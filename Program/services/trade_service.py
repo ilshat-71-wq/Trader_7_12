@@ -1,17 +1,15 @@
 from api.bcs_api import BCSAPI
 
 
-class QuoteService:
+class TradeService:
 
     def __init__(self):
-
         self.api = BCSAPI()
 
     def connect(self):
-
         return self.api.authorize()
 
-    def get(self, ticker, class_code="TQBR"):
+    def get(self, ticker, class_code="TQBR", limit=100):
 
         instruments = [
             {
@@ -20,14 +18,4 @@ class QuoteService:
             }
         ]
 
-        data = self.api.get_quotes(instruments)
-
-        if not data:
-            return None
-
-        records = data.get("records", [])
-
-        if not records:
-            return None
-
-        return records[0]
+        return self.api.get_last_trades(instruments, limit)

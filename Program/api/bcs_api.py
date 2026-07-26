@@ -49,7 +49,7 @@ class BCSAPI:
             params=params
         )
 
-        print(r.status_code)
+        print("Instruments:", r.status_code)
 
         if r.status_code == 200:
             return r.json()
@@ -75,6 +75,32 @@ class BCSAPI:
         )
 
         print("Quotes:", r.status_code)
+
+        if r.status_code == 200:
+            return r.json()
+
+        print(r.text)
+        return None
+
+    def get_last_trades(self, instruments, limit=100):
+
+        url = "https://be.broker.ru/trade-api-market-data-connector/api/v1/last-trades"
+
+        payload = {
+            "instruments": instruments,
+            "limit": limit
+        }
+
+        r = requests.post(
+            url,
+            headers={
+                **self.headers(),
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        print("Trades:", r.status_code)
 
         if r.status_code == 200:
             return r.json()
