@@ -56,3 +56,28 @@ class BCSAPI:
 
         print(r.text)
         return None
+
+    def get_quotes(self, instruments):
+
+        url = "https://be.broker.ru/trade-api-market-data-connector/api/v1/quotes"
+
+        payload = {
+            "instruments": instruments
+        }
+
+        r = requests.post(
+            url,
+            headers={
+                **self.headers(),
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        print("Quotes:", r.status_code)
+
+        if r.status_code == 200:
+            return r.json()
+
+        print(r.text)
+        return None

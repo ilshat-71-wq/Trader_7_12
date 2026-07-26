@@ -4,21 +4,11 @@ api = BCSAPI()
 
 if api.authorize():
 
-    print("Получаем список акций...")
+    quotes = api.get_quotes([
+        {
+            "ticker": "SBER",
+            "classCode": "TQBR"
+        }
+    ])
 
-    data = api.get_instruments("STOCK")
-
-    if data is None:
-        print("Ошибка получения данных")
-
-    else:
-        print(type(data))
-
-        try:
-            print("Количество объектов:", len(data))
-        except:
-            print("Не удалось определить количество")
-
-        print("Первые данные:")
-
-        print(data[0])
+    print(quotes)
