@@ -1,21 +1,21 @@
 class VolumeService:
 
     @staticmethod
-    def calculate(trades):
+    def calc(last, trades):
+
+        volume = 0
 
         if trades is None:
-            return 0
-
-        total = 0
+            return 0, 0
 
         records = trades.get("records", [])
 
-        for instrument in records:
+        for trade in records:
 
-            for trade in instrument.get("trades", []):
+            qty = trade.get("quantity", 0)
 
-                qty = trade.get("quantity", 0)
+            volume += qty
 
-                total += qty
+        money = volume * last
 
-        return total
+        return volume, money

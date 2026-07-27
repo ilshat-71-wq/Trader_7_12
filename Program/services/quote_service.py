@@ -7,27 +7,23 @@ class QuoteService:
 
         self.api = BCSAPI()
 
-    def connect(self):
+        if self.api.access_token is None:
+            self.api.authorize()
 
-        return self.api.authorize()
+    # ---------------------------------------------------------
 
-    def get(self, ticker, class_code="TQBR"):
+    def load(self, ticker, class_code):
 
-        instruments = [
-            {
-                "ticker": ticker,
-                "classCode": class_code
-            }
-        ]
+        quotes = self.api.get_quotes(
+            [
+                {
+                    "ticker": ticker,
+                    "classCode": class_code
+                }
+            ]
+        )
 
-        data = self.api.get_quotes(instruments)
-
-        if not data:
+        if not quotes:
             return None
 
-        records = data.get("records", [])
-
-        if not records:
-            return None
-
-        return records[0]
+        return quotes

@@ -3,9 +3,15 @@ from dataclasses import dataclass
 
 @dataclass
 class ScannerRow:
+
     ticker: str
-    short_name: str
-    sector: str
-    short_allowed: bool
-    margin_allowed: bool
-    market_cap: float
+
+    last: float
+
+    change: float
+
+    volume: float
+
+    money_volume: float
+
+    rating: int = 0
