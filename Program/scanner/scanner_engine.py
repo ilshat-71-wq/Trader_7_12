@@ -1,5 +1,3 @@
-import time
-
 from models.scanner_row import ScannerRow
 
 from services.instrument_service import InstrumentService
@@ -16,8 +14,6 @@ class ScannerEngine:
         self.quote_service = QuoteService()
         self.trade_service = TradeService()
 
-    # ---------------------------------------------------------
-
     def scan(self):
 
         rows = []
@@ -27,48 +23,46 @@ class ScannerEngine:
 
         instruments = self.instrument_service.load_stocks()
 
-        if not instruments:
-            return rows
-
         print(f"Получено инструментов: {len(instruments)}")
 
-        request_counter = 0
-
-        for instrument in instruments[:20]:
+        for instrument in instruments[:50]:
 
             ticker = instrument["ticker"]
-            class_code = instrument["boards"][0]["classCode"]
 
-            print(f"Обработка {ticker} ({class_code})")
+            #
+            # Для акций всегда используем TQBR
+            #
+            class_code = "TQBR"
 
-            try:
+            print(f"Обработка {ticker}")
 
-                quote = self.quote_service.load(
-                    ticker,
-                    class_code
-                )
+            quote = self.quote_service.load(
+                ticker,
+                class_code
+            )
 
-                if not quote:
-                    continue
+            if not quote:
+                continue
 
-                records = quote.get("records", [])
+            records = quote.get("records", [])
 
-                if len(records) == 0:
-                    continue
+            if len(records) == 0:
+                continue
 
-                q = records[0]
+            q = records[0]
 
-                trades = self.trade_service.load(
-                    ticker,
-                    class_code
-                )
+            trades = self.trade_service.load(
+                ticker,
+                class_code
+            )
 
-                volume, money = VolumeService.calc(
-                    q["last"],
-                    trades
-                )
+            volume, money = VolumeService.calc(
+                q["last"],
+                trades
+            )
 
-                row = ScannerRow(
+            rows.append(
+                ScannerRow(
                     ticker=ticker,
                     last=q["last"],
                     change=q["changeRate"],
@@ -76,20 +70,7 @@ class ScannerEngine:
                     money_volume=money,
                     rating=0
                 )
-
-                rows.append(row)
-
-            except Exception as e:
-
-                print(f"Ошибка {ticker}: {e}")
-
-            request_counter += 1
-
-            #
-            # Немного разгружаем API БКС
-            #
-            if request_counter % 5 == 0:
-                time.sleep(0.25)
+            )
 
         rows.sort(
             key=lambda x: x.money_volume,

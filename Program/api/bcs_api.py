@@ -1,9 +1,6 @@
 import requests
 from datetime import datetime, timedelta
 
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
 from config import REFRESH_TOKEN
 
 
@@ -21,37 +18,6 @@ class BCSAPI:
             "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         )
 
-        # ---------- Session ----------
-
-        self.session = requests.Session()
-
-        retry = Retry(
-            total=5,
-            connect=5,
-            read=5,
-            backoff_factor=0.4,
-            status_forcelist=[
-                429,
-                500,
-                502,
-                503,
-                504
-            ],
-            allowed_methods=[
-                "GET",
-                "POST"
-            ]
-        )
-
-        adapter = HTTPAdapter(
-            max_retries=retry,
-            pool_connections=20,
-            pool_maxsize=20
-        )
-
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
-
     # ---------------------------------------------------------
 
     def authorize(self):
@@ -68,22 +34,14 @@ class BCSAPI:
             "refresh_token": REFRESH_TOKEN,
         }
 
-        r = self.session.post(
-            url,
-            data=payload,
-            timeout=20
-        )
+        r = requests.post(url, data=payload)
 
         if r.status_code == 200:
-
             self.access_token = r.json()["access_token"]
-
             print("✅ Авторизация БКС успешна")
-
             return True
 
         print(r.text)
-
         return False
 
     # ---------------------------------------------------------
@@ -104,11 +62,10 @@ class BCSAPI:
             "type": instrument_type
         }
 
-        r = self.session.get(
+        r = requests.get(
             url,
             headers=self.headers(),
-            params=params,
-            timeout=20
+            params=params
         )
 
         print("Instruments:", r.status_code)
@@ -117,7 +74,6 @@ class BCSAPI:
             return r.json()
 
         print(r.text)
-
         return []
 
     # ---------------------------------------------------------
@@ -130,14 +86,13 @@ class BCSAPI:
             "instruments": instruments
         }
 
-        r = self.session.post(
+        r = requests.post(
             url,
             headers={
                 **self.headers(),
                 "Content-Type": "application/json"
             },
-            json=payload,
-            timeout=20
+            json=payload
         )
 
         print("Quotes:", r.status_code)
@@ -146,7 +101,6 @@ class BCSAPI:
             return r.json()
 
         print(r.text)
-
         return []
 
     # ---------------------------------------------------------
@@ -160,37 +114,52 @@ class BCSAPI:
 
         url = f"{self.market_url}/last-trades"
 
-        end_time = datetime.utcnow()
-
+        end_time = datetime.now()
         start_time = end_time - timedelta(minutes=5)
 
         payload = {
-            "ticker": ticker,
-            "classCode": class_code,
             "startDateTime": start_time.strftime(
                 "%Y-%m-%dT%H:%M:%S.000Z"
             ),
             "endDateTime": end_time.strftime(
                 "%Y-%m-%dT%H:%M:%S.000Z"
             ),
+            "classCode": class_code,
+            "ticker": ticker,
             "side": side
         }
 
-        r = self.session.post(
+        #
+        # DEBUG
+        #
+        if ticker == "AFLT":
+
+            print("\n========== REQUEST AFLT ==========\n")
+            print(payload)
+            print("\n==================================\n")
+
+        r = requests.post(
             url,
             headers={
                 **self.headers(),
                 "Content-Type": "application/json"
             },
-            json=payload,
-            timeout=20
+            json=payload
         )
 
         print("Trades:", r.status_code)
 
         if r.status_code == 200:
-            return r.json()
+
+            data = r.json()
+
+            if ticker == "AFLT":
+
+                print("\n========== RESPONSE AFLT ==========\n")
+                print(data)
+                print("\n===================================\n")
+
+            return data
 
         print(r.text)
-
         return []
