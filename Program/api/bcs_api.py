@@ -2,6 +2,7 @@ import requests
 from datetime import datetime, timedelta
 
 from config import REFRESH_TOKEN
+from api.request_helper import RequestHelper
 
 
 class BCSAPI:
@@ -34,14 +35,21 @@ class BCSAPI:
             "refresh_token": REFRESH_TOKEN,
         }
 
-        r = requests.post(url, data=payload)
+        r = RequestHelper.post(
+            url,
+            data=payload
+        )
 
         if r.status_code == 200:
+
             self.access_token = r.json()["access_token"]
+
             print("✅ Авторизация БКС успешна")
+
             return True
 
         print(r.text)
+
         return False
 
     # ---------------------------------------------------------
@@ -54,15 +62,20 @@ class BCSAPI:
 
     # ---------------------------------------------------------
 
-    def get_instruments(self, instrument_type):
+    def get_instruments(
+        self,
+        instrument_type
+    ):
 
-        url = f"{self.info_url}/instruments/by-type"
+        url = (
+            f"{self.info_url}/instruments/by-type"
+        )
 
         params = {
             "type": instrument_type
         }
 
-        r = requests.get(
+        r = RequestHelper.get(
             url,
             headers=self.headers(),
             params=params
@@ -71,22 +84,29 @@ class BCSAPI:
         print("Instruments:", r.status_code)
 
         if r.status_code == 200:
+
             return r.json()
 
         print(r.text)
+
         return []
 
     # ---------------------------------------------------------
 
-    def get_quotes(self, instruments):
+    def get_quotes(
+        self,
+        instruments
+    ):
 
-        url = f"{self.market_url}/quotes"
+        url = (
+            f"{self.market_url}/quotes"
+        )
 
         payload = {
             "instruments": instruments
         }
 
-        r = requests.post(
+        r = RequestHelper.post(
             url,
             headers={
                 **self.headers(),
@@ -98,9 +118,11 @@ class BCSAPI:
         print("Quotes:", r.status_code)
 
         if r.status_code == 200:
+
             return r.json()
 
         print(r.text)
+
         return []
 
     # ---------------------------------------------------------
@@ -112,33 +134,43 @@ class BCSAPI:
         side="1"
     ):
 
-        url = f"{self.market_url}/last-trades"
+        url = (
+            f"{self.market_url}/last-trades"
+        )
 
-        end_time = datetime.now()
-        start_time = end_time - timedelta(minutes=5)
+        end_time = datetime.utcnow()
+
+        start_time = (
+            end_time - timedelta(minutes=5)
+        )
 
         payload = {
-            "startDateTime": start_time.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            ),
-            "endDateTime": end_time.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            ),
-            "classCode": class_code,
             "ticker": ticker,
+            "classCode": class_code,
+            "startDateTime":
+                start_time.strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                ),
+            "endDateTime":
+                end_time.strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                ),
             "side": side
         }
 
-        #
-        # DEBUG
-        #
         if ticker == "AFLT":
 
-            print("\n========== REQUEST AFLT ==========\n")
-            print(payload)
-            print("\n==================================\n")
+            print(
+                "\n========== REQUEST AFLT ==========\n"
+            )
 
-        r = requests.post(
+            print(payload)
+
+            print(
+                "\n==================================\n"
+            )
+
+        r = RequestHelper.post(
             url,
             headers={
                 **self.headers(),
@@ -149,17 +181,22 @@ class BCSAPI:
 
         print("Trades:", r.status_code)
 
+        if ticker == "AFLT":
+
+            print(
+                "\n========== RESPONSE AFLT ==========\n"
+            )
+
+            print(r.json())
+
+            print(
+                "\n===================================\n"
+            )
+
         if r.status_code == 200:
 
-            data = r.json()
-
-            if ticker == "AFLT":
-
-                print("\n========== RESPONSE AFLT ==========\n")
-                print(data)
-                print("\n===================================\n")
-
-            return data
+            return r.json()
 
         print(r.text)
+
         return []
