@@ -1,8 +1,12 @@
 from scanner.instrument_loader import InstrumentLoader
+from scanner.signal_engine import SignalEngine
+
 from api.bcs_api import BCSAPI
 
 
+
 class MarketScanner:
+
 
     def __init__(self):
 
@@ -10,25 +14,43 @@ class MarketScanner:
 
         self.api = BCSAPI()
 
+        self.engine = SignalEngine()
+
 
 
     # ---------------------------------------------------------
 
-    def start(self):
+    def get_active_futures(self):
 
-        print("🚀 Market Scanner v0.3")
-
-
-        instruments = self.loader.load()
+        return self.loader.get_active_contracts()
 
 
-        if not instruments:
+
+    # ---------------------------------------------------------
+
+    def run(self):
+
+        print(
+            "🚀 Market Scanner v0.4"
+        )
+
+
+        print(
+            "📚 Загрузка ближайших фьючерсов"
+        )
+
+
+        contracts = self.get_active_futures()
+
+
+
+        if not contracts:
 
             print(
-                "❌ Инструменты не найдены"
+                "❌ Фьючерсы не найдены"
             )
 
-            return []
+            return
 
 
 
@@ -36,31 +58,32 @@ class MarketScanner:
 
         print(
             "Активных контрактов:",
-            len(instruments)
+            len(contracts)
         )
+
 
 
         if not self.api.authorize():
 
-            return []
+            return
 
 
 
-        quotes_request = []
+        instruments = []
 
 
-        for item in instruments:
 
+        for c in contracts:
 
-            quotes_request.append(
+            instruments.append(
 
                 {
 
                     "ticker":
-                        item["ticker"],
+                        c["ticker"],
 
                     "classCode":
-                        item["classCode"]
+                        c["classCode"]
 
                 }
 
@@ -69,7 +92,7 @@ class MarketScanner:
 
 
         quotes = self.api.get_quotes(
-            quotes_request
+            instruments
         )
 
 
@@ -81,109 +104,89 @@ class MarketScanner:
 
 
 
-        result = []
+        if not records:
 
-
-
-        for item in records:
-
-
-            bid = item.get(
-                "bid",
-                0
+            print(
+                "❌ Нет котировок"
             )
 
-
-            offer = item.get(
-                "offer",
-                0
-            )
-
-
-            last = item.get(
-                "last",
-                0
-            )
-
-
-            change = item.get(
-                "changeRate",
-                0
-            )
+            return
 
 
 
-            spread = 0
+        print()
 
-
-            if bid and offer:
-
-                spread = round(
-
-                    offer - bid,
-
-                    4
-
-                )
-
-
-
-            power = abs(change)
-
-
-
-            if spread > 0:
-
-                power = power / spread
-
-
-
-            result.append(
-
-                {
-
-                    "ticker":
-                        item.get(
-                            "ticker"
-                        ),
-
-                    "price":
-                        last,
-
-                    "change":
-                        change,
-
-                    "spread":
-                        spread,
-
-                    "power":
-                        round(
-                            power,
-                            2
-                        )
-
-                }
-
-            )
-
-
-
-        result.sort(
-
-            key=lambda x:
-                x["power"],
-
-            reverse=True
-
+        print(
+            "====== TRADER_7_12 SIGNALS ======"
         )
 
 
-        return result
+
+        signals = self.engine.rank(
+            records
+        )
 
 
 
+        if not signals:
 
-# ---------------------------------------------------------
+            print(
+                "Нет сигналов"
+            )
+
+            return
+
+
+
+        for i, s in enumerate(
+            signals,
+            start=1
+        ):
+
+
+            emoji = "🔥"
+
+
+            if s["score"] < 30:
+
+                emoji = "▫️"
+
+
+
+            print()
+
+            print(
+                f"{emoji} #{i} {s['ticker']}"
+            )
+
+
+            print(
+                f"Цена: {s['price']}"
+            )
+
+
+            print(
+                f"Изменение: {s['change']:.2f}%"
+            )
+
+
+            print(
+                f"Спред: {s['spread']}"
+            )
+
+
+            print(
+                f"Score: {s['score']}"
+            )
+
+
+            print(
+                f"Направление: {s['direction']}"
+            )
+
+
+
+# -------------------------------------------------------------
 
 
 if __name__ == "__main__":
@@ -192,27 +195,4 @@ if __name__ == "__main__":
     scanner = MarketScanner()
 
 
-    data = scanner.start()
-
-
-
-    print()
-
-    print(
-        "====== MARKET SCANNER RESULT ======"
-    )
-
-
-
-    for row in data:
-
-
-        print(
-
-            f'{row["ticker"]:8}'
-            f' Цена: {row["price"]:10}'
-            f' Изм: {row["change"]:7}%'
-            f' Спред: {row["spread"]:8}'
-            f' Сила: {row["power"]}'
-
-        )
+    scanner.run()

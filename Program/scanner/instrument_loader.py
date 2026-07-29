@@ -10,6 +10,14 @@ class InstrumentLoader:
 
     # ---------------------------------------------------------
 
+    def get_active_contracts(self):
+
+        return self.load()
+
+
+
+    # ---------------------------------------------------------
+
     def load(self):
 
         print("📚 Загрузка ближайших фьючерсов")
@@ -56,11 +64,11 @@ class InstrumentLoader:
 
 
             text = (
-                ticker +
-                " " +
-                name +
-                " " +
-                display
+                ticker
+                + " "
+                + name
+                + " "
+                + display
             ).upper()
 
 
@@ -109,7 +117,6 @@ class InstrumentLoader:
                     )
 
 
-
                 instruments.append(
 
                     {
@@ -127,33 +134,31 @@ class InstrumentLoader:
 
 
 
-        return self.select_nearest(
+        result = self.select_nearest(
             instruments
         )
+
+
+        print()
+
+        print(
+            "====== ACTIVE CONTRACTS ======"
+        )
+
+
+        for item in result:
+
+            print(item)
+
+
+
+        return result
 
 
 
     # ---------------------------------------------------------
 
     def contract_date(self, ticker):
-
-        """
-        Определяем дату экспирации MOEX.
-
-        Код месяца:
-        F январь
-        G февраль
-        H март
-        J апрель
-        K май
-        M июнь
-        N июль
-        Q август
-        U сентябрь
-        V октябрь
-        X ноябрь
-        Z декабрь
-        """
 
         months = {
 
@@ -180,7 +185,6 @@ class InstrumentLoader:
 
         month_code = ticker[-2]
 
-
         year_code = ticker[-1]
 
 
@@ -197,7 +201,8 @@ class InstrumentLoader:
 
         return (
 
-            year * 100 +
+            year * 100
+            +
             month
 
         )
@@ -224,7 +229,6 @@ class InstrumentLoader:
 
 
             else:
-
 
                 old = selected[asset]
 
@@ -254,16 +258,12 @@ if __name__ == "__main__":
     loader = InstrumentLoader()
 
 
-    data = loader.load()
+    data = loader.get_active_contracts()
 
 
     print()
 
     print(
-        "====== ACTIVE CONTRACTS ======"
+        "Всего активных:",
+        len(data)
     )
-
-
-    for item in data:
-
-        print(item)
