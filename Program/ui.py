@@ -4,11 +4,12 @@ Trader_7_12 Pro
 UI Module
 
 Версия:
-0.4
+0.5
 
 Изменения:
-- добавлена кнопка "Сканировать рынок"
-- подготовлено подключение сканера
+- подключен MarketScanner
+- кнопка "Сканировать рынок"
+- расчёт вынесен из UI
 """
 
 
@@ -24,27 +25,32 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 
-# Пока используем Volume x Price напрямую
-# На следующем шаге заменим на market_scanner.py
+from scanner.market_scanner import MarketScanner
 
-from scanner.volume_price import analyze_volume
 
 
 
 class TraderWindow(QWidget):
 
+
     def __init__(self):
 
         super().__init__()
+
 
         self.setWindowTitle(
             "Trader_7_12 Pro"
         )
 
+
         self.resize(
             900,
             600
         )
+
+
+        self.scanner = MarketScanner()
+
 
         self.init_ui()
 
@@ -52,13 +58,16 @@ class TraderWindow(QWidget):
 
     def init_ui(self):
 
+
         self.title = QLabel(
             "TRADER_7_12 PRO"
         )
 
+
         self.title.setAlignment(
             Qt.AlignCenter
         )
+
 
 
         self.scan_button = QPushButton(
@@ -71,11 +80,14 @@ class TraderWindow(QWidget):
         )
 
 
+
         self.result_box = QTextEdit()
+
 
         self.result_box.setReadOnly(
             True
         )
+
 
 
         layout = QVBoxLayout()
@@ -102,12 +114,16 @@ class TraderWindow(QWidget):
 
 
 
+
     def run_market_scan(self):
 
-        # Временно тестовые данные
-        # На следующем шаге сюда подключим market_scanner.py
+
+        # Пока тестовый список
+        # Следующим шагом сюда подключим данные BCS API
+
 
         instruments = [
+
 
             {
                 "ticker": "SBER-9.26",
@@ -116,12 +132,14 @@ class TraderWindow(QWidget):
                 "average_volume": 60000
             },
 
+
             {
                 "ticker": "Si-9.26",
                 "price": 92000,
                 "volume": 80000,
                 "average_volume": 70000
             },
+
 
             {
                 "ticker": "BR-9.26",
@@ -130,38 +148,13 @@ class TraderWindow(QWidget):
                 "average_volume": 40000
             }
 
+
         ]
 
 
-        results = []
 
-
-        for item in instruments:
-
-            result = analyze_volume(
-
-                ticker=item["ticker"],
-
-                price=item["price"],
-
-                volume=item["volume"],
-
-                average_volume=item["average_volume"]
-
-            )
-
-            results.append(
-                result
-            )
-
-
-
-        results.sort(
-
-            key=lambda x: x["volume_score"],
-
-            reverse=True
-
+        results = self.scanner.scan(
+            instruments
         )
 
 
@@ -175,6 +168,7 @@ TRADER_7_12 MARKET SCANNER
 ================================
 
 """
+
 
 
         for item in results:
@@ -207,9 +201,11 @@ TRADER_7_12 MARKET SCANNER
 """
 
 
+
         self.result_box.setText(
             output
         )
+
 
 
 
