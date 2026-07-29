@@ -1,35 +1,21 @@
 class SignalEngine:
 
-
     def __init__(self):
 
-        self.results = []
+        self.version = "0.2"
 
+        self.signals = []
 
 
     # ---------------------------------------------------------
 
-    def calculate_signal(
-        self,
-        quote
-    ):
+    def calculate_score(self, quote):
 
-
-        ticker = quote.get(
-            "ticker",
-            ""
-        )
-
-
-        price = quote.get(
-            "last",
-            0
-        )
-
-
-        change = quote.get(
-            "changeRate",
-            0
+        change = abs(
+            quote.get(
+                "changeRate",
+                0
+            )
         )
 
 
@@ -38,24 +24,16 @@ class SignalEngine:
             0
         )
 
-
         offer = quote.get(
             "offer",
             0
         )
 
+        last = quote.get(
+            "last",
+            1
+        )
 
-
-        # защита от ошибок
-
-        if not price:
-
-            return None
-
-
-
-        # -------------------------------------------------
-        # Спред
 
         spread = 0
 
@@ -65,88 +43,148 @@ class SignalEngine:
             spread = offer - bid
 
 
-
-        # -------------------------------------------------
-        # Базовая сила движения
-
-        movement_score = abs(change) * 10
+        score = 0
 
 
+        # сила движения
 
-        # -------------------------------------------------
-        # Оценка спреда
+        if change >= 5:
 
-        spread_score = 0
+            score += 50
+
+        elif change >= 3:
+
+            score += 35
+
+        elif change >= 1:
+
+            score += 20
 
 
-        if price:
+
+        # качество спреда
+
+        if spread > 0 and last:
 
             spread_percent = (
-                spread / price * 100
-            )
+                spread / last
+            ) * 100
 
 
-            if spread_percent < 0.05:
+            if spread_percent < 0.2:
 
-                spread_score = 20
+                score += 25
 
+            elif spread_percent < 0.5:
 
-            elif spread_percent < 0.15:
-
-                spread_score = 10
-
+                score += 15
 
 
-        # -------------------------------------------------
-        # Итоговый рейтинг
 
-        score = (
+        # волатильность
 
-            movement_score
+        if change >= 2:
 
-            +
+            score += 10
 
-            spread_score
 
+        return round(
+            score,
+            1
         )
 
 
-        if score > 100:
+    # ---------------------------------------------------------
 
-            score = 100
+    def get_direction(self, quote):
+
+        change = quote.get(
+            "changeRate",
+            0
+        )
 
 
+        if change > 0:
 
-        # направление
-
-        direction = "UP"
+            return "LONG"
 
 
         if change < 0:
 
-            direction = "DOWN"
+            return "SHORT"
 
+
+        return "FLAT"
+
+
+
+    # ---------------------------------------------------------
+
+    def get_status(self, score):
+
+        if score >= 70:
+
+            return "🔥 TRADE"
+
+
+        if score >= 40:
+
+            return "👀 WATCH"
+
+
+        return "⛔ SKIP"
+
+
+
+    # ---------------------------------------------------------
+
+    def analyze(self, quote):
+
+        score = self.calculate_score(
+            quote
+        )
 
 
         return {
 
-            "ticker": ticker,
+            "ticker":
+                quote.get(
+                    "ticker",
+                    ""
+                ),
 
-            "price": price,
+            "price":
+                quote.get(
+                    "last",
+                    0
+                ),
 
-            "change": change,
+            "change":
+                quote.get(
+                    "changeRate",
+                    0
+                ),
 
-            "spread": round(
-                spread,
-                2
-            ),
+            "spread":
+                round(
+                    quote.get("offer",0)
+                    -
+                    quote.get("bid",0),
+                    2
+                ),
 
-            "score": round(
+            "score":
                 score,
-                1
-            ),
 
-            "direction": direction
+            "direction":
+                self.get_direction(
+                    quote
+                ),
+
+            "status":
+                self.get_status(
+                    score
+                )
 
         }
 
@@ -154,52 +192,36 @@ class SignalEngine:
 
     # ---------------------------------------------------------
 
-    def rank(
-        self,
-        quotes
-    ):
+    def rank(self, quotes):
+
+        self.signals = []
 
 
-        self.results = []
+        for quote in quotes:
 
+            signal = self.analyze(
+                quote
+            )
 
-
-        for q in quotes:
-
-
-            signal = self.calculate_signal(
-                q
+            self.signals.append(
+                signal
             )
 
 
-            if signal:
-
-                self.results.append(
-                    signal
-                )
-
-
-
-        self.results.sort(
-
+        self.signals.sort(
             key=lambda x:
                 x["score"],
-
             reverse=True
-
         )
 
 
-        return self.results
+        return self.signals
 
 
 
     # ---------------------------------------------------------
 
-    def print_report(
-        self
-    ):
-
+    def print_report(self):
 
         print()
 
@@ -208,21 +230,23 @@ class SignalEngine:
         )
 
 
-        for item in self.results:
+        for s in self.signals:
 
+            print()
 
             print(
-
-                f"{item['ticker']:8}"
-
-                f" Цена: {item['price']:10}"
-
-                f" Изм: {item['change']:6.2f}%"
-
-                f" Спред: {item['spread']:6}"
-
-                f" Рейтинг: {item['score']:5}"
-
-                f" {item['direction']}"
-
+                f"{s['ticker']:6}",
+                f"Цена: {s['price']:10}",
+                f"Изм: {s['change']:6.2f}%",
+                f"Спред: {s['spread']:6}",
+                f"Рейтинг: {s['score']:5}",
+                s["direction"]
             )
+
+            print(
+                "Статус:",
+                s["status"]
+            )
+
+
+# ---------------------------------------------------------
