@@ -3,7 +3,6 @@ from models.scanner_row import ScannerRow
 from services.instrument_service import InstrumentService
 from services.quote_service import QuoteService
 from services.trade_service import TradeService
-from services.volume_service import VolumeService
 from services.rating_service import RatingService
 
 
@@ -14,101 +13,81 @@ class ScannerEngine:
         self.instrument_service = InstrumentService()
         self.quote_service = QuoteService()
         self.trade_service = TradeService()
+        self.rating_service = RatingService()
 
-    # ---------------------------------------------------------
+    # -------------------------------------------------------------
 
     def scan(self):
 
-        rows = []
-
-        #
-        # Авторизация
-        #
         if not self.instrument_service.connect():
-            return rows
+            return []
 
-        #
-        # Загружаем акции
-        #
         instruments = self.instrument_service.load_stocks()
-
-        if not instruments:
-            return rows
 
         print(f"Получено инструментов: {len(instruments)}")
 
-        #
-        # Обрабатываем все бумаги
-        #
+        rows = []
+
         for instrument in instruments:
 
-            ticker = instrument["ticker"]
-            class_code = instrument["classCode"]
+            ticker = instrument.get("ticker")
+            class_code = instrument.get("classCode")
 
             print(f"Обработка {ticker}")
 
-            #
-            # Котировки
-            #
             quote = self.quote_service.load(
                 ticker,
                 class_code
             )
 
-            if not quote:
+            if quote is None:
                 continue
 
-            records = quote.get("records", [])
-
-            if len(records) == 0:
-                continue
-
-            q = records[0]
-
-            #
-            # Сделки
-            #
             trades = self.trade_service.load(
                 ticker,
                 class_code
             )
 
-            #
-            # Объемы
-            #
-            volume, money = VolumeService.calc(
-                q["last"],
-                trades
-            )
+            last = float(quote.get("lastPrice", 0))
+            change = float(quote.get("changePercent", 0))
 
-            #
-            # Новый рейтинг
-            #
-            rating = RatingService.calc(
-                change=q["changeRate"],
-                money_volume=money,
-                volume=volume
-            )
+            volume = 0
+            money_volume = 0
 
-            #
-            # Строка таблицы
-            #
-            row = ScannerRow(
-                ticker=ticker,
-                last=q["last"],
-                change=q["changeRate"],
+            records = trades.get("records", [])
+
+            for trade in records:
+
+                trade_volume = float(trade.get("volume", 0))
+                trade_price = float(trade.get("price", 0))
+
+                volume += trade_volume
+                money_volume += trade_volume * trade_price
+
+            rating = self.rating_service.calculate(
+                last=last,
+                change=change,
                 volume=volume,
-                money_volume=money,
-                rating=rating
+                money_volume=money_volume,
             )
 
-            rows.append(row)
+            rows.append(
+                ScannerRow(
+                    ticker=ticker,
+                    last=last,
+                    change=change,
+                    volume=volume,
+                    money_volume=money_volume,
+                    rating=rating,
+                )
+            )
 
-        #
-        # Сортировка теперь по рейтингу
-        #
         rows.sort(
-            key=lambda x: x.rating,
+            key=lambda x: (
+                x.rating,
+                x.money_volume,
+                abs(x.change)
+            ),
             reverse=True
         )
 

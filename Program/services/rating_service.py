@@ -1,38 +1,66 @@
 class RatingService:
 
-    @staticmethod
-    def calc(
-        change,
-        money_volume,
-        volume
-    ):
-        """
-        Расчёт рейтинга бумаги.
+    """
+    Рассчитывает рейтинг бумаги.
+    Чем выше рейтинг — тем выше бумага в сканере.
+    """
 
-        Пока используем простую формулу.
-        Далее будем усложнять.
+    def calculate(
+        self,
+        last: float,
+        change: float,
+        volume: float,
+        money_volume: float,
+    ) -> int:
 
-        Вес:
-            Money Volume
-            Изменение цены
-            Объём сделок
-        """
+        score = 0
 
-        rating = 0
+        # -----------------------------------
+        # Денежный оборот
+        # -----------------------------------
 
-        #
-        # Денежный объём
-        #
-        rating += money_volume
+        if money_volume > 100_000_000:
+            score += 50
 
-        #
+        elif money_volume > 50_000_000:
+            score += 40
+
+        elif money_volume > 20_000_000:
+            score += 30
+
+        elif money_volume > 10_000_000:
+            score += 20
+
+        elif money_volume > 5_000_000:
+            score += 10
+
+        # -----------------------------------
         # Изменение цены
-        #
-        rating += abs(change) * 100000
+        # -----------------------------------
 
-        #
-        # Объём
-        #
-        rating += volume * 10
+        if abs(change) >= 5:
+            score += 30
 
-        return rating
+        elif abs(change) >= 3:
+            score += 20
+
+        elif abs(change) >= 2:
+            score += 10
+
+        # -----------------------------------
+        # Объем
+        # -----------------------------------
+
+        if volume > 1_000_000:
+            score += 20
+
+        elif volume > 500_000:
+            score += 15
+
+        elif volume > 100_000:
+            score += 10
+
+        elif volume > 50_000:
+            score += 5
+
+        return score
