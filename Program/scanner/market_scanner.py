@@ -1,7 +1,20 @@
-from scanner.instrument_loader import InstrumentLoader
-from scanner.signal_engine import SignalEngine
+"""
+Trader_7_12 Pro
 
-from api.bcs_api import BCSAPI
+Market Scanner
+
+Версия 0.1
+
+Назначение:
+- анализ списка инструментов
+- расчет Volume x Price
+- формирование рейтинга
+"""
+
+
+from scanner.volume_price import analyze_volume
+
+
 
 
 
@@ -10,189 +23,73 @@ class MarketScanner:
 
     def __init__(self):
 
-        self.loader = InstrumentLoader()
-
-        self.api = BCSAPI()
-
-        self.engine = SignalEngine()
+        self.results = []
 
 
 
-    # ---------------------------------------------------------
+    def scan(self, instruments):
 
-    def get_active_futures(self):
+        """
+        Анализ рынка
 
-        return self.loader.get_active_contracts()
+        instruments:
+        список словарей:
+
+        {
+            ticker,
+            price,
+            volume,
+            average_volume
+        }
+
+        """
+
+
+        self.results = []
+
+
+        for item in instruments:
+
+
+            result = analyze_volume(
+
+                ticker=item["ticker"],
+
+                price=item["price"],
+
+                volume=item["volume"],
+
+                average_volume=item["average_volume"]
+
+            )
+
+
+            self.results.append(
+                result
+            )
 
 
 
-    # ---------------------------------------------------------
+        self.results.sort(
 
-    def run(self):
+            key=lambda x: x["volume_score"],
 
-        print(
-            "🚀 Market Scanner v0.4"
+            reverse=True
+
         )
 
 
-        print(
-            "📚 Загрузка ближайших фьючерсов"
-        )
+        return self.results
 
 
-        contracts = self.get_active_futures()
 
+    def get_top(
+            self,
+            count=5
+    ):
 
+        """
+        Возвращает лучшие инструменты
+        """
 
-        if not contracts:
-
-            print(
-                "❌ Фьючерсы не найдены"
-            )
-
-            return
-
-
-
-        print()
-
-        print(
-            "Активных контрактов:",
-            len(contracts)
-        )
-
-
-
-        if not self.api.authorize():
-
-            return
-
-
-
-        instruments = []
-
-
-
-        for c in contracts:
-
-            instruments.append(
-
-                {
-
-                    "ticker":
-                        c["ticker"],
-
-                    "classCode":
-                        c["classCode"]
-
-                }
-
-            )
-
-
-
-        quotes = self.api.get_quotes(
-            instruments
-        )
-
-
-
-        records = quotes.get(
-            "records",
-            []
-        )
-
-
-
-        if not records:
-
-            print(
-                "❌ Нет котировок"
-            )
-
-            return
-
-
-
-        print()
-
-        print(
-            "====== TRADER_7_12 SIGNALS ======"
-        )
-
-
-
-        signals = self.engine.rank(
-            records
-        )
-
-
-
-        if not signals:
-
-            print(
-                "Нет сигналов"
-            )
-
-            return
-
-
-
-        for i, s in enumerate(
-            signals,
-            start=1
-        ):
-
-
-            emoji = "🔥"
-
-
-            if s["score"] < 30:
-
-                emoji = "▫️"
-
-
-
-            print()
-
-            print(
-                f"{emoji} #{i} {s['ticker']}"
-            )
-
-
-            print(
-                f"Цена: {s['price']}"
-            )
-
-
-            print(
-                f"Изменение: {s['change']:.2f}%"
-            )
-
-
-            print(
-                f"Спред: {s['spread']}"
-            )
-
-
-            print(
-                f"Score: {s['score']}"
-            )
-
-
-            print(
-                f"Направление: {s['direction']}"
-            )
-
-
-
-# -------------------------------------------------------------
-
-
-if __name__ == "__main__":
-
-
-    scanner = MarketScanner()
-
-
-    scanner.run()
+        return self.results[:count]
