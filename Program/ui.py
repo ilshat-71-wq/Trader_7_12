@@ -1,102 +1,230 @@
-from datetime import datetime
+"""
+Trader_7_12 Pro
 
-from PySide6.QtCore import Qt, QTimer
+UI Module
+
+Версия:
+0.4
+
+Изменения:
+- добавлена кнопка "Сканировать рынок"
+- подготовлено подключение сканера
+"""
+
+
 from PySide6.QtWidgets import (
+    QApplication,
+    QWidget,
     QLabel,
-    QHBoxLayout,
-    QMainWindow,
     QPushButton,
     QVBoxLayout,
-    QWidget,
+    QTextEdit
 )
 
-from engine import Engine
+from PySide6.QtCore import Qt
 
 
-class TraderWindow(QMainWindow):
+# Пока используем Volume x Price напрямую
+# На следующем шаге заменим на market_scanner.py
+
+from scanner.volume_price import analyze_volume
+
+
+
+class TraderWindow(QWidget):
 
     def __init__(self):
+
         super().__init__()
 
-        self.engine = Engine()
+        self.setWindowTitle(
+            "Trader_7_12 Pro"
+        )
 
-        self.setWindowTitle("Trader 7-12 Pro")
-        self.resize(1400, 900)
+        self.resize(
+            900,
+            600
+        )
 
-        central = QWidget()
-        self.setCentralWidget(central)
+        self.init_ui()
 
-        layout = QHBoxLayout()
-        central.setLayout(layout)
 
-        # ---------- меню ----------
-        menu = QVBoxLayout()
 
-        for text in (
-            "📈 Рынок",
-            "📋 Сделка",
-            "💰 Риск",
-            "📒 Журнал",
-            "⚙ Настройки",
-        ):
-            btn = QPushButton(text)
-            btn.setMinimumHeight(45)
-            menu.addWidget(btn)
+    def init_ui(self):
 
-        menu.addStretch()
+        self.title = QLabel(
+            "TRADER_7_12 PRO"
+        )
 
-        # ---------- рабочая область ----------
-        work = QVBoxLayout()
+        self.title.setAlignment(
+            Qt.AlignCenter
+        )
 
-        title = QLabel("Trader 7–12 Pro")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size:28px;font-weight:bold;")
 
-        status = QLabel("🟡 ОЖИДАНИЕ")
-        status.setAlignment(Qt.AlignCenter)
-        status.setStyleSheet("font-size:22px;color:orange;")
+        self.scan_button = QPushButton(
+            "Сканировать рынок"
+        )
 
-        self.clock = QLabel()
-        self.clock.setAlignment(Qt.AlignCenter)
-        self.clock.setStyleSheet("font-size:15px;color:gray;")
 
-        self.market = QLabel()
-        self.market.setStyleSheet("font-size:17px;")
+        self.scan_button.clicked.connect(
+            self.run_market_scan
+        )
 
-        work.addWidget(title)
-        work.addWidget(status)
-        work.addWidget(self.clock)
-        work.addSpacing(20)
-        work.addWidget(self.market)
-        work.addStretch()
 
-        layout.addLayout(menu, 1)
-        layout.addLayout(work, 4)
+        self.result_box = QTextEdit()
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_screen)
-        self.timer.start(1000)
+        self.result_box.setReadOnly(
+            True
+        )
 
-        self.update_screen()
 
-    def update_screen(self):
+        layout = QVBoxLayout()
 
-        self.engine.update()
 
-        now = datetime.now().strftime("%d.%m.%Y   %H:%M:%S")
-        self.clock.setText(now)
+        layout.addWidget(
+            self.title
+        )
 
-        data = self.engine.get_market()
 
-        text = ""
+        layout.addWidget(
+            self.scan_button
+        )
 
-        for symbol, item in data.items():
 
-            text += (
-                f"{symbol}\n"
-                f"Цена: {item['price']}\n"
-                f"Объем: {item['volume']:,}\n"
-                f"Цена × Объем: {item['turnover']:,.0f}\n\n"
+        layout.addWidget(
+            self.result_box
+        )
+
+
+        self.setLayout(
+            layout
+        )
+
+
+
+    def run_market_scan(self):
+
+        # Временно тестовые данные
+        # На следующем шаге сюда подключим market_scanner.py
+
+        instruments = [
+
+            {
+                "ticker": "SBER-9.26",
+                "price": 34500,
+                "volume": 150000,
+                "average_volume": 60000
+            },
+
+            {
+                "ticker": "Si-9.26",
+                "price": 92000,
+                "volume": 80000,
+                "average_volume": 70000
+            },
+
+            {
+                "ticker": "BR-9.26",
+                "price": 68000,
+                "volume": 120000,
+                "average_volume": 40000
+            }
+
+        ]
+
+
+        results = []
+
+
+        for item in instruments:
+
+            result = analyze_volume(
+
+                ticker=item["ticker"],
+
+                price=item["price"],
+
+                volume=item["volume"],
+
+                average_volume=item["average_volume"]
+
             )
 
-        self.market.setText(text)
+            results.append(
+                result
+            )
+
+
+
+        results.sort(
+
+            key=lambda x: x["volume_score"],
+
+            reverse=True
+
+        )
+
+
+
+        output = """
+
+================================
+
+TRADER_7_12 MARKET SCANNER
+
+================================
+
+"""
+
+
+        for item in results:
+
+
+            output += f"""
+
+Инструмент:
+{item['ticker']}
+
+
+Цена:
+{item['price']} ₽
+
+
+Оборот:
+{item['money_volume']:,.0f} ₽
+
+
+Объем:
+{item['volume_ratio']} x
+
+
+Рейтинг:
+{item['volume_score']} / 100
+
+
+------------------------------
+
+"""
+
+
+        self.result_box.setText(
+            output
+        )
+
+
+
+
+
+if __name__ == "__main__":
+
+
+    app = QApplication([])
+
+
+    window = TraderWindow()
+
+
+    window.show()
+
+
+    app.exec()
