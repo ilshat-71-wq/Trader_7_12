@@ -1,0 +1,251 @@
+
+
+class SignalEngine:
+
+    def __init__(self):
+
+        self.version = "0.2"
+
+
+    # ---------------------------------------------------------
+
+    def calculate_score(self, quote):
+
+        change = abs(
+            quote.get("changeRate", 0)
+        )
+
+        bid = quote.get(
+            "bid",
+            0
+        )
+
+        offer = quote.get(
+            "offer",
+            0
+        )
+
+        last = quote.get(
+            "last",
+            1
+        )
+
+        spread = 0
+
+        if bid and offer:
+
+            spread = offer - bid
+
+
+        score = 0
+
+
+        # движение цены
+        if change >= 5:
+
+            score += 50
+
+        elif change >= 3:
+
+            score += 35
+
+        elif change >= 1:
+
+            score += 20
+
+
+        # качество спреда
+        if spread > 0 and last:
+
+            spread_percent = (
+                spread / last
+            ) * 100
+
+
+            if spread_percent < 0.2:
+
+                score += 25
+
+            elif spread_percent < 0.5:
+
+                score += 15
+
+
+        # дополнительный бонус за движение
+
+        if change >= 2:
+
+            score += 10
+
+
+        return round(
+            score,
+            1
+        )
+
+
+    # ---------------------------------------------------------
+
+    def direction(self, quote):
+
+        change = quote.get(
+            "changeRate",
+            0
+        )
+
+
+        if change > 0:
+
+            return "LONG"
+
+
+        elif change < 0:
+
+            return "SHORT"
+
+
+        return "FLAT"
+
+
+    # ---------------------------------------------------------
+
+    def status(self, score):
+
+        if score >= 70:
+
+            return "🔥 TRADE"
+
+
+        elif score >= 40:
+
+            return "👀 WATCH"
+
+
+        return "⛔ SKIP"
+
+
+    # ---------------------------------------------------------
+
+    def analyze(self, quote):
+
+        score = self.calculate_score(
+            quote
+        )
+
+
+        return {
+
+            "ticker":
+                quote.get(
+                    "ticker",
+                    ""
+                ),
+
+            "price":
+                quote.get(
+                    "last",
+                    0
+                ),
+
+            "change":
+                quote.get(
+                    "changeRate",
+                    0
+                ),
+
+            "spread":
+                round(
+                    quote.get("offer", 0)
+                    -
+                    quote.get("bid", 0),
+                    2
+                ),
+
+            "score":
+                score,
+
+            "direction":
+                self.direction(
+                    quote
+                ),
+
+            "status":
+                self.status(
+                    score
+                )
+
+        }
+
+
+    # ---------------------------------------------------------
+    # Совместимость с test_signal_engine.py
+    # ---------------------------------------------------------
+
+    def rank(self, quotes):
+
+        signals = []
+
+
+        for quote in quotes:
+
+            signals.append(
+                self.analyze(
+                    quote
+                )
+            )
+
+
+        signals.sort(
+            key=lambda x:
+                x["score"],
+            reverse=True
+        )
+
+
+        return signals
+
+
+    # ---------------------------------------------------------
+
+    def analyze_quotes(self, quotes):
+
+        return self.rank(
+            quotes
+        )
+
+
+# ---------------------------------------------------------
+
+
+if __name__ == "__main__":
+
+    engine = SignalEngine()
+
+
+    test_quote = {
+
+        "ticker": "BMQ6",
+
+        "last": 83.95,
+
+        "bid": 83.67,
+
+        "offer": 84.25,
+
+        "changeRate": -6.59
+
+    }
+
+
+    result = engine.rank(
+        [
+            test_quote
+        ]
+    )
+
+
+    print(result)
+python3 test_signal_engine.py
+
+python3 test_signal_engine.py
+
