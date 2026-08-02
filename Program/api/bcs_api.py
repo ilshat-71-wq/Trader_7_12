@@ -1,23 +1,47 @@
-import requests
-from datetime import datetime, timedelta
+"""
+Trader_7_12 Pro
+
+BCS API
+
+Версия 0.9
+
+Назначение:
+- авторизация BCS
+- инструменты
+- котировки
+- сделки
+- стакан
+- свечи
+"""
+
+
+from datetime import datetime, timedelta, timezone
 
 from config import REFRESH_TOKEN
+
 from api.request_helper import RequestHelper
 
 
+
 class BCSAPI:
+
 
     def __init__(self):
 
         self.access_token = None
 
+
         self.info_url = (
-            "https://be.broker.ru/trade-api-information-service/api/v1"
+            "https://be.broker.ru/"
+            "trade-api-information-service/api/v1"
         )
 
+
         self.market_url = (
-            "https://be.broker.ru/trade-api-market-data-connector/api/v1"
+            "https://be.broker.ru/"
+            "trade-api-market-data-connector/api/v1"
         )
+
 
 
     # ---------------------------------------------------------
@@ -26,34 +50,63 @@ class BCSAPI:
 
         url = (
             "https://be.broker.ru/"
-            "trade-api-keycloak/realms/tradeapi/"
+            "trade-api-keycloak/"
+            "realms/tradeapi/"
             "protocol/openid-connect/token"
         )
 
 
         payload = {
-            "client_id": "trade-api-read",
-            "grant_type": "refresh_token",
-            "refresh_token": REFRESH_TOKEN
+
+            "client_id":
+                "trade-api-read",
+
+            "grant_type":
+                "refresh_token",
+
+            "refresh_token":
+                REFRESH_TOKEN
+
         }
 
 
+
         r = RequestHelper.post(
+
             url,
+
             data=payload
+
         )
+
 
 
         if r.status_code == 200:
 
-            self.access_token = r.json()["access_token"]
 
-            print("✅ Авторизация БКС успешна")
+            self.access_token = (
+
+                r.json()
+                .get(
+                    "access_token"
+                )
+
+            )
+
+
+            print(
+                "✅ Авторизация БКС успешна"
+            )
+
 
             return True
 
 
-        print(r.text)
+
+        print(
+            r.text
+        )
+
 
         return False
 
@@ -64,8 +117,11 @@ class BCSAPI:
     def headers(self):
 
         return {
+
             "Authorization":
+
                 f"Bearer {self.access_token}"
+
         }
 
 
@@ -73,17 +129,20 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_instruments(
-        self,
-        instrument_type
+            self,
+            instrument_type="FUTURES"
     ):
 
 
         url = (
-            f"{self.info_url}/instruments/by-type"
+
+            f"{self.info_url}/"
+            "instruments/by-type"
+
         )
 
 
-        all_records = []
+        result = []
 
         page = 0
 
@@ -91,15 +150,20 @@ class BCSAPI:
 
         while True:
 
+
             params = {
 
-                "type": instrument_type,
+                "type":
+                    instrument_type,
 
-                "page": page,
+                "page":
+                    page,
 
-                "size": 100
+                "size":
+                    100
 
             }
+
 
 
             r = RequestHelper.get(
@@ -113,15 +177,18 @@ class BCSAPI:
             )
 
 
+
             print(
+
                 f"Instruments page {page}:",
+
                 r.status_code
+
             )
 
 
-            if r.status_code != 200:
 
-                print(r.text)
+            if r.status_code != 200:
 
                 break
 
@@ -131,15 +198,21 @@ class BCSAPI:
 
 
 
-            if isinstance(data, list):
+            if isinstance(
+                data,
+                list
+            ):
 
                 records = data
 
             else:
 
                 records = data.get(
+
                     "records",
+
                     []
+
                 )
 
 
@@ -150,9 +223,12 @@ class BCSAPI:
 
 
 
-            all_records.extend(
+            result.extend(
+
                 records
+
             )
+
 
 
             if len(records) < 100:
@@ -166,31 +242,39 @@ class BCSAPI:
 
 
         print(
+
             "Всего загружено:",
-            len(all_records)
+
+            len(result)
+
         )
 
 
-        return all_records
+        return result
 
 
 
     # ---------------------------------------------------------
 
     def get_quotes(
-        self,
-        instruments
+            self,
+            instruments
     ):
 
 
         url = (
+
             f"{self.market_url}/quotes"
+
         )
+
 
 
         payload = {
 
-            "instruments": instruments
+            "instruments":
+
+                instruments
 
         }
 
@@ -204,7 +288,9 @@ class BCSAPI:
 
                 **self.headers(),
 
-                "Content-Type": "application/json"
+                "Content-Type":
+
+                    "application/json"
 
             },
 
@@ -215,31 +301,20 @@ class BCSAPI:
 
 
         print(
+
             "Quotes:",
+
             r.status_code
+
         )
 
 
 
         if r.status_code == 200:
 
-            data = r.json()
-
-            print(
-                "\n========== RAW QUOTES ==========\n"
-            )
-
-            print(data)
-
-            print(
-                "\n===============================\n"
-            )
-
-            return data
+            return r.json()
 
 
-
-        print(r.text)
 
         return {}
 
@@ -247,40 +322,145 @@ class BCSAPI:
 
     # ---------------------------------------------------------
 
+    def get_quotes_batch(
+            self,
+            instruments
+    ):
+
+
+        result = []
+
+        batch_size = 100
+
+
+
+        for i in range(
+
+            0,
+
+            len(instruments),
+
+            batch_size
+
+        ):
+
+
+            batch = instruments[
+
+                i:i + batch_size
+
+            ]
+
+
+
+            print(
+
+                "📊 Quotes batch",
+
+                i // batch_size + 1,
+
+                len(batch)
+
+            )
+
+
+
+            data = self.get_quotes(
+
+                batch
+
+            )
+
+
+
+            result.extend(
+
+                data.get(
+
+                    "records",
+
+                    []
+
+                )
+
+            )
+
+
+
+        return result
+
+
+
+    # ---------------------------------------------------------
+
     def get_last_trades(
-        self,
-        ticker,
-        class_code
+            self,
+            ticker,
+            class_code
     ):
 
 
         url = (
+
             f"{self.market_url}/last-trades"
+
         )
 
 
-        end_time = datetime.utcnow()
 
+        # Москва UTC+3
 
-        start_time = (
-            end_time - timedelta(minutes=15)
+        moscow = timezone(
+
+            timedelta(hours=3)
+
         )
+
+
+        now = datetime.now(
+
+            moscow
+
+        )
+
+
+
+        start = now - timedelta(
+
+            minutes=60
+
+        )
+
 
 
         payload = {
 
-            "ticker": ticker,
 
-            "classCode": class_code,
+            "ticker":
+
+                ticker,
+
+
+            "classCode":
+
+                class_code,
+
 
             "startDateTime":
-                start_time.strftime(
+
+                start.strftime(
+
                     "%Y-%m-%dT%H:%M:%S.000Z"
+
                 ),
 
+
             "endDateTime":
-                end_time.strftime(
+
+                now.strftime(
+
                     "%Y-%m-%dT%H:%M:%S.000Z"
+
                 )
 
         }
@@ -295,7 +475,9 @@ class BCSAPI:
 
                 **self.headers(),
 
-                "Content-Type": "application/json"
+                "Content-Type":
+
+                    "application/json"
 
             },
 
@@ -304,45 +486,69 @@ class BCSAPI:
         )
 
 
+
         print(
+
             f"Trades {ticker}:",
+
             r.status_code
+
         )
 
 
+
         if r.status_code == 200:
+
 
             return r.json()
 
 
 
-        print(r.text)
+        return {
 
-        return {}
+
+
+            "records":
+
+                []
+
+        }
 
 
 
     # ---------------------------------------------------------
 
     def get_order_book(
-        self,
-        ticker,
-        class_code
+            self,
+            ticker,
+            class_code
     ):
 
 
         url = (
+
             f"{self.market_url}/order-book"
+
         )
+
 
 
         payload = {
 
-            "ticker": ticker,
 
-            "classCode": class_code,
+            "ticker":
 
-            "depth": 10
+                ticker,
+
+
+            "classCode":
+
+                class_code,
+
+
+            "depth":
+
+                10
 
         }
 
@@ -356,7 +562,9 @@ class BCSAPI:
 
                 **self.headers(),
 
-                "Content-Type": "application/json"
+                "Content-Type":
+
+                    "application/json"
 
             },
 
@@ -366,19 +574,11 @@ class BCSAPI:
 
 
 
-        print(
-            f"OrderBook {ticker}:",
-            r.status_code
-        )
-
-
         if r.status_code == 200:
 
             return r.json()
 
 
-
-        print(r.text)
 
         return {}
 
@@ -387,42 +587,69 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_candles(
-        self,
-        ticker,
-        class_code,
-        interval="MINUTE_5"
+            self,
+            ticker,
+            class_code,
+            interval="MINUTE_5"
     ):
 
 
         url = (
+
             f"{self.market_url}/candles"
+
         )
 
 
-        end_time = datetime.utcnow()
 
+        now = datetime.now(
 
-        start_time = (
-            end_time - timedelta(hours=4)
+            timezone.utc
+
         )
+
+
+        start = now - timedelta(
+
+            hours=4
+
+        )
+
 
 
         payload = {
 
-            "ticker": ticker,
 
-            "classCode": class_code,
+            "ticker":
 
-            "interval": interval,
+                ticker,
+
+
+            "classCode":
+
+                class_code,
+
+
+            "interval":
+
+                interval,
+
 
             "startDateTime":
-                start_time.strftime(
+
+                start.strftime(
+
                     "%Y-%m-%dT%H:%M:%S.000Z"
+
                 ),
 
+
             "endDateTime":
-                end_time.strftime(
+
+                now.strftime(
+
                     "%Y-%m-%dT%H:%M:%S.000Z"
+
                 )
 
         }
@@ -437,7 +664,9 @@ class BCSAPI:
 
                 **self.headers(),
 
-                "Content-Type": "application/json"
+                "Content-Type":
+
+                    "application/json"
 
             },
 
@@ -446,35 +675,11 @@ class BCSAPI:
         )
 
 
-        print(
-            f"Candles {ticker}:",
-            r.status_code
-        )
-
-
 
         if r.status_code == 200:
 
-            data = r.json()
+            return r.json()
 
 
-            print(
-                "\n========== RAW CANDLES",
-                ticker,
-                "=========="
-            )
-
-            print(data)
-
-            print(
-                "====================================\n"
-            )
-
-
-            return data
-
-
-
-        print(r.text)
 
         return {}

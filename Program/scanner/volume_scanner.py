@@ -2,7 +2,9 @@ from scanner.instrument_loader import InstrumentLoader
 from api.bcs_api import BCSAPI
 
 
+
 class VolumeScanner:
+
 
     def __init__(self):
 
@@ -16,7 +18,9 @@ class VolumeScanner:
 
     def start(self):
 
-        print("📊 Volume Scanner v0.1")
+        print(
+            "📊 Volume Scanner v0.2"
+        )
 
 
         instruments = self.loader.load()
@@ -24,7 +28,9 @@ class VolumeScanner:
 
         if not instruments:
 
-            print("❌ Нет инструментов")
+            print(
+                "❌ Нет инструментов"
+            )
 
             return []
 
@@ -36,17 +42,104 @@ class VolumeScanner:
 
 
 
-        result = []
+        print(
+            "🔎 Отбор ликвидных инструментов..."
+        )
 
+
+        # ---------------------------------
+        # готовим запрос котировок
+        # ---------------------------------
+
+        quote_list = []
 
 
         for item in instruments:
 
 
-            ticker = item["ticker"]
+            quote_list.append(
 
-            class_code = item["classCode"]
+                {
 
+                    "ticker":
+                        item["ticker"],
+
+                    "classCode":
+                        item["classCode"]
+
+                }
+
+            )
+
+
+
+        quotes = self.api.get_quotes_batch(
+
+            quote_list
+
+        )
+
+
+
+        liquid = []
+
+
+
+        for q in quotes:
+
+
+            last = q.get(
+
+                "last",
+
+                0
+
+            )
+
+
+            if last > 0:
+
+
+                liquid.append(
+
+                    q
+
+                )
+
+
+
+        print(
+
+            "Ликвидных инструментов:",
+
+            len(liquid)
+
+        )
+
+
+
+        # берём максимум 20
+
+        liquid = liquid[:20]
+
+
+
+        result = []
+
+
+
+        print(
+            "📈 Расчёт объёмов сделок..."
+        )
+
+
+
+        for q in liquid:
+
+
+            ticker = q["ticker"]
+
+            class_code = q["classCode"]
 
 
             trades = self.api.get_last_trades(
@@ -67,11 +160,11 @@ class VolumeScanner:
             )
 
 
-            trade_count = len(records)
-
-
 
             money_flow = 0
+
+
+            quantity_sum = 0
 
 
 
@@ -87,7 +180,7 @@ class VolumeScanner:
                 )
 
 
-                volume = trade.get(
+                quantity = trade.get(
 
                     "quantity",
 
@@ -100,9 +193,12 @@ class VolumeScanner:
 
                     price *
 
-                    volume
+                    quantity
 
                 )
+
+
+                quantity_sum += quantity
 
 
 
@@ -113,8 +209,17 @@ class VolumeScanner:
                     "ticker":
                         ticker,
 
+                    "price":
+                        q.get(
+                            "last",
+                            0
+                        ),
+
                     "trades":
-                        trade_count,
+                        len(records),
+
+                    "volume":
+                        quantity_sum,
 
                     "money":
                         money_flow
@@ -122,7 +227,6 @@ class VolumeScanner:
                 }
 
             )
-
 
 
         result.sort(
@@ -160,13 +264,16 @@ if __name__ == "__main__":
     )
 
 
+
     for row in data:
 
 
         print(
 
             f'{row["ticker"]:8}'
-            f' Сделок: {row["trades"]:5}'
-            f' Поток: {row["money"]}'
+            f' Цена:{row["price"]:10}'
+            f' Сделок:{row["trades"]:5}'
+            f' Объём:{row["volume"]:8}'
+            f' Поток:{row["money"]}'
 
         )

@@ -3,143 +3,16 @@ Trader_7_12 Pro
 
 Market Loader
 
-Версия 0.5
+Версия 0.6
 
 Назначение:
 - подключение к BCS API
-- загрузка рыночных данных
+- загрузка инструментов рынка
+- тест получения котировок
 """
 
 
-import requests
-
-from config import REFRESH_TOKEN
-
-
-
-
-
-class BCSAPI:
-
-
-    def __init__(self):
-
-        self.access_token = None
-
-        self.base_url = (
-            "https://be.broker.ru/"
-            "trade-api-information-service/api/v1"
-        )
-
-
-
-    def authorize(self):
-
-        url = (
-            "https://be.broker.ru/"
-            "trade-api-keycloak/"
-            "realms/tradeapi/"
-            "protocol/openid-connect/token"
-        )
-
-
-        payload = {
-
-            "client_id": "trade-api-read",
-
-            "grant_type": "refresh_token",
-
-            "refresh_token": REFRESH_TOKEN
-
-        }
-
-
-        response = requests.post(
-
-            url,
-
-            data=payload
-
-        )
-
-
-        if response.status_code == 200:
-
-            self.access_token = (
-                response.json()["access_token"]
-            )
-
-            print(
-                "✅ Авторизация БКС успешна"
-            )
-
-            return True
-
-
-        print(response.text)
-
-        return False
-
-
-
-
-    def headers(self):
-
-        return {
-
-            "Authorization":
-            f"Bearer {self.access_token}"
-
-        }
-
-
-
-
-    def get_instruments(
-            self,
-            instrument_type="FUTURES"
-    ):
-
-
-        url = (
-            f"{self.base_url}/"
-            "instruments/by-type"
-        )
-
-
-        params = {
-
-            "type": instrument_type
-
-        }
-
-
-        response = requests.get(
-
-            url,
-
-            headers=self.headers(),
-
-            params=params
-
-        )
-
-
-        print(
-            "BCS response:",
-            response.status_code
-        )
-
-
-        if response.status_code == 200:
-
-            return response.json()
-
-
-        print(response.text)
-
-        return None
-
+from api.bcs_api import BCSAPI
 
 
 
@@ -156,18 +29,23 @@ class MarketLoader:
 
 
 
+    # ---------------------------------------------------------
+
+
     def connect(self):
 
         return self.api.authorize()
 
 
 
+    # ---------------------------------------------------------
+
+
     def load(self):
 
         """
-        Метод вызывается из main.py
-
-        Загружает фьючерсы
+        Загружает инструменты
+        и тестирует получение котировок
         """
 
         print(
@@ -184,38 +62,108 @@ class MarketLoader:
 
 
         self.data = self.api.get_instruments(
-
             "FUTURES"
+        )
+
+
+
+        if not self.data:
+
+            print(
+                "⚠️ Инструменты не получены"
+            )
+
+            return None
+
+
+
+        print(
+            "✅ Инструменты загружены:",
+            len(self.data)
+        )
+
+
+
+        # -------------------------------------------------
+        # ТЕСТ QUOTES
+        # -------------------------------------------------
+
+
+        test_instruments = []
+
+
+
+        for item in self.data[:3]:
+
+
+            test_instruments.append(
+
+                {
+
+                    "ticker":
+                        item.get(
+                            "ticker"
+                        ),
+
+
+                    "classCode":
+                        item.get(
+                            "primaryBoard"
+                        )
+
+                }
+
+            )
+
+
+
+        print(
+            "\nTEST QUOTE REQUEST:"
+        )
+
+
+        print(
+            test_instruments
+        )
+
+
+
+        quotes = self.api.get_quotes(
+
+            test_instruments
 
         )
 
 
-        if self.data:
 
-            print(
-                "✅ Инструменты загружены:",
-                len(self.data)
-                if isinstance(self.data, list)
-                else "OK"
-            )
+        print(
+            "\nTEST QUOTES RESULT:"
+        )
 
 
-        else:
+        print(
+            quotes
+        )
 
-            print(
-                "⚠️ Данные рынка не получены"
-            )
+
+        print(
+            "\n============================\n"
+        )
+
 
 
         return self.data
 
 
 
+    # ---------------------------------------------------------
+
 
     def load_instruments(
             self,
             instrument_type="FUTURES"
     ):
+
 
         return self.api.get_instruments(
 

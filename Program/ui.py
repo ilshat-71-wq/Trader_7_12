@@ -4,10 +4,11 @@ Trader_7_12 Pro
 UI Module
 
 Версия:
-0.5
+0.6
 
 Изменения:
-- подключен MarketScanner
+- подключен MarketData
+- получение реальных данных BCS API
 - кнопка "Сканировать рынок"
 - расчёт вынесен из UI
 """
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtCore import Qt
 
+
+from market.market_data import MarketData
 
 from scanner.market_scanner import MarketScanner
 
@@ -47,6 +50,9 @@ class TraderWindow(QWidget):
             900,
             600
         )
+
+
+        self.market = MarketData()
 
 
         self.scanner = MarketScanner()
@@ -118,38 +124,23 @@ class TraderWindow(QWidget):
     def run_market_scan(self):
 
 
-        # Пока тестовый список
-        # Следующим шагом сюда подключим данные BCS API
+        self.result_box.setText(
+            "📡 Загрузка данных рынка BCS..."
+        )
 
 
-        instruments = [
+        instruments = self.market.update()
 
 
-            {
-                "ticker": "SBER-9.26",
-                "price": 34500,
-                "volume": 150000,
-                "average_volume": 60000
-            },
+
+        if not instruments:
 
 
-            {
-                "ticker": "Si-9.26",
-                "price": 92000,
-                "volume": 80000,
-                "average_volume": 70000
-            },
+            self.result_box.setText(
+                "⚠️ Данные рынка отсутствуют"
+            )
 
-
-            {
-                "ticker": "BR-9.26",
-                "price": 68000,
-                "volume": 120000,
-                "average_volume": 40000
-            }
-
-
-        ]
+            return
 
 
 
@@ -167,7 +158,15 @@ TRADER_7_12 MARKET SCANNER
 
 ================================
 
-"""
+
+Получено инструментов:
+{}
+
+================================
+
+""".format(
+            len(instruments)
+        )
 
 
 
@@ -177,23 +176,23 @@ TRADER_7_12 MARKET SCANNER
             output += f"""
 
 Инструмент:
-{item['ticker']}
+{item.get('ticker')}
 
 
 Цена:
-{item['price']} ₽
+{item.get('price')} ₽
 
 
 Оборот:
-{item['money_volume']:,.0f} ₽
+{item.get('money_volume',0):,.0f} ₽
 
 
 Объем:
-{item['volume_ratio']} x
+{item.get('volume_ratio',0)} x
 
 
 Рейтинг:
-{item['volume_score']} / 100
+{item.get('volume_score',0)} / 100
 
 
 ------------------------------
