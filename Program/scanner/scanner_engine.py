@@ -53,9 +53,6 @@ class ScannerEngine:
         )
 
 
-        # первый рабочий режим:
-        # берём ограниченное количество бумаг
-
         instruments = instruments[:50]
 
 
@@ -72,17 +69,17 @@ class ScannerEngine:
         for instrument in instruments:
 
 
+            ticker = instrument.get(
+                "ticker"
+            )
+
+
+            class_code = instrument.get(
+                "classCode"
+            )
+
+
             try:
-
-
-                ticker = instrument.get(
-                    "ticker"
-                )
-
-
-                class_code = instrument.get(
-                    "classCode"
-                )
 
 
                 print(
@@ -152,7 +149,6 @@ class ScannerEngine:
                     dict
                 ):
 
-
                     records = trades.get(
 
                         "records",
@@ -171,10 +167,10 @@ class ScannerEngine:
                 for trade in records:
 
 
-                    quantity = float(
+                    trade_volume = float(
 
                         trade.get(
-                            "quantity",
+                            "volume",
                             0
                         )
 
@@ -191,12 +187,12 @@ class ScannerEngine:
                     )
 
 
-                    volume += quantity
+                    volume += trade_volume
 
 
                     money_volume += (
 
-                        quantity *
+                        trade_volume *
 
                         price
 
