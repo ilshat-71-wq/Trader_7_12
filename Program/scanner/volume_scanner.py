@@ -1,3 +1,17 @@
+"""
+Trader_7_12 Pro
+
+Volume Scanner
+
+Версия 0.3
+
+Назначение:
+- расчёт ликвидности инструментов
+- денежный оборот
+- рейтинг активности
+"""
+
+
 from scanner.instrument_loader import InstrumentLoader
 from api.bcs_api import BCSAPI
 
@@ -19,7 +33,7 @@ class VolumeScanner:
     def start(self):
 
         print(
-            "📊 Volume Scanner v0.2"
+            "📊 Volume Scanner v0.3"
         )
 
 
@@ -38,89 +52,11 @@ class VolumeScanner:
 
         if not self.api.authorize():
 
+            print(
+                "❌ Ошибка авторизации"
+            )
+
             return []
-
-
-
-        print(
-            "🔎 Отбор ликвидных инструментов..."
-        )
-
-
-        # ---------------------------------
-        # готовим запрос котировок
-        # ---------------------------------
-
-        quote_list = []
-
-
-        for item in instruments:
-
-
-            quote_list.append(
-
-                {
-
-                    "ticker":
-                        item["ticker"],
-
-                    "classCode":
-                        item["classCode"]
-
-                }
-
-            )
-
-
-
-        quotes = self.api.get_quotes_batch(
-
-            quote_list
-
-        )
-
-
-
-        liquid = []
-
-
-
-        for q in quotes:
-
-
-            last = q.get(
-
-                "last",
-
-                0
-
-            )
-
-
-            if last > 0:
-
-
-                liquid.append(
-
-                    q
-
-                )
-
-
-
-        print(
-
-            "Ликвидных инструментов:",
-
-            len(liquid)
-
-        )
-
-
-
-        # берём максимум 20
-
-        liquid = liquid[:20]
 
 
 
@@ -128,18 +64,18 @@ class VolumeScanner:
 
 
 
-        print(
-            "📈 Расчёт объёмов сделок..."
-        )
+        for item in instruments[:50]:
 
 
+            ticker = item.get(
+                "ticker"
+            )
 
-        for q in liquid:
 
+            class_code = item.get(
+                "classCode"
+            )
 
-            ticker = q["ticker"]
-
-            class_code = q["classCode"]
 
 
             trades = self.api.get_last_trades(
@@ -151,54 +87,101 @@ class VolumeScanner:
             )
 
 
+
             records = trades.get(
-
                 "records",
-
                 []
-
             )
 
 
 
-            money_flow = 0
+            trade_count = len(records)
 
 
-            quantity_sum = 0
+
+            money_volume = 0
+
+
+
+            total_quantity = 0
 
 
 
             for trade in records:
 
 
-                price = trade.get(
+                price = (
 
-                    "price",
+                    trade.get("price")
+
+                    or
+
+                    trade.get("last")
+
+                    or
+
+                    trade.get("tradePrice")
+
+                    or
 
                     0
 
                 )
 
 
-                quantity = trade.get(
+                quantity = (
 
-                    "quantity",
+                    trade.get("quantity")
+
+                    or
+
+                    trade.get("volume")
+
+                    or
+
+                    trade.get("amount")
+
+                    or
 
                     0
 
                 )
 
 
-                money_flow += (
+                try:
 
-                    price *
+                    money_volume += (
 
-                    quantity
+                        float(price)
+
+                        *
+
+                        float(quantity)
+
+                    )
+
+
+                    total_quantity += float(quantity)
+
+
+                except:
+
+                    pass
+
+
+
+            average_trade = 0
+
+
+            if trade_count:
+
+                average_trade = (
+
+                    money_volume /
+
+                    trade_count
 
                 )
-
-
-                quantity_sum += quantity
 
 
 
@@ -207,39 +190,74 @@ class VolumeScanner:
                 {
 
                     "ticker":
+
                         ticker,
 
-                    "price":
-                        q.get(
-                            "last",
-                            0
-                        ),
 
                     "trades":
-                        len(records),
 
-                    "volume":
-                        quantity_sum,
+                        trade_count,
 
-                    "money":
-                        money_flow
+
+                    "money_volume":
+
+                        money_volume,
+
+
+                    "quantity":
+
+                        total_quantity,
+
+
+                    "average_trade":
+
+                        average_trade
 
                 }
 
             )
 
 
+
         result.sort(
 
             key=lambda x:
-                x["money"],
+
+            x["money_volume"],
 
             reverse=True
 
         )
 
 
+
+        print()
+
+        print(
+            "🔥 TOP LIQUIDITY"
+        )
+
+
+        for row in result[:10]:
+
+            print(
+
+                row["ticker"],
+
+                "Сделок:",
+
+                row["trades"],
+
+                "Оборот:",
+
+                row["money_volume"]
+
+            )
+
+
+
         return result
+
 
 
 
@@ -256,24 +274,9 @@ if __name__ == "__main__":
     data = scanner.start()
 
 
-
     print()
 
     print(
-        "====== VOLUME RANKING ======"
+        "Готово:",
+        len(data)
     )
-
-
-
-    for row in data:
-
-
-        print(
-
-            f'{row["ticker"]:8}'
-            f' Цена:{row["price"]:10}'
-            f' Сделок:{row["trades"]:5}'
-            f' Объём:{row["volume"]:8}'
-            f' Поток:{row["money"]}'
-
-        )
