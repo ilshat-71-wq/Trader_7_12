@@ -1,23 +1,32 @@
 from scanner.scanner_engine import ScannerEngine
 
+
+print("🚀 Запуск теста сканера")
+
+
 scanner = ScannerEngine()
 
-rows = scanner.load()
 
+rows = scanner.scan()
+
+
+print()
+print("==============================")
 print("Всего инструментов:", len(rows))
+print("==============================")
 print()
 
+
 for row in rows[:20]:
+
     print(
         row.ticker,
-        "|",
-        row.short_name,
-        "| Short:",
-        row.short_allowed,
-        "| Margin:",
-        row.margin_allowed,
-        "| Sector:",
-        row.sector,
-        "| Cap:",
-        int(row.market_cap),
+        "| Цена:",
+        row.last,
+        "| Объём:",
+        row.volume,
+        "| Оборот:",
+        row.money_volume,
+        "| Rating:",
+        row.rating,
     )

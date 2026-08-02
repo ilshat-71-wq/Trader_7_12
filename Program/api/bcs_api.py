@@ -399,72 +399,35 @@ class BCSAPI:
             class_code
     ):
 
-
         url = (
-
             f"{self.market_url}/last-trades"
-
         )
 
-
-
-        # Москва UTC+3
-
-        moscow = timezone(
-
-            timedelta(hours=3)
-
-        )
-
-
-        now = datetime.now(
-
-            moscow
-
-        )
-
-
+        now = datetime.utcnow()
 
         start = now - timedelta(
-
-            minutes=60
-
+            minutes=30
         )
-
-
 
         payload = {
 
+            "ticker": ticker,
 
-            "ticker":
+            "classCode": class_code,
 
-                ticker,
+            "startDateTime": start.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            ),
 
-
-            "classCode":
-
-                class_code,
-
-
-            "startDateTime":
-
-                start.strftime(
-
-                    "%Y-%m-%dT%H:%M:%S.000Z"
-
-                ),
-
-
-            "endDateTime":
-
-                now.strftime(
-
-                    "%Y-%m-%dT%H:%M:%S.000Z"
-
-                )
+            "endDateTime": now.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            )
 
         }
 
+
+        print("TRADE PAYLOAD:")
+        print(payload)
 
 
         r = RequestHelper.post(
@@ -476,7 +439,6 @@ class BCSAPI:
                 **self.headers(),
 
                 "Content-Type":
-
                     "application/json"
 
             },
@@ -486,32 +448,25 @@ class BCSAPI:
         )
 
 
-
         print(
-
-            f"Trades {ticker}:",
-
+            "Trades status:",
             r.status_code
-
         )
 
+
+        print(
+            "Trades raw:",
+            r.text[:500]
+        )
 
 
         if r.status_code == 200:
 
-
             return r.json()
 
 
-
         return {
-
-
-
-            "records":
-
-                []
-
+            "records": []
         }
 
 

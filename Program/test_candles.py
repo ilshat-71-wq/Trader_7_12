@@ -3,13 +3,14 @@ from api.bcs_api import BCSAPI
 
 api = BCSAPI()
 
+api.authorize()
 
-if api.authorize():
+data = api.get_candles(
+    "SBER",
+    "TQBR"
+)
 
-    candles = api.get_candles(
-        "BMQ6",
-        "SPBFUT"
-    )
-
-
-    print(candles)
+print()
+print("========== RAW CANDLES ==========")
+print(data)
+print("=================================")

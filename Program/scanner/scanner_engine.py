@@ -6,7 +6,6 @@ from services.trade_service import TradeService
 from services.rating_service import RatingService
 
 
-
 class ScannerEngine:
 
 
@@ -23,8 +22,6 @@ class ScannerEngine:
 
 
     # -------------------------------------------------------------
-
-    # совместимость со старыми тестами
 
     def load(self):
 
@@ -56,6 +53,17 @@ class ScannerEngine:
         )
 
 
+        # первый рабочий режим:
+        # берём ограниченное количество бумаг
+
+        instruments = instruments[:50]
+
+
+        print(
+            f"Сканируем: {len(instruments)}"
+        )
+
+
 
         rows = []
 
@@ -64,121 +72,58 @@ class ScannerEngine:
         for instrument in instruments:
 
 
-            ticker = instrument.get(
-                "ticker"
-            )
+            try:
 
 
-            class_code = instrument.get(
-                "classCode"
-            )
-
-
-
-            print(
-                f"Обработка {ticker}"
-            )
-
-
-
-            # -----------------------------
-            # QUOTE
-            # -----------------------------
-
-
-            quote = self.quote_service.load(
-
-                ticker,
-
-                class_code
-
-            )
-
-
-
-            if not isinstance(quote, dict):
-
-                continue
-
-
-
-            last = float(
-
-                quote.get(
-                    "last",
-                    0
+                ticker = instrument.get(
+                    "ticker"
                 )
 
-            )
 
-
-            change = float(
-
-                quote.get(
-                    "changeRate",
-                    0
+                class_code = instrument.get(
+                    "classCode"
                 )
 
-            )
+
+                print(
+                    f"Обработка {ticker}"
+                )
 
 
 
-            # -----------------------------
-            # TRADES
-            # -----------------------------
+                quote = self.quote_service.load(
 
+                    ticker,
 
-            trades = self.trade_service.load(
-
-                ticker,
-
-                class_code
-
-            )
-
-
-
-            volume = 0
-
-            money_volume = 0
-
-
-
-            if isinstance(trades, dict):
-
-
-                records = trades.get(
-
-                    "records",
-
-                    []
+                    class_code
 
                 )
 
 
-            else:
 
-                records = []
+                if not isinstance(
+                    quote,
+                    dict
+                ):
+
+                    continue
 
 
 
-            for trade in records:
+                last = float(
 
-
-                quantity = float(
-
-                    trade.get(
-                        "quantity",
+                    quote.get(
+                        "last",
                         0
                     )
 
                 )
 
 
-                price = float(
+                change = float(
 
-                    trade.get(
-                        "price",
+                    quote.get(
+                        "changeRate",
                         0
                     )
 
@@ -186,43 +131,80 @@ class ScannerEngine:
 
 
 
-                volume += quantity
+                trades = self.trade_service.load(
 
+                    ticker,
 
-                money_volume += (
-
-                    quantity *
-
-                    price
+                    class_code
 
                 )
 
 
 
-            # -----------------------------
-            # RATING
-            # -----------------------------
+                volume = 0
 
-
-            rating = self.rating_service.calculate(
-
-                last=last,
-
-                change=change,
-
-                volume=volume,
-
-                money_volume=money_volume
-
-            )
+                money_volume = 0
 
 
 
-            rows.append(
+                if isinstance(
+                    trades,
+                    dict
+                ):
 
-                ScannerRow(
 
-                    ticker=ticker,
+                    records = trades.get(
+
+                        "records",
+
+                        []
+
+                    )
+
+
+                else:
+
+                    records = []
+
+
+
+                for trade in records:
+
+
+                    quantity = float(
+
+                        trade.get(
+                            "quantity",
+                            0
+                        )
+
+                    )
+
+
+                    price = float(
+
+                        trade.get(
+                            "price",
+                            0
+                        )
+
+                    )
+
+
+                    volume += quantity
+
+
+                    money_volume += (
+
+                        quantity *
+
+                        price
+
+                    )
+
+
+
+                rating = self.rating_service.calculate(
 
                     last=last,
 
@@ -230,13 +212,48 @@ class ScannerEngine:
 
                     volume=volume,
 
-                    money_volume=money_volume,
-
-                    rating=rating
+                    money_volume=money_volume
 
                 )
 
-            )
+
+
+                rows.append(
+
+                    ScannerRow(
+
+                        ticker=ticker,
+
+                        last=last,
+
+                        change=change,
+
+                        volume=volume,
+
+                        money_volume=money_volume,
+
+                        rating=rating
+
+                    )
+
+                )
+
+
+
+            except Exception as e:
+
+
+                print(
+
+                    "⚠️ Ошибка",
+
+                    ticker,
+
+                    e
+
+                )
+
+                continue
 
 
 
@@ -277,9 +294,6 @@ class ScannerEngine:
 
                 "Цена:",
                 row.last,
-
-                "Объём:",
-                row.volume,
 
                 "Оборот:",
                 row.money_volume,
