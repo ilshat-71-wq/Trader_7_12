@@ -1,9 +1,30 @@
+"""
+Trader_7_12 Pro
+
+Scanner Engine
+
+Версия 0.2
+
+Назначение:
+- загрузка инструментов
+- получение котировок
+- анализ сделок
+- расчет оборота
+- рейтинг инструмента
+- Volume Price анализ
+- подготовка торгового результата
+"""
+
+
 from models.scanner_row import ScannerRow
 
 from services.instrument_service import InstrumentService
 from services.quote_service import QuoteService
 from services.trade_service import TradeService
 from services.rating_service import RatingService
+
+from scanner.volume_price import analyze_volume
+
 
 
 class ScannerEngine:
@@ -53,7 +74,9 @@ class ScannerEngine:
         )
 
 
+
         instruments = instruments[:50]
+
 
 
         print(
@@ -117,6 +140,7 @@ class ScannerEngine:
                 )
 
 
+
                 change = float(
 
                     quote.get(
@@ -157,7 +181,6 @@ class ScannerEngine:
 
                     )
 
-
                 else:
 
                     records = []
@@ -187,6 +210,7 @@ class ScannerEngine:
                     )
 
 
+
                     volume += trade_volume
 
 
@@ -200,6 +224,10 @@ class ScannerEngine:
 
 
 
+                # -----------------------------------
+                # Rating Engine
+                # -----------------------------------
+
                 rating = self.rating_service.calculate(
 
                     last=last,
@@ -209,6 +237,24 @@ class ScannerEngine:
                     volume=volume,
 
                     money_volume=money_volume
+
+                )
+
+
+
+                # -----------------------------------
+                # Volume Price Analyzer
+                # -----------------------------------
+
+                volume_analysis = analyze_volume(
+
+                    ticker=ticker,
+
+                    price=last,
+
+                    volume=volume,
+
+                    average_volume=volume
 
                 )
 
@@ -228,7 +274,47 @@ class ScannerEngine:
 
                         money_volume=money_volume,
 
-                        rating=rating
+                        rating=rating,
+
+                        volume_ratio=volume_analysis.get(
+
+                            "volume_ratio",
+
+                            0
+
+                        ),
+
+                        volume_score=volume_analysis.get(
+
+                            "volume_score",
+
+                            0
+
+                        ),
+
+                        momentum_score=volume_analysis.get(
+
+                            "momentum_score",
+
+                            0
+
+                        ),
+
+                        range_position=volume_analysis.get(
+
+                            "range_position",
+
+                            0
+
+                        ),
+
+                        signal=volume_analysis.get(
+
+                            "signal",
+
+                            ""
+
+                        )
 
                     )
 
@@ -284,19 +370,45 @@ class ScannerEngine:
         for row in rows[:10]:
 
 
+            print()
+
             print(
+                row.ticker
+            )
 
-                row.ticker,
-
+            print(
                 "Цена:",
-                row.last,
+                row.last
+            )
 
+            print(
                 "Оборот:",
-                row.money_volume,
+                row.money_volume
+            )
 
+            print(
                 "Rating:",
                 row.rating
+            )
 
+            print(
+                "Volume:",
+                row.volume_ratio
+            )
+
+            print(
+                "Momentum:",
+                row.momentum_score
+            )
+
+            print(
+                "Range:",
+                row.range_position
+            )
+
+            print(
+                "Signal:",
+                row.signal
             )
 
 
