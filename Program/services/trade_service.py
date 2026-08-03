@@ -12,7 +12,13 @@ class TradeService:
 
 
 
-    def load(self, ticker, class_code):
+    # ---------------------------------------------------------
+
+    def load(
+        self,
+        ticker,
+        class_code
+    ):
 
 
         print()
@@ -38,6 +44,92 @@ class TradeService:
         print(result)
 
         print("================================")
+
+
+
+        return result
+
+
+
+    # ---------------------------------------------------------
+
+    def load_history(
+        self,
+        ticker,
+        class_code,
+        start_time,
+        end_time
+    ):
+
+
+        print()
+
+        print(
+            f"TradeService HISTORY: {ticker} {class_code}"
+        )
+
+
+        payload = {
+
+
+            "ticker":
+
+                ticker,
+
+
+            "classCode":
+
+                class_code,
+
+
+            "startDateTime":
+
+                start_time,
+
+
+            "endDateTime":
+
+                end_time
+
+        }
+
+
+
+        print()
+
+        print(
+            "HISTORY TRADE PAYLOAD:"
+        )
+
+        print(payload)
+
+
+
+        result = self.api.get_trades_history(
+
+            ticker,
+
+            class_code,
+
+            start_time,
+
+            end_time
+
+        )
+
+
+
+        print()
+
+        print(
+            "========== RAW HISTORY TRADES =========="
+        )
+
+        print(result)
+
+        print(
+            "========================================"
+        )
 
 
 

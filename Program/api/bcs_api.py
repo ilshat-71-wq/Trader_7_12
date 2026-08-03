@@ -638,3 +638,86 @@ class BCSAPI:
 
 
         return {}
+
+    # ---------------------------------------------------------
+    # HISTORY TRADES
+    # ---------------------------------------------------------
+
+    def get_trades_history(
+            self,
+            ticker,
+            class_code,
+            start_time,
+            end_time
+    ):
+
+        url = (
+            f"{self.market_url}/trades"
+        )
+
+
+        payload = {
+
+            "ticker":
+                ticker,
+
+            "classCode":
+                class_code,
+
+            "startDateTime":
+                start_time,
+
+            "endDateTime":
+                end_time
+
+        }
+
+
+        print()
+
+        print(
+            "HISTORY TRADES PAYLOAD:"
+        )
+
+        print(payload)
+
+
+        r = RequestHelper.post(
+
+            url,
+
+            headers={
+
+                **self.headers(),
+
+                "Content-Type":
+                    "application/json"
+
+            },
+
+            json=payload
+
+        )
+
+
+        print(
+            "History trades status:",
+            r.status_code
+        )
+
+
+        print(
+            "History trades raw:",
+            r.text[:500]
+        )
+
+
+        if r.status_code == 200:
+
+            return r.json()
+
+
+        return {
+            "records": []
+        }
+
