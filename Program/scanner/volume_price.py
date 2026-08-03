@@ -1,39 +1,44 @@
 """
 Trader_7_12 Pro
+
 Module: Volume x Price Analyzer
 
-Назначение:
-- расчет денежного оборота инструмента
-- оценка всплеска объема
-- подготовка рейтинга для сканера MOEX Futures
+Версия: 0.4
 
-Версия: 0.3
+Назначение:
+- расчет денежного оборота
+- анализ силы объема
+- анализ движения цены
+- положение цены в диапазоне
+- подготовка данных для Signal Engine
 """
 
 
-def calculate_volume_price(volume: int, price: float) -> float:
-    """
-    Расчет объема в деньгах
+# ---------------------------------------------------------
+# Денежный оборот
+# ---------------------------------------------------------
 
-    volume - количество контрактов
-    price  - цена инструмента
-
-    пример:
-    100000 контрактов * 34500 руб.
-    = 3 450 000 000 руб.
-    """
+def calculate_volume_price(
+        volume: int,
+        price: float
+) -> float:
 
     return volume * price
 
 
 
-def volume_ratio(current_volume: int, average_volume: int) -> float:
-    """
-    Во сколько раз текущий объем выше среднего
-    """
+# ---------------------------------------------------------
+# Коэффициент объема
+# ---------------------------------------------------------
+
+def volume_ratio(
+        current_volume: int,
+        average_volume: int
+) -> float:
 
     if average_volume == 0:
         return 0
+
 
     return round(
         current_volume / average_volume,
@@ -42,15 +47,14 @@ def volume_ratio(current_volume: int, average_volume: int) -> float:
 
 
 
-def volume_score(current_volume: int,
-                 average_volume: int) -> int:
-    """
-    Оценка силы объема 0-100
+# ---------------------------------------------------------
+# Оценка объема
+# ---------------------------------------------------------
 
-    >3x среднего = сильный импульс
-    >2x = хороший
-    >1.5x = внимание
-    """
+def volume_score(
+        current_volume: int,
+        average_volume: int
+) -> int:
 
     ratio = volume_ratio(
         current_volume,
@@ -70,38 +74,175 @@ def volume_score(current_volume: int,
     elif ratio >= 1:
         return 40
 
-    else:
+    return 20
+
+
+
+# ---------------------------------------------------------
+# Импульс цены
+# ---------------------------------------------------------
+
+def price_momentum_score(
+        change_percent: float
+) -> int:
+
+
+    change = abs(change_percent)
+
+
+    if change >= 5:
+        return 100
+
+    elif change >= 3:
+        return 80
+
+    elif change >= 2:
+        return 60
+
+    elif change >= 1:
+        return 40
+
+    elif change >= 0.5:
         return 20
 
+    return 0
 
+
+
+# ---------------------------------------------------------
+# Положение цены в диапазоне
+# ---------------------------------------------------------
+
+def range_position(
+        price: float,
+        low: float,
+        high: float
+) -> float:
+
+
+    if high <= low:
+        return 0
+
+
+    position = (
+
+        price - low
+
+    ) / (
+
+        high - low
+
+    )
+
+
+    return round(
+        position,
+        2
+    )
+
+
+
+# ---------------------------------------------------------
+# Поиск пробоя
+# ---------------------------------------------------------
+
+def breakout_signal(
+        position: float,
+        volume_ratio_value: float,
+        change_percent: float
+) -> str:
+
+
+    # Цена возле максимума + рост объема
+
+    if (
+
+        position >= 0.85
+
+        and volume_ratio_value >= 2
+
+        and change_percent > 0
+
+    ):
+
+        return "BREAKOUT_WATCH"
+
+
+
+    # Цена возле минимума + рост объема
+
+    if (
+
+        position <= 0.15
+
+        and volume_ratio_value >= 2
+
+        and change_percent < 0
+
+    ):
+
+        return "BREAKDOWN_WATCH"
+
+
+
+    return "NO_SIGNAL"
+
+
+
+# ---------------------------------------------------------
+# Полный анализ
+# ---------------------------------------------------------
 
 def analyze_volume(
         ticker: str,
         price: float,
         volume: int,
-        average_volume: int
+        average_volume: int,
+        change_percent: float = 0,
+        low: float = 0,
+        high: float = 0
 ):
-    """
-    Полный анализ инструмента
-    """
+
 
     money_volume = calculate_volume_price(
         volume,
         price
     )
 
+
     ratio = volume_ratio(
         volume,
         average_volume
     )
 
-    score = volume_score(
+
+    v_score = volume_score(
         volume,
         average_volume
     )
 
 
+    momentum = price_momentum_score(
+        change_percent
+    )
+
+
+    position = range_position(
+        price,
+        low,
+        high
+    )
+
+
+    signal = breakout_signal(
+        position,
+        ratio,
+        change_percent
+    )
+
+
     return {
+
 
         "ticker": ticker,
 
@@ -113,21 +254,41 @@ def analyze_volume(
 
         "volume_ratio": ratio,
 
-        "volume_score": score
+        "volume_score": v_score,
+
+        "momentum_score": momentum,
+
+        "range_position": position,
+
+        "signal": signal
 
     }
 
 
 
-# Тестовый запуск
+# ---------------------------------------------------------
+# Тест
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
 
 
     result = analyze_volume(
-        ticker="SBER-9.26",
-        price=34500,
-        volume=150000,
-        average_volume=60000
+
+        ticker="AFLT",
+
+        price=35.22,
+
+        volume=23_000_000,
+
+        average_volume=8_000_000,
+
+        change_percent=3.2,
+
+        low=33.5,
+
+        high=35.5
+
     )
 
 
