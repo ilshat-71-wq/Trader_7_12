@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Scanner Engine
 
-Версия 0.2
+Версия 0.3
 
 Назначение:
 - загрузка инструментов
@@ -12,6 +12,8 @@ Scanner Engine
 - расчет оборота
 - рейтинг инструмента
 - Volume Price анализ
+- построение свечей
+- Momentum анализ
 - подготовка торгового результата
 """
 
@@ -22,6 +24,8 @@ from services.instrument_service import InstrumentService
 from services.quote_service import QuoteService
 from services.trade_service import TradeService
 from services.rating_service import RatingService
+from services.candle_service import CandleService
+from services.momentum_service import MomentumService
 
 from scanner.volume_price import analyze_volume
 
@@ -40,9 +44,13 @@ class ScannerEngine:
 
         self.rating_service = RatingService()
 
+        self.candle_service = CandleService()
+
+        self.momentum_service = MomentumService()
 
 
-    # -------------------------------------------------------------
+
+    # ---------------------------------------------------------
 
     def load(self):
 
@@ -50,7 +58,7 @@ class ScannerEngine:
 
 
 
-    # -------------------------------------------------------------
+    # ---------------------------------------------------------
 
     def scan(self):
 
@@ -140,7 +148,6 @@ class ScannerEngine:
                 )
 
 
-
                 change = float(
 
                     quote.get(
@@ -194,7 +201,10 @@ class ScannerEngine:
 
                         trade.get(
                             "volume",
-                            0
+                            trade.get(
+                                "quantity",
+                                0
+                            )
                         )
 
                     )
@@ -225,7 +235,7 @@ class ScannerEngine:
 
 
                 # -----------------------------------
-                # Rating Engine
+                # Rating
                 # -----------------------------------
 
                 rating = self.rating_service.calculate(
@@ -243,7 +253,7 @@ class ScannerEngine:
 
 
                 # -----------------------------------
-                # Volume Price Analyzer
+                # Volume Price
                 # -----------------------------------
 
                 volume_analysis = analyze_volume(
@@ -257,6 +267,49 @@ class ScannerEngine:
                     average_volume=volume
 
                 )
+
+
+
+                # -----------------------------------
+                # Candle + Momentum
+                # -----------------------------------
+
+                momentum = {
+
+
+                    "momentum_score": 0,
+
+                    "range_position": 0,
+
+                    "signal": ""
+
+                }
+
+
+
+                candles = self.candle_service.build_candles(
+
+                    records,
+
+                    timeframe_minutes=5
+
+                )
+
+
+
+                if candles:
+
+
+                    last_candle = candles[-1]
+
+
+                    momentum = self.momentum_service.analyze(
+
+                        last_candle,
+
+                        average_volume=volume
+
+                    )
 
 
 
@@ -276,6 +329,7 @@ class ScannerEngine:
 
                         rating=rating,
 
+
                         volume_ratio=volume_analysis.get(
 
                             "volume_ratio",
@@ -283,6 +337,7 @@ class ScannerEngine:
                             0
 
                         ),
+
 
                         volume_score=volume_analysis.get(
 
@@ -292,7 +347,8 @@ class ScannerEngine:
 
                         ),
 
-                        momentum_score=volume_analysis.get(
+
+                        momentum_score=momentum.get(
 
                             "momentum_score",
 
@@ -300,7 +356,8 @@ class ScannerEngine:
 
                         ),
 
-                        range_position=volume_analysis.get(
+
+                        range_position=momentum.get(
 
                             "range_position",
 
@@ -308,11 +365,12 @@ class ScannerEngine:
 
                         ),
 
-                        signal=volume_analysis.get(
+
+                        signal=momentum.get(
 
                             "signal",
 
-                            ""
+                            "NO_SIGNAL"
 
                         )
 
@@ -346,6 +404,8 @@ class ScannerEngine:
             (
 
                 x.rating,
+
+                x.momentum_score,
 
                 x.money_volume,
 
@@ -389,11 +449,6 @@ class ScannerEngine:
             print(
                 "Rating:",
                 row.rating
-            )
-
-            print(
-                "Volume:",
-                row.volume_ratio
             )
 
             print(
