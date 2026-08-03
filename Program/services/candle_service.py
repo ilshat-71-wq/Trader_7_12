@@ -3,16 +3,17 @@ Trader_7_12 Pro
 
 Candle Service
 
-Версия 0.1
+Версия 0.2
 
 Назначение:
 - построение свечей из last-trades BCS
 - агрегация сделок
 - подготовка данных для momentum engine
+- расчет дополнительных метрик
 """
 
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 
 class CandleService:
@@ -37,9 +38,9 @@ class CandleService:
         trades:
         [
             {
-                price: float,
-                volume: float,
-                time: str
+                price,
+                volume,
+                time
             }
         ]
 
@@ -62,41 +63,37 @@ class CandleService:
         for trade in trades:
 
 
-            price = float(
+            try:
 
-                trade.get(
-                    "price",
-                    0
-                )
-
-            )
-
-
-            volume = float(
-
-                trade.get(
-                    "volume",
+                price = float(
                     trade.get(
-                        "quantity",
+                        "price",
                         0
                     )
                 )
 
-            )
+
+                volume = float(
+                    trade.get(
+                        "volume",
+                        trade.get(
+                            "quantity",
+                            0
+                        )
+                    )
+                )
 
 
-            time_value = trade.get(
-                "time"
-            )
+                time_value = trade.get(
+                    "time"
+                )
 
 
-            if not time_value:
+                if not time_value:
 
-                continue
+                    continue
 
 
-
-            try:
 
                 dt = datetime.fromisoformat(
 
@@ -109,6 +106,12 @@ class CandleService:
 
 
             except Exception:
+
+                continue
+
+
+
+            if price <= 0:
 
                 continue
 
@@ -178,6 +181,16 @@ class CandleService:
 
                     "money_volume":
 
+                        0,
+
+
+                    "trade_count":
+
+                        0,
+
+
+                    "price_sum":
+
                         0
 
 
@@ -217,19 +230,57 @@ class CandleService:
 
             candle["money_volume"] += (
 
-                volume *
+                price *
 
-                price
+                volume
 
             )
 
 
+            candle["trade_count"] += 1
 
-        result = list(
 
-            candles.values()
 
-        )
+            candle["price_sum"] += price
+
+
+
+        result = []
+
+
+
+        for candle in candles.values():
+
+
+            if candle["trade_count"] > 0:
+
+
+                candle["average_price"] = round(
+
+                    candle["price_sum"] /
+
+                    candle["trade_count"],
+
+                    4
+
+                )
+
+
+            else:
+
+                candle["average_price"] = 0
+
+
+
+            del candle["price_sum"]
+
+
+
+            result.append(
+
+                candle
+
+            )
 
 
 
