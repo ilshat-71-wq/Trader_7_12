@@ -721,3 +721,86 @@ class BCSAPI:
             "records": []
         }
 
+
+
+    # ---------------------------------------------------------
+
+    def get_trades_period(
+            self,
+            ticker,
+            class_code,
+            start_time,
+            end_time
+    ):
+
+        url = (
+            f"{self.market_url}/last-trades"
+        )
+
+
+        payload = {
+
+            "ticker":
+                ticker,
+
+            "classCode":
+                class_code,
+
+            "startDateTime":
+                start_time,
+
+            "endDateTime":
+                end_time
+
+        }
+
+
+        print()
+
+        print(
+            "PERIOD TRADES PAYLOAD:"
+        )
+
+        print(payload)
+
+
+
+        r = RequestHelper.post(
+
+            url,
+
+            headers={
+
+                **self.headers(),
+
+                "Content-Type":
+                    "application/json"
+
+            },
+
+            json=payload
+
+        )
+
+
+        print(
+            "Period trades status:",
+            r.status_code
+        )
+
+
+        print(
+            "Period trades raw:",
+            r.text[:500]
+        )
+
+
+        if r.status_code == 200:
+
+            return r.json()
+
+
+        return {
+            "records": []
+        }
+

@@ -3,13 +3,12 @@ Trader_7_12 Pro
 
 Candle Service
 
-Версия 0.2
+Версия 0.3
 
 Назначение:
-- построение свечей из last-trades BCS
+- построение свечей из BCS trades
 - агрегация сделок
 - подготовка данных для momentum engine
-- расчет дополнительных метрик
 """
 
 
@@ -32,22 +31,6 @@ class CandleService:
             trades,
             timeframe_minutes=5
     ):
-        """
-        Построение свечей
-
-        trades:
-        [
-            {
-                price,
-                volume,
-                time
-            }
-        ]
-
-        timeframe_minutes:
-            5
-            15
-        """
 
 
         if not trades:
@@ -85,7 +68,10 @@ class CandleService:
 
 
                 time_value = trade.get(
-                    "time"
+                    "time",
+                    trade.get(
+                        "dateTime"
+                    )
                 )
 
 
@@ -193,13 +179,11 @@ class CandleService:
 
                         0
 
-
                 }
 
 
 
             candle = candles[key]
-
 
 
             candle["high"] = max(
@@ -227,7 +211,6 @@ class CandleService:
             candle["volume"] += volume
 
 
-
             candle["money_volume"] += (
 
                 price *
@@ -238,7 +221,6 @@ class CandleService:
 
 
             candle["trade_count"] += 1
-
 
 
             candle["price_sum"] += price
@@ -252,35 +234,21 @@ class CandleService:
         for candle in candles.values():
 
 
-            if candle["trade_count"] > 0:
+            candle["average_price"] = round(
 
+                candle["price_sum"] /
 
-                candle["average_price"] = round(
+                candle["trade_count"],
 
-                    candle["price_sum"] /
+                4
 
-                    candle["trade_count"],
-
-                    4
-
-                )
-
-
-            else:
-
-                candle["average_price"] = 0
-
+            )
 
 
             del candle["price_sum"]
 
 
-
-            result.append(
-
-                candle
-
-            )
+            result.append(candle)
 
 
 
@@ -291,7 +259,6 @@ class CandleService:
             x["time"]
 
         )
-
 
 
         return result
