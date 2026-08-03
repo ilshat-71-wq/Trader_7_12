@@ -3,18 +3,19 @@ Trader_7_12 Pro
 
 Market Scanner
 
-Версия 0.1
+Версия 0.2
 
 Назначение:
 - анализ списка инструментов
-- расчет Volume x Price
-- формирование рейтинга
+- Volume x Price анализ
+- расчет профессионального рейтинга
+- формирование TOP кандидатов
 """
 
 
 from scanner.volume_price import analyze_volume
 
-
+from services.rating_service import RatingService
 
 
 
@@ -25,21 +26,29 @@ class MarketScanner:
 
         self.results = []
 
+        self.rating_service = RatingService()
 
 
-    def scan(self, instruments):
+
+    def scan(
+            self,
+            instruments
+    ):
 
         """
         Анализ рынка
 
         instruments:
-        список словарей:
 
         {
             ticker,
             price,
             volume,
-            average_volume
+            average_volume,
+
+            change_percent,
+            low,
+            high
         }
 
         """
@@ -51,7 +60,7 @@ class MarketScanner:
         for item in instruments:
 
 
-            result = analyze_volume(
+            volume_result = analyze_volume(
 
                 ticker=item["ticker"],
 
@@ -59,20 +68,57 @@ class MarketScanner:
 
                 volume=item["volume"],
 
-                average_volume=item["average_volume"]
+                average_volume=item["average_volume"],
+
+                change_percent=item.get(
+                    "change_percent",
+                    0
+                ),
+
+                low=item.get(
+                    "low",
+                    0
+                ),
+
+                high=item.get(
+                    "high",
+                    0
+                )
 
             )
 
 
+
+            rating = self.rating_service.calculate(
+
+                last=item["price"],
+
+                change=item.get(
+                    "change_percent",
+                    0
+                ),
+
+                volume=item["volume"],
+
+                money_volume=volume_result["money_volume"]
+
+            )
+
+
+
+            volume_result["rating"] = rating
+
+
+
             self.results.append(
-                result
+                volume_result
             )
 
 
 
         self.results.sort(
 
-            key=lambda x: x["volume_score"],
+            key=lambda x: x["rating"],
 
             reverse=True
 
@@ -91,5 +137,6 @@ class MarketScanner:
         """
         Возвращает лучшие инструменты
         """
+
 
         return self.results[:count]
