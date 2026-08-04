@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Volume Scanner
 
-Версия 0.4
+Версия 0.5
 
 Назначение:
 - расчёт ликвидности инструментов
@@ -34,7 +34,7 @@ class VolumeScanner:
     def start(self):
 
         print(
-            "📊 Volume Scanner v0.4"
+            "📊 Volume Scanner v0.5"
         )
 
 
