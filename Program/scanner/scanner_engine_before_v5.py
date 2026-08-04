@@ -27,9 +27,6 @@ from services.rating_service import RatingService
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 
-from scanner.signal_engine import SignalEngine
-from scanner.trade_decision_engine import TradeDecisionEngine
-
 from scanner.volume_price import analyze_volume
 
 
@@ -50,10 +47,6 @@ class ScannerEngine:
         self.candle_service = CandleService()
 
         self.momentum_service = MomentumService()
-
-        self.signal_engine = SignalEngine()
-
-        self.trade_decision_engine = TradeDecisionEngine()
 
 
 
@@ -319,21 +312,6 @@ class ScannerEngine:
                     )
 
 
-                    signal_result = self.signal_engine.analyze(
-
-                        quote,
-
-                        last_candle,
-
-                        volume,
-
-                        money_volume,
-
-                        rating
-
-                    )
-
-
 
                 rows.append(
 
@@ -394,62 +372,6 @@ class ScannerEngine:
 
                             "NO_SIGNAL"
 
-                        ),
-
-
-                        trade_score=(
-
-                            signal_result.get(
-                                "trade_score",
-                                0
-                            )
-
-                            if signal_result
-
-                            else 0
-
-                        ),
-
-
-                        confidence=(
-
-                            signal_result.get(
-                                "confidence",
-                                ""
-                            )
-
-                            if signal_result
-
-                            else ""
-
-                        ),
-
-
-                        direction=(
-
-                            signal_result.get(
-                                "direction",
-                                ""
-                            )
-
-                            if signal_result
-
-                            else ""
-
-                        ),
-
-
-                        reasons=(
-
-                            signal_result.get(
-                                "reasons",
-                                []
-                            )
-
-                            if signal_result
-
-                            else []
-
                         )
 
                     )
@@ -475,28 +397,19 @@ class ScannerEngine:
 
 
 
-        rows = [
-
-            r for r in rows
-
-            if r.money_volume > 0
-
-        ]
-
-
         rows.sort(
 
             key=lambda x:
 
             (
 
-                x.trade_score,
+                x.rating,
 
                 x.momentum_score,
 
-                x.rating,
+                x.money_volume,
 
-                x.money_volume
+                abs(x.change)
 
             ),
 
@@ -504,89 +417,6 @@ class ScannerEngine:
 
         )
 
-
-
-        # -----------------------------------
-        # Trade Decision Engine
-        # -----------------------------------
-
-        trade_ideas = []
-
-
-        for row in rows:
-
-            decision = self.trade_decision_engine.evaluate(
-                row
-            )
-
-
-            if decision.get(
-                "decision"
-            ) == "TRADE":
-
-                trade_ideas.append(
-                    decision
-                )
-
-
-        trade_ideas.sort(
-
-            key=lambda x:
-
-            x.get(
-                "trade_score",
-                0
-            ),
-
-            reverse=True
-
-        )
-
-
-        print()
-
-        print(
-            "🔥 TRADE IDEAS:"
-        )
-
-
-        for idea in trade_ideas[:3]:
-
-            print()
-
-            print(
-                idea.get(
-                    "ticker"
-                )
-            )
-
-            print(
-                "Direction:",
-                idea.get(
-                    "direction"
-                )
-            )
-
-            print(
-                "Score:",
-                idea.get(
-                    "trade_score"
-                )
-            )
-
-            print(
-                "Confidence:",
-                idea.get(
-                    "confidence"
-                )
-            )
-
-            print(
-                "Reasons:",
-                idea.get(
-                    "reasons"
-                )
-            )
 
 
         print()
@@ -619,26 +449,6 @@ class ScannerEngine:
             print(
                 "Rating:",
                 row.rating
-            )
-
-            print(
-                "Trade Score:",
-                row.trade_score
-            )
-
-            print(
-                "Direction:",
-                row.direction
-            )
-
-            print(
-                "Confidence:",
-                row.confidence
-            )
-
-            print(
-                "Reasons:",
-                row.reasons
             )
 
             print(

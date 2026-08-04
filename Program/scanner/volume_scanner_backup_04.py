@@ -216,30 +216,11 @@ class VolumeScanner:
 
 
 
-        # ---------------------------------------------------------
-        # Итоговый торговый рейтинг
-        # ---------------------------------------------------------
-
-        for item in result:
-
-            item["trade_score"] = round(
-
-                item["volume_score"] * 0.5 +
-
-                item["momentum_score"] * 0.3 +
-
-                (100 if item["signal"] != "NO_SIGNAL" else 0) * 0.2,
-
-                2
-
-            )
-
-
         result.sort(
 
             key=lambda x:
 
-            x["trade_score"],
+            x["money_volume"],
 
             reverse=True
 
@@ -270,17 +251,9 @@ class VolumeScanner:
 
                 ),
 
-                "volume:",
+                "score:",
 
                 item["volume_score"],
-
-                "momentum:",
-
-                item["momentum_score"],
-
-                "TRADE SCORE:",
-
-                item["trade_score"],
 
                 "signal:",
 

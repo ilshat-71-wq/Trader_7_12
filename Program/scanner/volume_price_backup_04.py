@@ -14,6 +14,10 @@ Module: Volume x Price Analyzer
 """
 
 
+# ---------------------------------------------------------
+# Денежный оборот
+# ---------------------------------------------------------
+
 def calculate_volume_price(
         volume: int,
         price: float
@@ -23,6 +27,10 @@ def calculate_volume_price(
 
 
 
+# ---------------------------------------------------------
+# Коэффициент объема
+# ---------------------------------------------------------
+
 def volume_ratio(
         current_volume: int,
         average_volume: int
@@ -31,12 +39,17 @@ def volume_ratio(
     if average_volume == 0:
         return 0
 
+
     return round(
         current_volume / average_volume,
         2
     )
 
 
+
+# ---------------------------------------------------------
+# Оценка объема
+# ---------------------------------------------------------
 
 def volume_score(
         current_volume: int,
@@ -47,6 +60,7 @@ def volume_score(
         current_volume,
         average_volume
     )
+
 
     if ratio >= 3:
         return 100
@@ -64,11 +78,17 @@ def volume_score(
 
 
 
+# ---------------------------------------------------------
+# Импульс цены
+# ---------------------------------------------------------
+
 def price_momentum_score(
         change_percent: float
 ) -> int:
 
+
     change = abs(change_percent)
+
 
     if change >= 5:
         return 100
@@ -89,24 +109,42 @@ def price_momentum_score(
 
 
 
+# ---------------------------------------------------------
+# Положение цены в диапазоне
+# ---------------------------------------------------------
+
 def range_position(
         price: float,
         low: float,
         high: float
 ) -> float:
 
+
     if high <= low:
         return 0
 
+
     position = (
+
         price - low
+
     ) / (
+
         high - low
+
     )
 
-    return round(position, 2)
+
+    return round(
+        position,
+        2
+    )
 
 
+
+# ---------------------------------------------------------
+# Поиск пробоя
+# ---------------------------------------------------------
 
 def breakout_signal(
         position: float,
@@ -114,25 +152,46 @@ def breakout_signal(
         change_percent: float
 ) -> str:
 
+
+    # Цена возле максимума + рост объема
+
     if (
+
         position >= 0.85
+
         and volume_ratio_value >= 2
+
         and change_percent > 0
+
     ):
+
         return "BREAKOUT_WATCH"
 
 
+
+    # Цена возле минимума + рост объема
+
     if (
+
         position <= 0.15
+
         and volume_ratio_value >= 2
+
         and change_percent < 0
+
     ):
+
         return "BREAKDOWN_WATCH"
+
 
 
     return "NO_SIGNAL"
 
 
+
+# ---------------------------------------------------------
+# Полный анализ
+# ---------------------------------------------------------
 
 def analyze_volume(
         ticker: str,
@@ -143,6 +202,7 @@ def analyze_volume(
         low: float = 0,
         high: float = 0
 ):
+
 
     money_volume = calculate_volume_price(
         volume,
@@ -183,6 +243,7 @@ def analyze_volume(
 
     return {
 
+
         "ticker": ticker,
 
         "price": price,
@@ -205,7 +266,12 @@ def analyze_volume(
 
 
 
+# ---------------------------------------------------------
+# Тест
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
+
 
     result = analyze_volume(
 

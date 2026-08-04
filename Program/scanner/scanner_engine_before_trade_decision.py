@@ -28,7 +28,6 @@ from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 
 from scanner.signal_engine import SignalEngine
-from scanner.trade_decision_engine import TradeDecisionEngine
 
 from scanner.volume_price import analyze_volume
 
@@ -52,8 +51,6 @@ class ScannerEngine:
         self.momentum_service = MomentumService()
 
         self.signal_engine = SignalEngine()
-
-        self.trade_decision_engine = TradeDecisionEngine()
 
 
 
@@ -504,89 +501,6 @@ class ScannerEngine:
 
         )
 
-
-
-        # -----------------------------------
-        # Trade Decision Engine
-        # -----------------------------------
-
-        trade_ideas = []
-
-
-        for row in rows:
-
-            decision = self.trade_decision_engine.evaluate(
-                row
-            )
-
-
-            if decision.get(
-                "decision"
-            ) == "TRADE":
-
-                trade_ideas.append(
-                    decision
-                )
-
-
-        trade_ideas.sort(
-
-            key=lambda x:
-
-            x.get(
-                "trade_score",
-                0
-            ),
-
-            reverse=True
-
-        )
-
-
-        print()
-
-        print(
-            "🔥 TRADE IDEAS:"
-        )
-
-
-        for idea in trade_ideas[:3]:
-
-            print()
-
-            print(
-                idea.get(
-                    "ticker"
-                )
-            )
-
-            print(
-                "Direction:",
-                idea.get(
-                    "direction"
-                )
-            )
-
-            print(
-                "Score:",
-                idea.get(
-                    "trade_score"
-                )
-            )
-
-            print(
-                "Confidence:",
-                idea.get(
-                    "confidence"
-                )
-            )
-
-            print(
-                "Reasons:",
-                idea.get(
-                    "reasons"
-                )
-            )
 
 
         print()

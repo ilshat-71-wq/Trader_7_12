@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Scanner Engine
 
-Версия 0.3
+Версия 0.2
 
 Назначение:
 - загрузка инструментов
@@ -12,8 +12,6 @@ Scanner Engine
 - расчет оборота
 - рейтинг инструмента
 - Volume Price анализ
-- построение свечей
-- Momentum анализ
 - подготовка торгового результата
 """
 
@@ -24,11 +22,6 @@ from services.instrument_service import InstrumentService
 from services.quote_service import QuoteService
 from services.trade_service import TradeService
 from services.rating_service import RatingService
-from services.candle_service import CandleService
-from services.momentum_service import MomentumService
-
-from scanner.signal_engine import SignalEngine
-from scanner.trade_decision_engine import TradeDecisionEngine
 
 from scanner.volume_price import analyze_volume
 
@@ -47,17 +40,9 @@ class ScannerEngine:
 
         self.rating_service = RatingService()
 
-        self.candle_service = CandleService()
-
-        self.momentum_service = MomentumService()
-
-        self.signal_engine = SignalEngine()
-
-        self.trade_decision_engine = TradeDecisionEngine()
 
 
-
-    # ---------------------------------------------------------
+    # -------------------------------------------------------------
 
     def load(self):
 
@@ -65,7 +50,7 @@ class ScannerEngine:
 
 
 
-    # ---------------------------------------------------------
+    # -------------------------------------------------------------
 
     def scan(self):
 
@@ -155,6 +140,7 @@ class ScannerEngine:
                 )
 
 
+
                 change = float(
 
                     quote.get(
@@ -208,10 +194,7 @@ class ScannerEngine:
 
                         trade.get(
                             "volume",
-                            trade.get(
-                                "quantity",
-                                0
-                            )
+                            0
                         )
 
                     )
@@ -242,7 +225,7 @@ class ScannerEngine:
 
 
                 # -----------------------------------
-                # Rating
+                # Rating Engine
                 # -----------------------------------
 
                 rating = self.rating_service.calculate(
@@ -260,7 +243,7 @@ class ScannerEngine:
 
 
                 # -----------------------------------
-                # Volume Price
+                # Volume Price Analyzer
                 # -----------------------------------
 
                 volume_analysis = analyze_volume(
@@ -274,64 +257,6 @@ class ScannerEngine:
                     average_volume=volume
 
                 )
-
-
-
-                # -----------------------------------
-                # Candle + Momentum
-                # -----------------------------------
-
-                momentum = {
-
-
-                    "momentum_score": 0,
-
-                    "range_position": 0,
-
-                    "signal": ""
-
-                }
-
-
-
-                candles = self.candle_service.build_candles(
-
-                    records,
-
-                    timeframe_minutes=5
-
-                )
-
-
-
-                if candles:
-
-
-                    last_candle = candles[-1]
-
-
-                    momentum = self.momentum_service.analyze(
-
-                        last_candle,
-
-                        average_volume=volume
-
-                    )
-
-
-                    signal_result = self.signal_engine.analyze(
-
-                        quote,
-
-                        last_candle,
-
-                        volume,
-
-                        money_volume,
-
-                        rating
-
-                    )
 
 
 
@@ -351,7 +276,6 @@ class ScannerEngine:
 
                         rating=rating,
 
-
                         volume_ratio=volume_analysis.get(
 
                             "volume_ratio",
@@ -359,7 +283,6 @@ class ScannerEngine:
                             0
 
                         ),
-
 
                         volume_score=volume_analysis.get(
 
@@ -369,8 +292,7 @@ class ScannerEngine:
 
                         ),
 
-
-                        momentum_score=momentum.get(
+                        momentum_score=volume_analysis.get(
 
                             "momentum_score",
 
@@ -378,8 +300,7 @@ class ScannerEngine:
 
                         ),
 
-
-                        range_position=momentum.get(
+                        range_position=volume_analysis.get(
 
                             "range_position",
 
@@ -387,68 +308,11 @@ class ScannerEngine:
 
                         ),
 
-
-                        signal=momentum.get(
+                        signal=volume_analysis.get(
 
                             "signal",
 
-                            "NO_SIGNAL"
-
-                        ),
-
-
-                        trade_score=(
-
-                            signal_result.get(
-                                "trade_score",
-                                0
-                            )
-
-                            if signal_result
-
-                            else 0
-
-                        ),
-
-
-                        confidence=(
-
-                            signal_result.get(
-                                "confidence",
-                                ""
-                            )
-
-                            if signal_result
-
-                            else ""
-
-                        ),
-
-
-                        direction=(
-
-                            signal_result.get(
-                                "direction",
-                                ""
-                            )
-
-                            if signal_result
-
-                            else ""
-
-                        ),
-
-
-                        reasons=(
-
-                            signal_result.get(
-                                "reasons",
-                                []
-                            )
-
-                            if signal_result
-
-                            else []
+                            ""
 
                         )
 
@@ -475,28 +339,17 @@ class ScannerEngine:
 
 
 
-        rows = [
-
-            r for r in rows
-
-            if r.money_volume > 0
-
-        ]
-
-
         rows.sort(
 
             key=lambda x:
 
             (
 
-                x.trade_score,
-
-                x.momentum_score,
-
                 x.rating,
 
-                x.money_volume
+                x.money_volume,
+
+                abs(x.change)
 
             ),
 
@@ -504,89 +357,6 @@ class ScannerEngine:
 
         )
 
-
-
-        # -----------------------------------
-        # Trade Decision Engine
-        # -----------------------------------
-
-        trade_ideas = []
-
-
-        for row in rows:
-
-            decision = self.trade_decision_engine.evaluate(
-                row
-            )
-
-
-            if decision.get(
-                "decision"
-            ) == "TRADE":
-
-                trade_ideas.append(
-                    decision
-                )
-
-
-        trade_ideas.sort(
-
-            key=lambda x:
-
-            x.get(
-                "trade_score",
-                0
-            ),
-
-            reverse=True
-
-        )
-
-
-        print()
-
-        print(
-            "🔥 TRADE IDEAS:"
-        )
-
-
-        for idea in trade_ideas[:3]:
-
-            print()
-
-            print(
-                idea.get(
-                    "ticker"
-                )
-            )
-
-            print(
-                "Direction:",
-                idea.get(
-                    "direction"
-                )
-            )
-
-            print(
-                "Score:",
-                idea.get(
-                    "trade_score"
-                )
-            )
-
-            print(
-                "Confidence:",
-                idea.get(
-                    "confidence"
-                )
-            )
-
-            print(
-                "Reasons:",
-                idea.get(
-                    "reasons"
-                )
-            )
 
 
         print()
@@ -622,23 +392,8 @@ class ScannerEngine:
             )
 
             print(
-                "Trade Score:",
-                row.trade_score
-            )
-
-            print(
-                "Direction:",
-                row.direction
-            )
-
-            print(
-                "Confidence:",
-                row.confidence
-            )
-
-            print(
-                "Reasons:",
-                row.reasons
+                "Volume:",
+                row.volume_ratio
             )
 
             print(
