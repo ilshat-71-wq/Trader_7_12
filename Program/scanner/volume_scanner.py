@@ -20,6 +20,7 @@ from api.bcs_api import BCSAPI
 
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
+from services.trade_score_service import TradeScoreService
 
 
 
@@ -35,6 +36,8 @@ class VolumeScanner:
         self.candle_service = CandleService()
 
         self.momentum_service = MomentumService()
+
+        self.trade_score_service = TradeScoreService()
 
 
 
@@ -278,15 +281,13 @@ class VolumeScanner:
 
         for item in result:
 
-            item["trade_score"] = round(
+            item["trade_score"] = self.trade_score_service.calculate(
 
-                item["volume_score"] * 0.5 +
+                volume_score=item.get("volume_score", 0),
 
-                item["momentum_score"] * 0.3 +
+                momentum_score=item.get("momentum_score", 0),
 
-                (100 if item["signal"] != "NO_SIGNAL" else 0) * 0.2,
-
-                2
+                signal=item.get("signal", "NO_SIGNAL")
 
             )
 
