@@ -20,6 +20,7 @@ from api.bcs_api import BCSAPI
 
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
+from services.volume_score_service import VolumeScoreService
 from services.trade_score_service import TradeScoreService
 
 
@@ -38,6 +39,7 @@ class VolumeScanner:
         self.momentum_service = MomentumService()
 
         self.trade_score_service = TradeScoreService()
+        self.volume_score_service = VolumeScoreService()
 
 
 
@@ -169,6 +171,8 @@ class VolumeScanner:
             previous_high = None
             previous_low = None
 
+
+
             if candles:
 
                 previous_candles = candles[:-1]
@@ -220,13 +224,7 @@ class VolumeScanner:
 
                 volume=int(total_volume),
 
-                average_volume=max(
-
-                    int(total_volume / 2),
-
-                    1
-
-                ),
+                average_volume=average_volume,
 
                 change_percent=change_percent,
 
@@ -235,6 +233,8 @@ class VolumeScanner:
                 high=high
 
             )
+
+
 
 
             if candles:
