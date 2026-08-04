@@ -23,6 +23,7 @@ from services.momentum_service import MomentumService
 from services.volume_score_service import VolumeScoreService
 from services.trade_score_service import TradeScoreService
 from services.diagnostic_service import DiagnosticService
+from services.breakout_service import BreakoutService
 
 
 
@@ -42,6 +43,7 @@ class VolumeScanner:
         self.trade_score_service = TradeScoreService()
         self.diagnostic_service = DiagnosticService()
         self.volume_score_service = VolumeScoreService()
+        self.breakout_service = BreakoutService()
 
 
 
@@ -288,6 +290,22 @@ class VolumeScanner:
 
 
             analysis.update(volume_score)
+
+
+            breakout = self.breakout_service.analyze(
+
+                current_price=current_price,
+
+                previous_high=previous_high,
+
+                previous_low=previous_low,
+
+                volume_ratio=volume_score["volume_ratio"]
+
+            )
+
+
+            analysis.update(breakout)
 
 
 
