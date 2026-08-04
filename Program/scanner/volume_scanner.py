@@ -18,6 +18,9 @@ from scanner.instrument_loader import InstrumentLoader
 from scanner.volume_price import analyze_volume
 from api.bcs_api import BCSAPI
 
+from services.candle_service import CandleService
+from services.momentum_service import MomentumService
+
 
 
 class VolumeScanner:
@@ -28,6 +31,10 @@ class VolumeScanner:
         self.loader = InstrumentLoader()
 
         self.api = BCSAPI()
+
+        self.candle_service = CandleService()
+
+        self.momentum_service = MomentumService()
 
 
 
@@ -148,6 +155,34 @@ class VolumeScanner:
                 continue
 
 
+            candles = self.candle_service.build_candles(
+                records,
+                timeframe_minutes=5
+            )
+
+
+            average_volume = 0
+            average_money_volume = 0
+            previous_high = None
+            previous_low = None
+
+            if candles:
+
+                previous_candles = candles[:-1]
+
+                if previous_candles:
+
+                    vols = [c["volume"] for c in previous_candles if c["volume"] > 0]
+                    money = [c["money_volume"] for c in previous_candles if c["money_volume"] > 0]
+
+                    if vols:
+                        average_volume = sum(vols) / len(vols)
+
+                    if money:
+                        average_money_volume = sum(money) / len(money)
+
+                    previous_high = max(c["high"] for c in previous_candles)
+                    previous_low = min(c["low"] for c in previous_candles)
 
             current_price = prices[0]
 
@@ -197,6 +232,27 @@ class VolumeScanner:
                 high=high
 
             )
+
+
+            if candles:
+
+                momentum = self.momentum_service.analyze(
+
+                    candles[-1],
+
+                    average_volume=average_volume,
+
+                    average_money_volume=average_money_volume,
+
+                    previous_high=previous_high,
+
+                    previous_low=previous_low
+
+                )
+
+                analysis["momentum_score"] = momentum["momentum_score"]
+
+                analysis["signal"] = momentum["signal"]
 
 
 

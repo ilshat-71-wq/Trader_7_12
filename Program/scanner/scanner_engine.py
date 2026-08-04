@@ -258,25 +258,6 @@ class ScannerEngine:
                 )
 
 
-
-                # -----------------------------------
-                # Volume Price
-                # -----------------------------------
-
-                volume_analysis = analyze_volume(
-
-                    ticker=ticker,
-
-                    price=last,
-
-                    volume=volume,
-
-                    average_volume=volume
-
-                )
-
-
-
                 # -----------------------------------
                 # Candle + Momentum
                 # -----------------------------------
@@ -303,6 +284,111 @@ class ScannerEngine:
                 )
 
 
+                # -----------------------------------
+                # Volume baseline + market context
+                # -----------------------------------
+
+                average_volume = 0
+
+                average_money_volume = 0
+
+                previous_high = None
+
+                previous_low = None
+
+
+                if candles:
+
+                    previous_candles = candles[:-1]
+
+
+                    previous_volumes = [
+
+                        c["volume"]
+
+                        for c in previous_candles
+
+                        if c["volume"] > 0
+
+                    ]
+
+
+                    previous_money_volumes = [
+
+                        c["money_volume"]
+
+                        for c in previous_candles
+
+                        if c["money_volume"] > 0
+
+                    ]
+
+
+                    if previous_volumes:
+
+                        average_volume = (
+
+                            sum(previous_volumes)
+
+                            /
+
+                            len(previous_volumes)
+
+                        )
+
+
+                    if previous_money_volumes:
+
+                        average_money_volume = (
+
+                            sum(previous_money_volumes)
+
+                            /
+
+                            len(previous_money_volumes)
+
+                        )
+
+
+                    if previous_candles:
+
+                        previous_high = max(
+
+                            c["high"]
+
+                            for c in previous_candles
+
+                        )
+
+
+                        previous_low = min(
+
+                            c["low"]
+
+                            for c in previous_candles
+
+                        )
+
+
+                # -----------------------------------
+                # Volume Price
+                # -----------------------------------
+
+                volume_analysis = analyze_volume(
+
+                    ticker=ticker,
+
+                    price=last,
+
+                    volume=volume,
+
+                    average_volume=average_volume
+
+                )
+
+
+
+
 
                 if candles:
 
@@ -310,11 +396,35 @@ class ScannerEngine:
                     last_candle = candles[-1]
 
 
+                    print(
+                        "MOMENTUM DEBUG:",
+                        ticker,
+                        "candles=",
+                        len(candles),
+                        "avg_vol=",
+                        average_volume,
+                        "avg_money=",
+                        average_money_volume,
+                        "prev_high=",
+                        previous_high,
+                        "prev_low=",
+                        previous_low,
+                        "last_candle=",
+                        last_candle
+                    )
+
+
                     momentum = self.momentum_service.analyze(
 
                         last_candle,
 
-                        average_volume=volume
+                        average_volume=average_volume,
+
+                        average_money_volume=average_money_volume,
+
+                        previous_high=previous_high,
+
+                        previous_low=previous_low
 
                     )
 
