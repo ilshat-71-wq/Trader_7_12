@@ -3,14 +3,14 @@ Trader_7_12 Pro
 
 Signal Engine
 
-Версия 0.3
+Версия 0.4
 
 Назначение:
 - объединение котировок
 - анализ импульса
-- оценка объема
-- расчет итогового рейтинга
-- подготовка сигналов LONG/SHORT
+- анализ объема
+- анализ breakout
+- итоговый рейтинг сделки
 """
 
 
@@ -23,7 +23,7 @@ class SignalEngine:
 
     def __init__(self):
 
-        self.version = "0.3"
+        self.version = "0.4"
 
         self.signals = []
 
@@ -38,6 +38,11 @@ class SignalEngine:
             quote,
             momentum=None
     ):
+
+        score = 0
+
+        reasons = []
+
 
         change = abs(
             float(
@@ -61,11 +66,8 @@ class SignalEngine:
 
         last = quote.get(
             "last",
-            1
+            0
         )
-
-
-        score = 0
 
 
 
@@ -73,11 +75,21 @@ class SignalEngine:
 
         if change >= 5:
 
-            score += 40
+            score += 35
+
+            reasons.append(
+                "Strong price movement"
+            )
+
 
         elif change >= 3:
 
-            score += 30
+            score += 25
+
+            reasons.append(
+                "Good price movement"
+            )
+
 
         elif change >= 1:
 
@@ -92,23 +104,29 @@ class SignalEngine:
             spread = offer - bid
 
             spread_percent = (
-                spread / last
+
+                spread /
+
+                last
+
             ) * 100
+
 
 
             if spread_percent < 0.2:
 
-                score += 20
+                score += 15
 
-            elif spread_percent < 0.5:
+                reasons.append(
+                    "Tight spread"
+                )
 
-                score += 10
 
 
-
-        # импульс свечи
+        # momentum
 
         if momentum:
+
 
             m_score = momentum.get(
                 "momentum_score",
@@ -116,31 +134,65 @@ class SignalEngine:
             )
 
 
-            if m_score >= 70:
+            if m_score >= 75:
 
-                score += 30
+                score += 25
 
-
-            elif m_score >= 40:
-
-                score += 15
-
-
-            elif m_score <= -70:
-
-                score += 30
+                reasons.append(
+                    "Strong momentum"
+                )
 
 
-            elif m_score <= -40:
+            elif m_score >= 45:
 
                 score += 15
 
 
 
-        return round(
-            min(score,100),
-            1
-        )
+            elif m_score <= -75:
+
+                score += 25
+
+                reasons.append(
+                    "Strong short momentum"
+                )
+
+
+
+            volume_ratio = momentum.get(
+                "volume_ratio",
+                0
+            )
+
+
+            if volume_ratio >= 1.5:
+
+                score += 10
+
+                reasons.append(
+                    "Volume confirmation"
+                )
+
+
+
+            if momentum.get(
+                "true_breakout",
+                False
+            ):
+
+
+                score += 15
+
+                reasons.append(
+                    "Breakout confirmed"
+                )
+
+
+
+        return min(
+            score,
+            100
+        ), reasons
 
 
 
@@ -155,6 +207,7 @@ class SignalEngine:
 
         if momentum:
 
+
             signal = momentum.get(
                 "signal",
                 ""
@@ -164,6 +217,7 @@ class SignalEngine:
             if "LONG" in signal:
 
                 return "LONG"
+
 
 
             if "SHORT" in signal:
@@ -194,55 +248,56 @@ class SignalEngine:
 
     # ---------------------------------------------------------
 
-    def get_status(
-            self,
-            score
-    ):
-
-        if score >= 75:
-
-            return "🔥 TRADE"
-
-
-        if score >= 45:
-
-            return "👀 WATCH"
-
-
-        return "⛔ SKIP"
-
-
-
-    # ---------------------------------------------------------
-
     def analyze(
             self,
             quote,
-            candle=None
+            data=None
     ):
 
 
         momentum_result = None
 
 
-        if candle:
+
+        if data:
 
 
-            momentum_result = self.momentum.analyze(
+            if (
+                "momentum_score" in data
+            ):
 
-                candle
-
-            )
+                momentum_result = data
 
 
+            else:
 
-        score = self.calculate_score(
+                momentum_result = self.momentum.analyze(
+                    data
+                )
+
+
+
+        score, reasons = self.calculate_score(
 
             quote,
 
             momentum_result
 
         )
+
+
+
+        confidence = "LOW"
+
+
+        if score >= 80:
+
+            confidence = "HIGH"
+
+
+        elif score >= 60:
+
+            confidence = "MEDIUM"
 
 
 
@@ -257,14 +312,12 @@ class SignalEngine:
                 ),
 
 
-
             "price":
 
                 quote.get(
                     "last",
                     0
                 ),
-
 
 
             "change":
@@ -275,23 +328,27 @@ class SignalEngine:
                 ),
 
 
-
-            "score":
+            "trade_score":
 
                 score,
-
 
 
             "direction":
 
                 self.get_direction(
-
                     quote,
-
                     momentum_result
-
                 ),
 
+
+            "confidence":
+
+                confidence,
+
+
+            "reasons":
+
+                reasons,
 
 
             "momentum":
@@ -299,14 +356,15 @@ class SignalEngine:
                 momentum_result,
 
 
-
             "status":
 
-                self.get_status(
-
-                    score
-
-                )
+                "🔥 TRADE"
+                if score >= 75
+                else
+                "👀 WATCH"
+                if score >= 45
+                else
+                "⛔ SKIP"
 
         }
 
@@ -325,7 +383,6 @@ class SignalEngine:
 
         for quote in quotes:
 
-
             self.signals.append(
 
                 self.analyze(
@@ -340,7 +397,7 @@ class SignalEngine:
 
             key=lambda x:
 
-            x["score"],
+            x["trade_score"],
 
             reverse=True
 
@@ -348,45 +405,3 @@ class SignalEngine:
 
 
         return self.signals
-
-
-
-    # ---------------------------------------------------------
-
-    def print_report(self):
-
-
-        print()
-
-        print(
-            "====== SIGNAL ENGINE ======"
-        )
-
-
-        for s in self.signals:
-
-
-            print()
-
-            print(
-
-                f"{s['ticker']:8}",
-
-                f"Цена:{s['price']}",
-
-                f"Изм:{s['change']}%",
-
-                f"Рейтинг:{s['score']}",
-
-                s["direction"]
-
-            )
-
-
-            print(
-
-                "Статус:",
-
-                s["status"]
-
-            )
