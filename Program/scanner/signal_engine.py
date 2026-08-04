@@ -36,7 +36,9 @@ class SignalEngine:
     def calculate_score(
             self,
             quote,
-            momentum=None
+            momentum=None,
+            money_volume=0,
+            rating=0
     ):
 
         score = 0
@@ -120,6 +122,56 @@ class SignalEngine:
                 reasons.append(
                     "Tight spread"
                 )
+
+
+
+        # -----------------------------------
+        # Liquidity
+        # денежный оборот
+        # -----------------------------------
+
+        if money_volume >= 1_000_000_000:
+
+            score += 20
+
+            reasons.append(
+                "High liquidity"
+            )
+
+        elif money_volume >= 500_000_000:
+
+            score += 15
+
+            reasons.append(
+                "Good liquidity"
+            )
+
+        elif money_volume >= 100_000_000:
+
+            score += 10
+
+
+        elif money_volume >= 50_000_000:
+
+            score += 5
+
+
+
+        # -----------------------------------
+        # Rating quality
+        # -----------------------------------
+
+        if rating >= 70:
+
+            score += 10
+
+            reasons.append(
+                "High rating"
+            )
+
+        elif rating >= 50:
+
+            score += 5
 
 
 
@@ -284,7 +336,11 @@ class SignalEngine:
 
             quote,
 
-            momentum_result
+            momentum_result,
+
+            money_volume,
+
+            rating
 
         )
 
