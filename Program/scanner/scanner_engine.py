@@ -27,6 +27,8 @@ from services.rating_service import RatingService
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 
+from scanner.signal_engine import SignalEngine
+
 from scanner.volume_price import analyze_volume
 
 
@@ -47,6 +49,8 @@ class ScannerEngine:
         self.candle_service = CandleService()
 
         self.momentum_service = MomentumService()
+
+        self.signal_engine = SignalEngine()
 
 
 
@@ -312,6 +316,21 @@ class ScannerEngine:
                     )
 
 
+                    signal_result = self.signal_engine.analyze(
+
+                        quote,
+
+                        last_candle,
+
+                        volume,
+
+                        money_volume,
+
+                        rating
+
+                    )
+
+
 
                 rows.append(
 
@@ -372,6 +391,62 @@ class ScannerEngine:
 
                             "NO_SIGNAL"
 
+                        ),
+
+
+                        trade_score=(
+
+                            signal_result.get(
+                                "trade_score",
+                                0
+                            )
+
+                            if signal_result
+
+                            else 0
+
+                        ),
+
+
+                        confidence=(
+
+                            signal_result.get(
+                                "confidence",
+                                ""
+                            )
+
+                            if signal_result
+
+                            else ""
+
+                        ),
+
+
+                        direction=(
+
+                            signal_result.get(
+                                "direction",
+                                ""
+                            )
+
+                            if signal_result
+
+                            else ""
+
+                        ),
+
+
+                        reasons=(
+
+                            signal_result.get(
+                                "reasons",
+                                []
+                            )
+
+                            if signal_result
+
+                            else []
+
                         )
 
                     )
@@ -397,19 +472,28 @@ class ScannerEngine:
 
 
 
+        rows = [
+
+            r for r in rows
+
+            if r.money_volume > 0
+
+        ]
+
+
         rows.sort(
 
             key=lambda x:
 
             (
 
-                x.rating,
+                x.trade_score,
 
                 x.momentum_score,
 
-                x.money_volume,
+                x.rating,
 
-                abs(x.change)
+                x.money_volume
 
             ),
 
@@ -449,6 +533,26 @@ class ScannerEngine:
             print(
                 "Rating:",
                 row.rating
+            )
+
+            print(
+                "Trade Score:",
+                row.trade_score
+            )
+
+            print(
+                "Direction:",
+                row.direction
+            )
+
+            print(
+                "Confidence:",
+                row.confidence
+            )
+
+            print(
+                "Reasons:",
+                row.reasons
             )
 
             print(

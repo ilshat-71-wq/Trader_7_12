@@ -251,7 +251,10 @@ class SignalEngine:
     def analyze(
             self,
             quote,
-            data=None
+            data=None,
+            volume=0,
+            money_volume=0,
+            rating=0
     ):
 
 

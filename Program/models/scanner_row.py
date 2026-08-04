@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 
@@ -24,6 +24,7 @@ class ScannerRow:
     rating: int = 0
 
 
+
     # ----------------------------
     # Volume Price Analyzer
     # ----------------------------
@@ -32,6 +33,7 @@ class ScannerRow:
 
 
     volume_score: int = 0
+
 
 
     # ----------------------------
@@ -44,8 +46,24 @@ class ScannerRow:
     range_position: float = 0
 
 
+
     # ----------------------------
-    # Trading signal
+    # Signal Engine
     # ----------------------------
 
+    trade_score: int = 0
+
+
+    direction: str = ""
+
+
+    confidence: str = ""
+
+
+    reasons: list = field(
+        default_factory=list
+    )
+
+
     signal: str = ""
+
