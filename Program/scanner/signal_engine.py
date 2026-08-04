@@ -1,20 +1,50 @@
+"""
+Trader_7_12 Pro
+
+Signal Engine
+
+Версия 0.3
+
+Назначение:
+- объединение котировок
+- анализ импульса
+- оценка объема
+- расчет итогового рейтинга
+- подготовка сигналов LONG/SHORT
+"""
+
+
+from services.momentum_service import MomentumService
+
+
+
 class SignalEngine:
+
 
     def __init__(self):
 
-        self.version = "0.2"
+        self.version = "0.3"
 
         self.signals = []
+
+        self.momentum = MomentumService()
+
 
 
     # ---------------------------------------------------------
 
-    def calculate_score(self, quote):
+    def calculate_score(
+            self,
+            quote,
+            momentum=None
+    ):
 
         change = abs(
-            quote.get(
-                "changeRate",
-                0
+            float(
+                quote.get(
+                    "changeRate",
+                    0
+                )
             )
         )
 
@@ -35,36 +65,31 @@ class SignalEngine:
         )
 
 
-        spread = 0
-
-
-        if bid and offer:
-
-            spread = offer - bid
-
-
         score = 0
 
 
-        # сила движения
+
+        # движение цены
 
         if change >= 5:
 
-            score += 50
+            score += 40
 
         elif change >= 3:
 
-            score += 35
+            score += 30
 
         elif change >= 1:
 
-            score += 20
+            score += 15
 
 
 
-        # качество спреда
+        # спред
 
-        if spread > 0 and last:
+        if bid and offer and last:
+
+            spread = offer - bid
 
             spread_percent = (
                 spread / last
@@ -73,30 +98,79 @@ class SignalEngine:
 
             if spread_percent < 0.2:
 
-                score += 25
+                score += 20
 
             elif spread_percent < 0.5:
+
+                score += 10
+
+
+
+        # импульс свечи
+
+        if momentum:
+
+            m_score = momentum.get(
+                "momentum_score",
+                0
+            )
+
+
+            if m_score >= 70:
+
+                score += 30
+
+
+            elif m_score >= 40:
+
+                score += 15
+
+
+            elif m_score <= -70:
+
+                score += 30
+
+
+            elif m_score <= -40:
 
                 score += 15
 
 
 
-        # волатильность
-
-        if change >= 2:
-
-            score += 10
-
-
         return round(
-            score,
+            min(score,100),
             1
         )
 
 
+
     # ---------------------------------------------------------
 
-    def get_direction(self, quote):
+    def get_direction(
+            self,
+            quote,
+            momentum=None
+    ):
+
+
+        if momentum:
+
+            signal = momentum.get(
+                "signal",
+                ""
+            )
+
+
+            if "LONG" in signal:
+
+                return "LONG"
+
+
+            if "SHORT" in signal:
+
+                return "SHORT"
+
+
 
         change = quote.get(
             "changeRate",
@@ -120,14 +194,17 @@ class SignalEngine:
 
     # ---------------------------------------------------------
 
-    def get_status(self, score):
+    def get_status(
+            self,
+            score
+    ):
 
-        if score >= 70:
+        if score >= 75:
 
             return "🔥 TRADE"
 
 
-        if score >= 40:
+        if score >= 45:
 
             return "👀 WATCH"
 
@@ -138,52 +215,97 @@ class SignalEngine:
 
     # ---------------------------------------------------------
 
-    def analyze(self, quote):
+    def analyze(
+            self,
+            quote,
+            candle=None
+    ):
+
+
+        momentum_result = None
+
+
+        if candle:
+
+
+            momentum_result = self.momentum.analyze(
+
+                candle
+
+            )
+
+
 
         score = self.calculate_score(
-            quote
+
+            quote,
+
+            momentum_result
+
         )
+
 
 
         return {
 
+
             "ticker":
+
                 quote.get(
                     "ticker",
                     ""
                 ),
 
+
+
             "price":
+
                 quote.get(
                     "last",
                     0
                 ),
 
+
+
             "change":
+
                 quote.get(
                     "changeRate",
                     0
                 ),
 
-            "spread":
-                round(
-                    quote.get("offer",0)
-                    -
-                    quote.get("bid",0),
-                    2
-                ),
+
 
             "score":
+
                 score,
 
+
+
             "direction":
+
                 self.get_direction(
-                    quote
+
+                    quote,
+
+                    momentum_result
+
                 ),
 
+
+
+            "momentum":
+
+                momentum_result,
+
+
+
             "status":
+
                 self.get_status(
+
                     score
+
                 )
 
         }
@@ -192,26 +314,36 @@ class SignalEngine:
 
     # ---------------------------------------------------------
 
-    def rank(self, quotes):
+    def rank(
+            self,
+            quotes
+    ):
+
 
         self.signals = []
 
 
         for quote in quotes:
 
-            signal = self.analyze(
-                quote
-            )
 
             self.signals.append(
-                signal
+
+                self.analyze(
+                    quote
+                )
+
             )
+
 
 
         self.signals.sort(
+
             key=lambda x:
-                x["score"],
+
+            x["score"],
+
             reverse=True
+
         )
 
 
@@ -223,6 +355,7 @@ class SignalEngine:
 
     def print_report(self):
 
+
         print()
 
         print(
@@ -232,21 +365,28 @@ class SignalEngine:
 
         for s in self.signals:
 
+
             print()
 
             print(
-                f"{s['ticker']:6}",
-                f"Цена: {s['price']:10}",
-                f"Изм: {s['change']:6.2f}%",
-                f"Спред: {s['spread']:6}",
-                f"Рейтинг: {s['score']:5}",
+
+                f"{s['ticker']:8}",
+
+                f"Цена:{s['price']}",
+
+                f"Изм:{s['change']}%",
+
+                f"Рейтинг:{s['score']}",
+
                 s["direction"]
+
             )
+
 
             print(
+
                 "Статус:",
+
                 s["status"]
+
             )
-
-
-# ---------------------------------------------------------

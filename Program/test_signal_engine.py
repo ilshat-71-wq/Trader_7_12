@@ -1,33 +1,40 @@
 from scanner.signal_engine import SignalEngine
 
 
+engine = SignalEngine()
+
+
 quotes = [
 
     {
-        "ticker": "BMQ6",
-        "last": 83.95,
-        "changeRate": -6.59,
-        "bid": 83.67,
-        "offer": 84.25
+        "ticker": "SBER",
+        "last": 281.40,
+        "changeRate": 2.5,
+        "bid": 281.35,
+        "offer": 281.45
     },
 
     {
-        "ticker": "GDU6",
-        "last": 4044.5,
-        "changeRate": -1.30,
-        "bid": 4044,
-        "offer": 4050
+        "ticker": "LKOH",
+        "last": 7200,
+        "changeRate": -1.8,
+        "bid": 7198,
+        "offer": 7202
     }
 
 ]
 
 
-engine = SignalEngine()
+result = engine.rank(quotes)
 
 
-engine.rank(
-    quotes
-)
+print()
 
+print("RESULT:")
 
-engine.print_report()
+for x in result:
+
+    print()
+
+    print(x)
+
