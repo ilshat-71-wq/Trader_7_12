@@ -3,13 +3,13 @@ Trader_7_12 Pro
 
 Momentum Service
 
-Версия 0.1
+Версия 0.3
 
 Назначение:
 - анализ силы свечи
-- расчет импульса
-- определение направления движения
-- подготовка сигналов для Signal Engine
+- анализ объема
+- анализ денежного оборота
+- настоящий breakout относительно предыдущих уровней
 """
 
 
@@ -18,7 +18,7 @@ class MomentumService:
 
     def __init__(self):
 
-        pass
+        self.version = "0.3"
 
 
 
@@ -27,57 +27,36 @@ class MomentumService:
     def analyze(
             self,
             candle,
-            average_volume=0
+            average_volume=0,
+            average_money_volume=0,
+            previous_high=None,
+            previous_low=None
     ):
-        """
-        Анализ одной свечи
-
-        candle:
-        {
-            open,
-            high,
-            low,
-            close,
-            volume
-        }
-        """
 
 
         open_price = float(
-            candle.get(
-                "open",
-                0
-            )
+            candle.get("open", 0)
         )
-
 
         high = float(
-            candle.get(
-                "high",
-                0
-            )
+            candle.get("high", 0)
         )
-
 
         low = float(
-            candle.get(
-                "low",
-                0
-            )
+            candle.get("low", 0)
         )
-
 
         close = float(
-            candle.get(
-                "close",
-                0
-            )
+            candle.get("close", 0)
         )
 
-
         volume = float(
+            candle.get("volume", 0)
+        )
+
+        money_volume = float(
             candle.get(
-                "volume",
+                "money_volume",
                 0
             )
         )
@@ -92,7 +71,13 @@ class MomentumService:
 
             "range_position": 0,
 
-            "volume_power": 0,
+            "volume_ratio": 0,
+
+            "money_volume_ratio": 0,
+
+            "breakout_strength": 0,
+
+            "true_breakout": False,
 
             "signal": "NO_SIGNAL"
 
@@ -111,18 +96,13 @@ class MomentumService:
 
 
         body = abs(
-
             close - open_price
-
         )
 
 
         candle_power = (
-
             body /
-
             candle_range
-
         ) * 100
 
 
@@ -139,19 +119,61 @@ class MomentumService:
 
 
 
-        volume_power = 0
-
+        volume_ratio = 0
 
 
         if average_volume > 0:
 
-            volume_power = (
+            volume_ratio = (
 
                 volume /
 
                 average_volume
 
-            ) * 100
+            )
+
+
+
+        money_volume_ratio = 0
+
+
+        if average_money_volume > 0:
+
+            money_volume_ratio = (
+
+                money_volume /
+
+                average_money_volume
+
+            )
+
+
+
+        breakout_strength = 0
+
+        true_breakout = False
+
+
+
+        if previous_high is not None:
+
+
+            if close > previous_high:
+
+                breakout_strength = 100
+
+                true_breakout = True
+
+
+
+        if previous_low is not None:
+
+
+            if close < previous_low:
+
+                breakout_strength = -100
+
+                true_breakout = True
 
 
 
@@ -159,45 +181,61 @@ class MomentumService:
 
 
 
-        # направление вверх
-
         if close > open_price:
-
 
             momentum_score += candle_power / 2
 
 
-
             if range_position > 70:
 
-                momentum_score += 25
+                momentum_score += 20
 
 
-
-        # направление вниз
 
         elif close < open_price:
-
 
             momentum_score -= candle_power / 2
 
 
-
             if range_position < 30:
 
-                momentum_score -= 25
+                momentum_score -= 20
 
 
 
-        if volume_power > 150:
+        if volume_ratio >= 2:
 
-            momentum_score += 20
+            momentum_score += 25
 
 
+        elif volume_ratio >= 1.5:
 
-        elif volume_power < 50:
+            momentum_score += 15
+
+
+        elif volume_ratio < 0.7:
 
             momentum_score -= 10
+
+
+
+        if money_volume_ratio >= 2:
+
+            momentum_score += 15
+
+
+
+        if true_breakout:
+
+            momentum_score += (
+
+                25
+
+                if breakout_strength > 0
+
+                else -25
+
+            )
 
 
 
@@ -225,36 +263,35 @@ class MomentumService:
 
 
 
-        if momentum_score >= 70:
+        if momentum_score >= 75:
 
             signal = "STRONG_LONG"
 
 
-        elif momentum_score >= 40:
+        elif momentum_score >= 45:
 
             signal = "LONG_WATCH"
 
 
-        elif momentum_score <= -70:
+        elif momentum_score <= -75:
 
             signal = "STRONG_SHORT"
 
 
-        elif momentum_score <= -40:
+        elif momentum_score <= -45:
 
             signal = "SHORT_WATCH"
 
 
 
-        result = {
+        return {
+
 
             "momentum_score":
-
                 momentum_score,
 
 
             "candle_power":
-
                 round(
                     candle_power,
                     2
@@ -262,27 +299,35 @@ class MomentumService:
 
 
             "range_position":
-
                 round(
                     range_position,
                     2
                 ),
 
 
-            "volume_power":
-
+            "volume_ratio":
                 round(
-                    volume_power,
+                    volume_ratio,
                     2
                 ),
 
 
-            "signal":
+            "money_volume_ratio":
+                round(
+                    money_volume_ratio,
+                    2
+                ),
 
+
+            "breakout_strength":
+                breakout_strength,
+
+
+            "true_breakout":
+                true_breakout,
+
+
+            "signal":
                 signal
 
         }
-
-
-
-        return result

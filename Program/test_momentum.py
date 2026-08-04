@@ -1,7 +1,7 @@
 from services.momentum_service import MomentumService
 
 
-print("🚀 Test Momentum Service")
+print("🚀 Test Momentum Service 0.2")
 
 
 service = MomentumService()
@@ -18,7 +18,9 @@ candle = {
 
     "close": 109,
 
-    "volume": 200000
+    "volume": 200000,
+
+    "money_volume": 21800000
 
 }
 
@@ -28,7 +30,9 @@ result = service.analyze(
 
     candle,
 
-    average_volume=100000
+    average_volume=100000,
+
+    average_money_volume=10000000
 
 )
 
