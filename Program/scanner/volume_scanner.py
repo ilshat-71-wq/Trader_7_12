@@ -22,6 +22,7 @@ from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 from services.volume_score_service import VolumeScoreService
 from services.trade_score_service import TradeScoreService
+from services.diagnostic_service import DiagnosticService
 
 
 
@@ -39,6 +40,7 @@ class VolumeScanner:
         self.momentum_service = MomentumService()
 
         self.trade_score_service = TradeScoreService()
+        self.diagnostic_service = DiagnosticService()
         self.volume_score_service = VolumeScoreService()
 
 
@@ -132,21 +134,21 @@ class VolumeScanner:
                 )
 
 
-                quantity = float(
+                volume = float(
 
-                    trade.get("quantity", 0)
+                    trade.get("volume", 0)
 
                 )
 
 
-                total_volume += quantity
+                total_volume += volume
 
 
                 money_volume += (
 
                     price *
 
-                    quantity
+                    volume
 
                 )
 
@@ -165,8 +167,10 @@ class VolumeScanner:
                 timeframe_minutes=5
             )
 
+            print("DEBUG candles:", len(candles))
 
-            average_volume = 0
+
+            average_volume = total_volume / 5
             average_money_volume = 0
             previous_high = None
             previous_low = None
@@ -176,6 +180,10 @@ class VolumeScanner:
             if candles:
 
                 previous_candles = candles[:-1]
+
+                print("DEBUG previous candles:")
+                for c in previous_candles:
+                    print(c)
 
                 if previous_candles:
 
@@ -266,6 +274,22 @@ class VolumeScanner:
             analysis["money_volume_real"] = money_volume
 
 
+            volume_score = self.volume_score_service.calculate(
+
+                volume=int(total_volume),
+
+                average_volume=average_volume,
+
+                money_volume=money_volume,
+
+                average_money_volume=average_money_volume
+
+            )
+
+
+            analysis.update(volume_score)
+
+
 
             result.append(
 
@@ -312,6 +336,8 @@ class VolumeScanner:
 
 
         for item in result[:10]:
+
+            self.diagnostic_service.print_analysis(item)
 
             print(
 
