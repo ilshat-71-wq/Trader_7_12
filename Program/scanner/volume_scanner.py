@@ -32,6 +32,8 @@ from services.trade_idea_service import TradeIdeaService
 from services.signal_engine import SignalEngine
 from services.trade_ranker_service import TradeRankerService
 from services.portfolio_manager_service import PortfolioManagerService
+from services.trade_journal_service import TradeJournalService
+from services.outcome_manager_service import OutcomeManagerService
 
 
 
@@ -60,6 +62,8 @@ class VolumeScanner:
         self.signal_engine = SignalEngine()
         self.trade_ranker_service = TradeRankerService()
         self.portfolio_manager_service = PortfolioManagerService()
+        self.trade_journal_service = TradeJournalService()
+        self.outcome_manager_service = OutcomeManagerService()
 
 
 
@@ -553,6 +557,17 @@ class VolumeScanner:
             max_positions=3
 
         )
+
+
+        # ---------------------------------------------------------
+        # TRADE JOURNAL
+        # ---------------------------------------------------------
+
+        for item in ranked_trades:
+
+            self.trade_journal_service.add_trade_idea(
+                item
+            )
 
 
         result.sort(
