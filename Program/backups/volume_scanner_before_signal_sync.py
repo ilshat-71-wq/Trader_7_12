@@ -383,8 +383,6 @@ class VolumeScanner:
 
             item["final_signal"] = signal_result["signal"]
 
-            item["signal"] = signal_result["signal"]
-
             item["confidence"] = signal_result["confidence"]
 
             item["reasons"] = signal_result["reasons"]

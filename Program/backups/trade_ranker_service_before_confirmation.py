@@ -26,6 +26,8 @@ class TradeRankerService:
             signal = (
                 item.get("final_signal")
                 or item.get("momentum_signal")
+                or item.get("trade_signal")
+                or item.get("signal")
                 or "NO_SIGNAL"
             )
 
@@ -67,11 +69,6 @@ class TradeRankerService:
         ranked.sort(
 
             key=lambda x: (
-
-                x.get(
-                    "confirmation_score",
-                    0
-                ),
 
                 x.get(
                     "confidence",

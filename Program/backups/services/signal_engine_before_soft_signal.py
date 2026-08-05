@@ -137,9 +137,9 @@ class SignalEngine:
 
 
         elif (
-            confidence >= 50
-            and trade_score >= 55
-            and breakout_quality_score >= 20
+            confidence >= 55
+            and trade_score >= 60
+            and breakout_quality_score >= 25
             and abs(momentum_score) >= 20
         ):
 

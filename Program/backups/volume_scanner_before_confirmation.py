@@ -27,7 +27,6 @@ from services.breakout_service import BreakoutService
 from services.breakout_quality_service import BreakoutQualityService
 from services.trade_plan_service import TradePlanService
 from services.trade_filter_service import TradeFilterService
-from services.trade_confirmation_service import TradeConfirmationService
 from services.trade_idea_service import TradeIdeaService
 from services.signal_engine import SignalEngine
 from services.trade_ranker_service import TradeRankerService
@@ -55,7 +54,6 @@ class VolumeScanner:
         self.breakout_quality_service = BreakoutQualityService()
         self.trade_plan_service = TradePlanService()
         self.trade_filter_service = TradeFilterService()
-        self.trade_confirmation_service = TradeConfirmationService()
         self.trade_idea_service = TradeIdeaService()
         self.signal_engine = SignalEngine()
         self.trade_ranker_service = TradeRankerService()
@@ -383,8 +381,6 @@ class VolumeScanner:
 
             item["final_signal"] = signal_result["signal"]
 
-            item["signal"] = signal_result["signal"]
-
             item["confidence"] = signal_result["confidence"]
 
             item["reasons"] = signal_result["reasons"]
@@ -446,56 +442,6 @@ class VolumeScanner:
             )
 
             item["trade_filter_reason"] = filter_result["reason"]
-
-
-            confirmation = self.trade_confirmation_service.confirm(
-
-                confidence=signal_result["confidence"],
-
-                trade_score=item.get(
-                    "trade_score",
-                    {}
-                ).get(
-                    "trade_score",
-                    0
-                ),
-
-                rr_ratio=item.get(
-                    "rr_ratio",
-                    0
-                ),
-
-                breakout_quality=item.get(
-                    "breakout_quality_score",
-                    item.get(
-                        "breakout_quality",
-                        0
-                    )
-                ),
-
-                volume_ratio=item.get(
-                    "volume_ratio",
-                    0
-                ),
-
-                momentum_signal=item.get(
-                    "momentum_signal",
-                    "NO_SIGNAL"
-                ),
-
-                trade_allowed=item.get(
-                    "trade_allowed",
-                    False
-                )
-
-            )
-
-
-            item["confirmation_score"] = confirmation["confirmation_score"]
-
-            item["confirmation_decision"] = confirmation["decision"]
-
-            item["confirmation_reasons"] = confirmation["reasons"]
 
 
             trade_idea = self.trade_idea_service.generate(item)
