@@ -29,6 +29,7 @@ from services.trade_plan_service import TradePlanService
 from services.trade_filter_service import TradeFilterService
 from services.trade_idea_service import TradeIdeaService
 from services.signal_engine import SignalEngine
+from services.trade_ranker_service import TradeRankerService
 
 
 
@@ -54,6 +55,7 @@ class VolumeScanner:
         self.trade_filter_service = TradeFilterService()
         self.trade_idea_service = TradeIdeaService()
         self.signal_engine = SignalEngine()
+        self.trade_ranker_service = TradeRankerService()
 
 
 
@@ -444,6 +446,20 @@ class VolumeScanner:
 
             item["trade_idea"] = trade_idea
 
+
+        # ---------------------------------------------------------
+        # TOP TRADE RANKING
+        # ---------------------------------------------------------
+
+        ranked_trades = self.trade_ranker_service.rank(
+
+            result,
+
+            limit=3
+
+        )
+
+
         result.sort(
 
             key=lambda x:
@@ -466,11 +482,11 @@ class VolumeScanner:
         print()
 
         print(
-            "🔥 TOP LIQUIDITY"
+            "🔥 TOP TRADE IDEAS"
         )
 
 
-        for item in result[:10]:
+        for item in ranked_trades:
 
             self.diagnostic_service.print_analysis(item)
 
