@@ -3,13 +3,14 @@ Trader_7_12 Pro
 
 Trade Score Service
 
-Версия 0.1
+Версия 0.2
 
 Назначение:
 - итоговый торговый рейтинг
-- объединение объёма
-- импульса
-- сигнала
+- баланс объёма
+- импульс
+- пробой
+- сила сигнала
 """
 
 
@@ -20,10 +21,12 @@ class TradeScoreService:
         self,
         volume_score=0,
         momentum_score=0,
+        breakout_score=0,
         signal="NO_SIGNAL"
     ):
 
-        signal_bonus = 0
+
+        signal_score = 0
 
 
         if signal in (
@@ -31,7 +34,7 @@ class TradeScoreService:
             "STRONG_SHORT"
         ):
 
-            signal_bonus = 100
+            signal_score = 100
 
 
         elif signal in (
@@ -39,26 +42,69 @@ class TradeScoreService:
             "SHORT_WATCH"
         ):
 
-            signal_bonus = 50
+            signal_score = 70
 
+
+        elif signal in (
+            "EARLY_LONG",
+            "EARLY_SHORT"
+        ):
+
+            signal_score = 50
 
 
         score = (
 
-            volume_score * 0.5
+            volume_score * 0.30
 
             +
 
-            abs(momentum_score) * 0.3
+            abs(momentum_score) * 0.30
 
             +
 
-            signal_bonus * 0.2
+            breakout_score * 0.25
+
+            +
+
+            signal_score * 0.15
 
         )
 
 
-        return round(
-            score,
-            2
-        )
+        if score > 100:
+
+            score = 100
+
+
+        if score >= 90:
+
+            grade = "TRADE_READY"
+
+
+        elif score >= 75:
+
+            grade = "WATCH"
+
+
+        elif score >= 50:
+
+            grade = "DEVELOPING"
+
+
+        else:
+
+            grade = "IGNORE"
+
+
+
+        return {
+
+            "trade_score": round(
+                score,
+                2
+            ),
+
+            "trade_grade": grade
+
+        }

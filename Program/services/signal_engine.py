@@ -33,10 +33,18 @@ class SignalEngine:
             0
         )
 
-        trade_score = analysis.get(
+        trade_score_data = analysis.get(
             "trade_score",
             0
         )
+
+        if isinstance(trade_score_data, dict):
+            trade_score = trade_score_data.get(
+                "trade_score",
+                0
+            )
+        else:
+            trade_score = trade_score_data
 
 
         breakout_quality_score = analysis.get(

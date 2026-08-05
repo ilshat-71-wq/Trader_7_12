@@ -362,12 +362,7 @@ class VolumeScanner:
 
                 momentum_score=item.get("momentum_score", 0),
 
-                signal=item.get("momentum_signal", "NO_SIGNAL"),
-
-                breakout_score=item.get(
-                    "breakout_score",
-                    0
-                )
+                signal=item.get("momentum_signal", "NO_SIGNAL")
 
             )
 
@@ -380,6 +375,30 @@ class VolumeScanner:
             item["confidence"] = signal_result["confidence"]
 
             item["reasons"] = signal_result["reasons"]
+
+
+            filter_result = self.trade_filter_service.check(
+
+                signal=signal_result["signal"],
+
+                confidence=signal_result["confidence"],
+
+                breakout_quality=item.get(
+                    "breakout_quality",
+                    0
+                ),
+
+                trade_score=item.get(
+                    "trade_score",
+                    0
+                )
+
+            )
+
+
+            item["trade_allowed"] = filter_result["allowed"]
+
+            item["trade_filter_reason"] = filter_result["reason"]
 
 
             trade_plan = self.trade_plan_service.generate_plan(
@@ -403,43 +422,6 @@ class VolumeScanner:
 
             item.update(trade_plan)
 
-
-            filter_result = self.trade_filter_service.check(
-
-                signal=signal_result["signal"],
-
-                confidence=signal_result["confidence"],
-
-                breakout_score=item.get(
-                    "breakout_score",
-                    0
-                ),
-
-                trade_score=item.get(
-                    "trade_score",
-                    {}
-                ).get(
-                    "trade_score",
-                    0
-                ),
-
-                rr_ratio=item.get(
-                    "rr_ratio",
-                    0
-                )
-
-            )
-
-
-            item["trade_allowed"] = filter_result["allowed"]
-
-            item["trade_filter_level"] = filter_result.get(
-                "level"
-            )
-
-            item["trade_filter_reason"] = filter_result["reason"]
-
-
             trade_idea = self.trade_idea_service.generate(item)
 
             item["trade_idea"] = trade_idea
@@ -448,14 +430,7 @@ class VolumeScanner:
 
             key=lambda x:
 
-            (
-                x.get("trade_score", {}).get("score", 0)
-                if isinstance(
-                    x.get("trade_score"),
-                    dict
-                )
-                else x.get("trade_score", 0)
-            ),
+            x["trade_score"],
 
             reverse=True
 
