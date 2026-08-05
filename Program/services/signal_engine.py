@@ -39,13 +39,21 @@ class SignalEngine:
         )
 
 
+        breakout_quality_score = analysis.get(
+            "breakout_quality_score",
+            0
+        )
+
+
         confidence = round(
 
-            trade_score * 0.6
+            trade_score * 0.5
             +
-            breakout_score * 0.2
+            breakout_score * 0.15
             +
-            abs(momentum_score) * 0.2,
+            abs(momentum_score) * 0.2
+            +
+            breakout_quality_score * 0.15,
 
             1
 
@@ -93,7 +101,13 @@ class SignalEngine:
 
 
 
-        if confidence >= 85:
+        breakout_quality_score = analysis.get(
+            "breakout_quality_score",
+            0
+        )
+
+
+        if confidence >= 85 and breakout_quality_score >= 50:
 
             if momentum_score >= 0:
 
@@ -105,7 +119,7 @@ class SignalEngine:
 
 
 
-        elif confidence >= 70:
+        elif confidence >= 70 and breakout_quality_score >= 35:
 
             if momentum_score >= 0:
 
@@ -117,7 +131,7 @@ class SignalEngine:
 
 
 
-        elif confidence >= 55:
+        elif confidence >= 55 and breakout_quality_score >= 25:
 
             if momentum_score >= 0:
 

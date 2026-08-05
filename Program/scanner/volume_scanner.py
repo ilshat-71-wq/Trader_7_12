@@ -24,6 +24,7 @@ from services.volume_score_service import VolumeScoreService
 from services.trade_score_service import TradeScoreService
 from services.diagnostic_service import DiagnosticService
 from services.breakout_service import BreakoutService
+from services.breakout_quality_service import BreakoutQualityService
 from services.signal_engine import SignalEngine
 
 
@@ -45,6 +46,7 @@ class VolumeScanner:
         self.diagnostic_service = DiagnosticService()
         self.volume_score_service = VolumeScoreService()
         self.breakout_service = BreakoutService()
+        self.breakout_quality_service = BreakoutQualityService()
         self.signal_engine = SignalEngine()
 
 
@@ -308,6 +310,28 @@ class VolumeScanner:
 
 
             analysis.update(breakout)
+
+            current_candle = candles[-1]
+
+            breakout_quality = self.breakout_quality_service.analyze(
+
+                current_price=current_price,
+
+                open_price=current_candle["open"],
+
+                high_price=current_candle["high"],
+
+                low_price=current_candle["low"],
+
+                close_price=current_candle["close"],
+
+                previous_high=previous_high,
+
+                previous_low=previous_low
+
+            )
+
+            analysis.update(breakout_quality)
 
 
 

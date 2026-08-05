@@ -74,6 +74,16 @@ class DiagnosticService:
 
 
         print(
+            "Breakout quality:",
+            item.get("breakout_quality_score", 0)
+        )
+
+
+        print(
+        )
+
+
+        print(
             "Trade score:",
             item.get("trade_score")
         )
