@@ -7,8 +7,8 @@ Diagnostic Service
 
 Назначение:
 - прозрачность торгового рейтинга
-- анализ компонентов score
-- вывод финального торгового решения
+- вывод компонентов score
+- вывод финального сигнала
 """
 
 
@@ -20,7 +20,6 @@ class DiagnosticService:
         print()
 
         print("🔎 DIAGNOSTIC")
-
 
         print(
             "Ticker:",
@@ -62,14 +61,8 @@ class DiagnosticService:
 
 
         print(
-            "Momentum signal:",
-            item.get("momentum_signal", "N/A")
-        )
-
-
-        print(
             "Breakout score:",
-            item.get("breakout_score", 0)
+            item.get("breakout_score")
         )
 
 
@@ -83,16 +76,21 @@ class DiagnosticService:
 
         print("🚦 FINAL SIGNAL")
 
-
         print(
             "Signal:",
-            item.get("final_signal", "NO_SIGNAL")
+            item.get(
+                "final_signal",
+                item.get("signal")
+            )
         )
 
 
         print(
             "Confidence:",
-            item.get("confidence")
+            item.get(
+                "confidence",
+                0
+            )
         )
 
 

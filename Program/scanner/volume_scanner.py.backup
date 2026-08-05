@@ -267,7 +267,7 @@ class VolumeScanner:
 
                 analysis["momentum_score"] = momentum["momentum_score"]
 
-                analysis["momentum_signal"] = momentum["signal"]
+                analysis["signal"] = momentum["signal"]
 
 
 
@@ -331,19 +331,10 @@ class VolumeScanner:
 
                 momentum_score=item.get("momentum_score", 0),
 
-                signal=item.get("momentum_signal", "NO_SIGNAL")
+                signal=item.get("signal", "NO_SIGNAL")
 
             )
 
-
-
-            signal_result = self.signal_engine.analyze(item)
-
-            item["final_signal"] = signal_result["signal"]
-
-            item["confidence"] = signal_result["confidence"]
-
-            item["reasons"] = signal_result["reasons"]
 
         result.sort(
 
@@ -396,7 +387,7 @@ class VolumeScanner:
 
                 "signal:",
 
-                item["final_signal"]
+                item["signal"]
 
             )
 

@@ -3,11 +3,11 @@ Trader_7_12 Pro
 
 Breakout Service
 
-Версия 0.1
+Версия 0.2
 
 Назначение:
 - анализ пробоя уровней
-- определение направления
+- поиск развития движения
 - оценка силы пробоя
 """
 
@@ -24,14 +24,25 @@ class BreakoutService:
     ):
 
         score = 0
+
         direction = "NO_SIGNAL"
+
         breakout = False
 
+        state = "NO_SIGNAL"
+
+
+        # -----------------------------
+        # CONFIRMED BREAKOUT
+        # -----------------------------
 
         if previous_high and current_price > previous_high:
 
             breakout = True
+
             direction = "LONG"
+
+            state = "CONFIRMED"
 
             score += 50
 
@@ -39,19 +50,61 @@ class BreakoutService:
         elif previous_low and current_price < previous_low:
 
             breakout = True
+
             direction = "SHORT"
+
+            state = "CONFIRMED"
 
             score += 50
 
 
+        # -----------------------------
+        # DEVELOPING BREAKOUT
+        # -----------------------------
 
-        if volume_ratio >= 2:
+        elif previous_high:
+
+            distance = current_price / previous_high
+
+            if distance >= 0.995:
+
+                direction = "LONG"
+
+                state = "DEVELOPING"
+
+                score += 25
+
+
+        elif previous_low:
+
+            distance = current_price / previous_low
+
+            if distance <= 1.005:
+
+                direction = "SHORT"
+
+                state = "DEVELOPING"
+
+                score += 25
+
+
+        # -----------------------------
+        # VOLUME CONFIRMATION
+        # -----------------------------
+
+        if volume_ratio >= 5:
 
             score += 30
 
-        elif volume_ratio >= 1.5:
+
+        elif volume_ratio >= 3:
 
             score += 20
+
+
+        elif volume_ratio >= 2:
+
+            score += 10
 
 
 
@@ -60,6 +113,8 @@ class BreakoutService:
             "breakout": breakout,
 
             "direction": direction,
+
+            "breakout_state": state,
 
             "breakout_score": min(
                 score,

@@ -1,0 +1,62 @@
+"""
+Trader_7_12 Pro
+
+Signal Engine
+
+Версия 0.1
+
+Назначение:
+- объединение всех сигналов
+- расчет итоговой уверенности
+- объяснение причин входа
+"""
+
+
+class SignalEngine:
+
+    def analyze(self, analysis):
+
+        volume_score = analysis.get("volume_score", 0)
+        momentum_score = analysis.get("momentum_score", 0)
+        breakout_score = analysis.get("breakout_score", 0)
+        trade_score = analysis.get("trade_score", 0)
+
+        confidence = round(
+            trade_score * 0.6 +
+            breakout_score * 0.2 +
+            momentum_score * 0.2,
+            1
+        )
+
+        reasons = []
+
+        if volume_score >= 80:
+            reasons.append("High volume")
+
+        if momentum_score >= 60:
+            reasons.append("Strong momentum")
+        elif momentum_score <= -60:
+            reasons.append("Strong downside momentum")
+
+        if breakout_score >= 70:
+            reasons.append("Breakout confirmed")
+
+        signal = "NO_SIGNAL"
+
+        if confidence >= 90:
+            if momentum_score >= 0:
+                signal = "STRONG_LONG"
+            else:
+                signal = "STRONG_SHORT"
+
+        elif confidence >= 75:
+            if momentum_score >= 0:
+                signal = "LONG_WATCH"
+            else:
+                signal = "SHORT_WATCH"
+
+        return {
+            "signal": signal,
+            "confidence": confidence,
+            "reasons": reasons
+        }
