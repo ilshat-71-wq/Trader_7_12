@@ -94,6 +94,10 @@ class TradeJournalService:
                 "final_signal"
             ),
 
+            "side": item.get(
+                "side"
+            ),
+
             "confidence": item.get(
                 "confidence",
                 0
@@ -148,12 +152,42 @@ class TradeJournalService:
         }
 
 
+        # ---------------------------------------------------------
+        # DEDUPLICATION
+        # ---------------------------------------------------------
+        # Не создаем несколько одинаковых идей по одному инструменту.
+        # Обновляем существующую WATCHING/OPEN идею.
+
         for trade in journal:
 
             if (
                 trade.get("ticker") == record.get("ticker")
-                and trade.get("status") == "OPEN"
+                and trade.get("signal") == record.get("signal")
+                and trade.get("decision") == record.get("decision")
             ):
+
+                trade.update(
+                    {
+                        "time": record.get("time"),
+                        "signal": record.get("signal"),
+                        "side": record.get("side"),
+                        "status": record.get("status"),
+                        "confidence": record.get("confidence"),
+                        "confirmation_score": record.get("confirmation_score"),
+                        "decision": record.get("decision"),
+                        "entry": record.get("entry"),
+                        "stop": record.get("stop"),
+                        "target": record.get("target"),
+                        "rr": record.get("rr"),
+                        "reasons": record.get("reasons"),
+                    }
+                )
+
+
+                self._save(
+                    journal
+                )
+
 
                 return trade
 
