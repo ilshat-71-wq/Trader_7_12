@@ -33,6 +33,7 @@ from services.signal_engine import SignalEngine
 from services.trade_ranker_service import TradeRankerService
 from services.portfolio_manager_service import PortfolioManagerService
 from services.trade_journal_service import TradeJournalService
+from services.trade_outcome_service import TradeOutcomeService
 from services.outcome_manager_service import OutcomeManagerService
 
 
@@ -63,7 +64,13 @@ class VolumeScanner:
         self.trade_ranker_service = TradeRankerService()
         self.portfolio_manager_service = PortfolioManagerService()
         self.trade_journal_service = TradeJournalService()
-        self.outcome_manager_service = OutcomeManagerService()
+
+        self.trade_outcome_service = TradeOutcomeService()
+
+        self.outcome_manager_service = OutcomeManagerService(
+            self.trade_journal_service,
+            self.trade_outcome_service
+        )
 
 
 
@@ -559,11 +566,80 @@ class VolumeScanner:
         )
 
 
+        print("DEBUG RANKED TRADES AFTER PORTFOLIO")
+
+        for x in ranked_trades:
+            print(
+                x.get("ticker"),
+                x.get("final_signal"),
+                x.get("confirmation_decision"),
+                x.get("confidence")
+            )
+
+
+        # ---------------------------------------------------------
+        # OUTCOME MANAGER CHECK OPEN TRADES
+        # ---------------------------------------------------------
+
+        market_prices = {}
+
+        for item in result:
+
+            ticker = item.get("ticker")
+            price = item.get("current_price")
+
+            if ticker and price:
+                market_prices[ticker] = price
+
+
+        print("DEBUG MARKET PRICES:")
+        print(market_prices)
+
+
+        closed_trades = (
+            self.outcome_manager_service
+            .evaluate_open_trades(
+                market_prices
+            )
+        )
+
+
+        if closed_trades:
+
+            print(
+                "📌 CLOSED TRADES:",
+                len(closed_trades)
+            )
+
+
         # ---------------------------------------------------------
         # TRADE JOURNAL
         # ---------------------------------------------------------
 
         for item in ranked_trades:
+
+            decision = (
+                item.get(
+                    "confirmation_decision",
+                    ""
+                )
+                or
+                item.get(
+                    "trade_score",
+                    {}
+                ).get(
+                    "trade_grade",
+                    ""
+                )
+            )
+
+            if decision not in (
+                "WATCH",
+                "CONFIRMED",
+                "ENTER"
+            ):
+                continue
+
 
             self.trade_journal_service.add_trade_idea(
                 item

@@ -65,6 +65,20 @@ class TradeJournalService:
         item
     ):
 
+        decision = item.get(
+            "confirmation_decision",
+            ""
+        )
+
+
+        if decision not in (
+            "WATCH",
+            "CONFIRMED",
+            "ENTER"
+        ):
+            return None
+
+
         journal = self._load()
 
 
@@ -99,11 +113,11 @@ class TradeJournalService:
             ),
 
             "stop": item.get(
-                "stop"
+                "stop_loss"
             ),
 
             "target": item.get(
-                "target"
+                "take_profit"
             ),
 
             "rr": item.get(
@@ -111,12 +125,37 @@ class TradeJournalService:
                 0
             ),
 
+            "status": (
+                "OPEN"
+                if decision in (
+                    "ENTER",
+                    "CONFIRMED"
+                )
+                else "WATCHING"
+            ),
+
+            "exit_price": None,
+
+            "result": None,
+
+            "profit_points": None,
+
             "reasons": item.get(
                 "reasons",
                 []
             )
 
         }
+
+
+        for trade in journal:
+
+            if (
+                trade.get("ticker") == record.get("ticker")
+                and trade.get("status") == "OPEN"
+            ):
+
+                return trade
 
 
         journal.append(
@@ -136,3 +175,30 @@ class TradeJournalService:
     def get_history(self):
 
         return self._load()
+
+
+    def update_trade(
+        self,
+        index,
+        update_data
+    ):
+
+        journal = self._load()
+
+
+        if index < 0 or index >= len(journal):
+
+            return None
+
+
+        journal[index].update(
+            update_data
+        )
+
+
+        self._save(
+            journal
+        )
+
+
+        return journal[index]

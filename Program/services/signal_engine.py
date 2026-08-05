@@ -108,6 +108,23 @@ class SignalEngine:
 
 
 
+        print(
+            "DEBUG SIGNAL ENGINE:",
+            "volume",
+            volume_score,
+            "trade",
+            trade_score,
+            "momentum",
+            momentum_score,
+            "breakout",
+            breakout_score,
+            "quality",
+            breakout_quality_score,
+            "confidence",
+            confidence
+        )
+
+
         signal = "NO_SIGNAL"
 
 

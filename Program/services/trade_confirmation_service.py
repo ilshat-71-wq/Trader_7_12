@@ -72,11 +72,11 @@ class TradeConfirmationService:
             score += 10
             reasons.append("Trade allowed")
 
-        if score >= 90:
+        if score >= 80:
             decision = "EXECUTE"
-        elif score >= 75:
+        elif score >= 65:
             decision = "WATCH"
-        elif score >= 60:
+        elif score >= 50:
             decision = "EARLY"
         else:
             decision = "REJECT"
