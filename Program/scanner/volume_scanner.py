@@ -367,6 +367,23 @@ class VolumeScanner:
 
 
 
+        if not result:
+
+            print(
+                "\n🌙 MARKET CLOSED / NO DATA"
+            )
+
+            print(
+                "Scanner finished."
+            )
+
+            print(
+                "No active trade data available."
+            )
+
+            return []
+
+
         # ---------------------------------------------------------
         # Итоговый торговый рейтинг
         # ---------------------------------------------------------
