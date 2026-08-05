@@ -25,6 +25,7 @@ from services.trade_score_service import TradeScoreService
 from services.diagnostic_service import DiagnosticService
 from services.breakout_service import BreakoutService
 from services.breakout_quality_service import BreakoutQualityService
+from services.trade_plan_service import TradePlanService
 from services.signal_engine import SignalEngine
 
 
@@ -47,6 +48,7 @@ class VolumeScanner:
         self.volume_score_service = VolumeScoreService()
         self.breakout_service = BreakoutService()
         self.breakout_quality_service = BreakoutQualityService()
+        self.trade_plan_service = TradePlanService()
         self.signal_engine = SignalEngine()
 
 
@@ -332,6 +334,7 @@ class VolumeScanner:
             )
 
             analysis.update(breakout_quality)
+            analysis["current_price"] = current_price
 
 
 
@@ -368,6 +371,28 @@ class VolumeScanner:
             item["confidence"] = signal_result["confidence"]
 
             item["reasons"] = signal_result["reasons"]
+
+
+            trade_plan = self.trade_plan_service.generate_plan(
+
+                current_price=item["current_price"],
+
+                signal=signal_result["signal"],
+
+                momentum_score=item.get(
+                    "momentum_score",
+                    0
+                ),
+
+                breakout_score=item.get(
+                    "breakout_score",
+                    0
+                )
+
+            )
+
+
+            item.update(trade_plan)
 
         result.sort(
 
@@ -420,7 +445,15 @@ class VolumeScanner:
 
                 "signal:",
 
-                item["final_signal"]
+                item["final_signal"],
+
+                "ENTRY:", item.get("entry"),
+
+                "STOP:", item.get("stop_loss"),
+
+                "TARGET:", item.get("take_profit"),
+
+                "RR:", item.get("rr_ratio")
 
             )
 
