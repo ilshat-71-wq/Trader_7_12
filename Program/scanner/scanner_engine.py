@@ -378,6 +378,7 @@ class ScannerEngine:
 
                     ticker=ticker,
 
+
                     price=last,
 
                     volume=volume,
@@ -450,6 +451,13 @@ class ScannerEngine:
                     ScannerRow(
 
                         ticker=ticker,
+
+                        lot_size=int(
+                            instrument.get(
+                                "lotSize",
+                                1
+                            )
+                        ),
 
                         last=last,
 
