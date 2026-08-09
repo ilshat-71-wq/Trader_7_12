@@ -415,6 +415,26 @@ class ScannerEngine:
                     )
 
 
+                    if ticker == "PLZL":
+                        print("=== PLZL CANDLES DEBUG ===")
+                        for i, c in enumerate(candles):
+                            print(
+                                i,
+                                "time=", c.get("time"),
+                                "open=", c.get("open"),
+                                "high=", c.get("high"),
+                                "low=", c.get("low"),
+                                "close=", c.get("close"),
+                                "volume=", c.get("volume"),
+                                "money_volume=", c.get("money_volume")
+                            )
+
+                        print(
+                            "PLZL BASELINE:",
+                            "average_volume=", average_volume,
+                            "average_money_volume=", average_money_volume
+                        )
+
                     momentum = self.momentum_service.analyze(
 
                         last_candle,

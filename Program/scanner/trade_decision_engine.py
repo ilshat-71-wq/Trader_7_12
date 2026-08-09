@@ -1,22 +1,24 @@
 """
 Trader_7_12 Pro
 
-Trade Decision Engine v0.7
+Trade Decision Engine v0.8
 
 Назначение:
+
 - финальный отбор торговых возможностей
 - фильтрация слабых сигналов
-- поиск лучших торговых идей
+- пропуск только реальных торговых сигналов
+- защита от TRADE при NO_SIGNAL
+- проверка объема
+- проверка согласованности направления
 """
 
 
 class TradeDecisionEngine:
 
-
     def __init__(self):
 
-        self.version = "0.7"
-
+        self.version = "0.8"
 
 
     # -------------------------------------------------
@@ -28,15 +30,11 @@ class TradeDecisionEngine:
         row
     ):
 
-        reasons = []
-
-
         score = getattr(
             row,
             "trade_score",
             0
         )
-
 
         rating = getattr(
             row,
@@ -44,13 +42,11 @@ class TradeDecisionEngine:
             0
         )
 
-
         momentum = getattr(
             row,
             "momentum_score",
             0
         )
-
 
         money_volume = getattr(
             row,
@@ -58,13 +54,11 @@ class TradeDecisionEngine:
             0
         )
 
-
         volume_ratio = getattr(
             row,
             "volume_ratio",
             0
         )
-
 
         direction = getattr(
             row,
@@ -72,20 +66,90 @@ class TradeDecisionEngine:
             ""
         )
 
+        signal = getattr(
+            row,
+            "signal",
+            ""
+        )
 
 
-        # -----------------------------
-        # Базовые фильтры
-        # -----------------------------
+        # -------------------------------------------------
+        # 1. Направление обязательно
+        # -------------------------------------------------
 
-        if not direction:
+        if direction not in (
+            "LONG",
+            "SHORT"
+        ):
 
             return {
                 "decision": "SKIP",
-                "reason": "No direction"
+                "reason": "No valid direction"
             }
 
 
+        # -------------------------------------------------
+        # 2. NO_SIGNAL не может быть TRADE
+        # -------------------------------------------------
+
+        active_signals = (
+            "LONG_WATCH",
+            "EARLY_LONG",
+            "STRONG_LONG",
+            "SHORT_WATCH",
+            "EARLY_SHORT",
+            "STRONG_SHORT"
+        )
+
+
+        if signal not in active_signals:
+
+            return {
+                "decision": "SKIP",
+                "reason": "No active signal"
+            }
+
+
+        # -------------------------------------------------
+        # 3. Проверяем согласованность направления
+        # -------------------------------------------------
+
+        long_signals = (
+            "LONG_WATCH",
+            "EARLY_LONG",
+            "STRONG_LONG"
+        )
+
+        short_signals = (
+            "SHORT_WATCH",
+            "EARLY_SHORT",
+            "STRONG_SHORT"
+        )
+
+
+        if signal in long_signals:
+
+            if direction != "LONG":
+
+                return {
+                    "decision": "SKIP",
+                    "reason": "Direction mismatch"
+                }
+
+
+        if signal in short_signals:
+
+            if direction != "SHORT":
+
+                return {
+                    "decision": "SKIP",
+                    "reason": "Direction mismatch"
+                }
+
+
+        # -------------------------------------------------
+        # 4. Минимальный score
+        # -------------------------------------------------
 
         if score < 35:
 
@@ -95,6 +159,9 @@ class TradeDecisionEngine:
             }
 
 
+        # -------------------------------------------------
+        # 5. Минимальный rating
+        # -------------------------------------------------
 
         if rating < 40:
 
@@ -104,6 +171,9 @@ class TradeDecisionEngine:
             }
 
 
+        # -------------------------------------------------
+        # 6. Минимальная ликвидность
+        # -------------------------------------------------
 
         if money_volume < 3_000_000:
 
@@ -113,6 +183,9 @@ class TradeDecisionEngine:
             }
 
 
+        # -------------------------------------------------
+        # 7. Расширение объема
+        # -------------------------------------------------
 
         if volume_ratio < 1.2:
 
@@ -122,19 +195,45 @@ class TradeDecisionEngine:
             }
 
 
+        # -------------------------------------------------
+        # 8. Проверка momentum
+        # -------------------------------------------------
 
-        # -----------------------------
+        if direction == "LONG":
+
+            if momentum < 45:
+
+                return {
+                    "decision": "SKIP",
+                    "reason": "Weak long momentum"
+                }
+
+
+        if direction == "SHORT":
+
+            if momentum > -45:
+
+                return {
+                    "decision": "SKIP",
+                    "reason": "Weak short momentum"
+                }
+
+
+        # -------------------------------------------------
         # Подтверждения
-        # -----------------------------
+        # -------------------------------------------------
 
-        if momentum >= 45:
+        reasons = []
+
+
+        if direction == "LONG":
 
             reasons.append(
                 "Positive momentum"
             )
 
 
-        elif momentum <= -45:
+        elif direction == "SHORT":
 
             reasons.append(
                 "Negative momentum"
@@ -155,6 +254,16 @@ class TradeDecisionEngine:
             )
 
 
+        elif volume_ratio >= 1.2:
+
+            reasons.append(
+                "Volume expansion"
+            )
+
+
+        # -------------------------------------------------
+        # Confidence
+        # -------------------------------------------------
 
         confidence = "LOW"
 
@@ -163,56 +272,55 @@ class TradeDecisionEngine:
 
             confidence = "HIGH"
 
-
         elif score >= 60:
 
             confidence = "MEDIUM"
 
 
+        # -------------------------------------------------
+        # Финальное решение
+        # -------------------------------------------------
 
         return {
 
-
             "decision":
-
                 "TRADE",
 
-
             "ticker":
-
                 getattr(
                     row,
                     "ticker",
                     ""
                 ),
 
-
             "direction":
-
                 direction,
 
+            "signal":
+                signal,
 
             "trade_score":
-
                 score,
 
-
             "rating":
-
                 rating,
 
+            "momentum_score":
+                momentum,
+
+            "volume_ratio":
+                volume_ratio,
+
+            "money_volume":
+                money_volume,
 
             "confidence":
-
                 confidence,
 
-
             "reasons":
-
                 reasons
 
         }
-
 
 
     # -------------------------------------------------
@@ -223,7 +331,6 @@ class TradeDecisionEngine:
         self,
         rows
     ):
-
 
         results = []
 
@@ -244,14 +351,25 @@ class TradeDecisionEngine:
                 )
 
 
-
         results.sort(
 
-            key=lambda x:
+            key=lambda x: (
 
-            x.get(
-                "trade_score",
-                0
+                x.get(
+                    "trade_score",
+                    0
+                ),
+
+                x.get(
+                    "momentum_score",
+                    0
+                ),
+
+                x.get(
+                    "rating",
+                    0
+                )
+
             ),
 
             reverse=True
