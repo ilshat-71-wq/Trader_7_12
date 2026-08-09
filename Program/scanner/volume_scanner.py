@@ -11,7 +11,7 @@ Volume Scanner
 - денежный оборот
 - сила объёма
 - импульс цены
-- Relative Strength относительно MX
+- Relative Strength относительно IMOEX
 - breakout
 - торговый рейтинг
 - подготовка данных для Signal Engine
@@ -187,17 +187,18 @@ class VolumeScanner:
         # RELATIVE STRENGTH BENCHMARK
         # ---------------------------------------------------------
         #
-        # Benchmark = ближайший MX futures.
+        # Benchmark = ближайший IMOEX futures.
         #
+        # IMOEXF является фьючерсом на Индекс Мосбиржи.
         # Используем уже собранные market_data.
-        # Повторного запроса MMU6 нет.
+        # Повторного запроса benchmark нет.
         # ---------------------------------------------------------
 
         benchmark = next(
             (
                 item
                 for item in instruments
-                if item.get("asset") == "MX"
+                if item.get("asset") == "IMOEX"
                 and item.get("ticker") in market_data
             ),
             None
@@ -251,7 +252,7 @@ class VolumeScanner:
 
             print()
             print(
-                "⚠️ RS benchmark MX not found"
+                "⚠️ RS benchmark IMOEX not found"
             )
 
         # ---------------------------------------------------------
@@ -469,7 +470,10 @@ class VolumeScanner:
 
                 if len(common_times) >= 2:
 
-                    previous_time = common_times[-2]
+                    # RS WINDOW:
+                    # сравниваем весь доступный общий интервал,
+                    # а не только последнюю 5-минутную свечу.
+                    previous_time = common_times[0]
                     current_time = common_times[-1]
 
                     benchmark_previous = (
@@ -527,6 +531,21 @@ class VolumeScanner:
 
                     analysis.update(
                         relative_strength
+                    )
+
+                    print(
+                        "DEBUG RS VALUES:",
+                        ticker,
+                        "instrument_return=",
+                        relative_strength.get("instrument_return"),
+                        "benchmark_return=",
+                        relative_strength.get("benchmark_return"),
+                        "relative_strength=",
+                        relative_strength.get("relative_strength"),
+                        "score=",
+                        relative_strength.get("relative_strength_score"),
+                        "signal=",
+                        relative_strength.get("relative_strength_signal")
                     )
 
                 else:

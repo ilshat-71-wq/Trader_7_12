@@ -56,6 +56,59 @@ class SignalEngine:
         )
 
 
+        # ---------------------------------------------------------
+        # RELATIVE STRENGTH vs IMOEX
+        # ---------------------------------------------------------
+
+        relative_strength_score = float(
+            analysis.get(
+                "relative_strength_score",
+                50.0
+            )
+        )
+
+        relative_strength_signal = analysis.get(
+            "relative_strength_signal",
+            "NEUTRAL"
+        )
+
+        # RS confirmation:
+        # LONG  + positive RS -> bonus
+        # LONG  + negative RS -> penalty
+        # SHORT + negative RS -> bonus
+        # SHORT + positive RS -> penalty
+
+        rs_adjustment = 0.0
+
+        if momentum_score > 0:
+
+            if relative_strength_signal in (
+                "STRONG",
+                "POSITIVE"
+            ):
+                rs_adjustment = 10.0
+
+            elif relative_strength_signal in (
+                "WEAK",
+                "NEGATIVE"
+            ):
+                rs_adjustment = -10.0
+
+        elif momentum_score < 0:
+
+            if relative_strength_signal in (
+                "WEAK",
+                "NEGATIVE"
+            ):
+                rs_adjustment = 10.0
+
+            elif relative_strength_signal in (
+                "STRONG",
+                "POSITIVE"
+            ):
+                rs_adjustment = -10.0
+
+
         confidence = round(
 
             trade_score * 0.5
@@ -64,7 +117,8 @@ class SignalEngine:
             +
             abs(momentum_score) * 0.2
             +
-            breakout_quality_score * 0.15,
+            breakout_quality_score * 0.15
+              + rs_adjustment,
 
             1
 
@@ -91,6 +145,30 @@ class SignalEngine:
 
             reasons.append(
                 "Strong downside momentum"
+            )
+
+
+        if relative_strength_signal == "STRONG":
+            reasons.append(
+                "Relative strength confirms market strength"
+            )
+
+        elif relative_strength_signal == "POSITIVE":
+            reasons.append(
+                "Relative strength supports direction"
+            )
+
+        elif relative_strength_signal == "WEAK":
+            reasons.append(
+                "Relative weakness supports downside"
+            )
+
+        elif relative_strength_signal == "NEGATIVE":
+            reasons.append(
+                "Relative weakness conflicts with long direction"
+                if momentum_score > 0
+                else
+                "Relative weakness supports short direction"
             )
 
 
