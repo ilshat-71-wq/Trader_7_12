@@ -462,7 +462,17 @@ class VolumeScanner:
                 rr_ratio=item.get(
                     "rr_ratio",
                     0
-                )
+                ),
+
+                    momentum_score=item.get(
+                        "momentum_score",
+                        0
+                    ),
+
+                    volume_score=item.get(
+                        "volume_score",
+                        0
+                    )
 
             )
 
