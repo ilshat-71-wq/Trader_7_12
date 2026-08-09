@@ -26,9 +26,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 
-from market.market_data import MarketData
 
-from scanner.market_scanner import MarketScanner
+from scanner.volume_scanner import VolumeScanner
 
 
 
@@ -52,10 +51,9 @@ class TraderWindow(QWidget):
         )
 
 
-        self.market = MarketData()
 
 
-        self.scanner = MarketScanner()
+        self.scanner = VolumeScanner()
 
 
         self.init_ui()
@@ -122,91 +120,128 @@ class TraderWindow(QWidget):
 
 
     def run_market_scan(self):
-
-
         self.result_box.setText(
-            "📡 Загрузка данных рынка BCS..."
+            "📡 Сканирование рынка BCS...\n\n"
+            "VolumeScanner анализирует ликвидность, объём, momentum и breakout."
         )
 
-
-        instruments = self.market.update()
-
-
-
-        if not instruments:
-
-
+        try:
+            results = self.scanner.scan()
+        except Exception as exc:
             self.result_box.setText(
-                "⚠️ Данные рынка отсутствуют"
+                "❌ Ошибка сканирования:\n\n"
+                f"{exc}"
             )
-
             return
 
+        if not results:
+            self.result_box.setText(
+                "⚠️ Торговые данные отсутствуют."
+            )
+            return
 
+        # Показываем только реальные торговые идеи.
+        tradable = [
+            item for item in results
+            if item.get("signal") not in ("NO_SIGNAL", None)
+        ]
 
-        results = self.scanner.scan(
-            instruments
+        if not tradable:
+            self.result_box.setText(
+                "🌙 Активных торговых идей нет.\n\n"
+                "Scanner завершил анализ без сигнала."
+            )
+            return
+
+        tradable.sort(
+            key=lambda item: float(item.get("confidence", 0)),
+            reverse=True
         )
 
+        output = [
+            "================================",
+            "TRADER_7_12 PRO",
+            "TOP TRADE IDEAS",
+            "================================",
+            "",
+            f"Всего результатов: {len(results)}",
+            f"Торговых идей: {len(tradable)}",
+            ""
+        ]
 
+        for index, item in enumerate(tradable[:3], start=1):
+            ticker = item.get("ticker", "UNKNOWN")
+            signal = item.get(
+                "final_signal",
+                item.get("signal", "NO_SIGNAL")
+            )
 
-        output = """
+            confidence = item.get("confidence", 0)
+            trade_score = item.get("trade_score", {})
+            trade_score_value = (
+                trade_score.get("trade_score", 0)
+                if isinstance(trade_score, dict)
+                else trade_score
+            )
 
-================================
+            entry = item.get("entry")
+            stop = item.get("stop_loss", item.get("stop"))
+            target = item.get("target")
 
-TRADER_7_12 MARKET SCANNER
+            rr = item.get("rr_ratio", 0)
 
-================================
+            volume_score = item.get("volume_score", 0)
+            volume_ratio = item.get("volume_ratio", 0)
+            momentum = item.get("momentum_score", 0)
+            breakout = item.get("breakout_score", 0)
 
+            confirmation = item.get(
+                "confirmation_decision",
+                "UNKNOWN"
+            )
 
-Получено инструментов:
-{}
+            output.extend([
+                "",
+                f"#{index}  {ticker}",
+                "--------------------------------",
+                f"Signal:       {signal}",
+                f"Confidence:   {confidence}",
+                f"Trade score:  {trade_score_value}",
+                f"Confirmation: {confirmation}",
+                "",
+                f"Entry:        {entry}",
+                f"Stop:         {stop}",
+                f"Target:       {target}",
+                f"RR:           {rr}",
+                "",
+                f"Volume score: {volume_score}",
+                f"Volume ratio: {volume_ratio}",
+                f"Momentum:     {momentum}",
+                f"Breakout:     {breakout}",
+            ])
 
-================================
+            reasons = item.get("reasons", [])
 
-""".format(
-            len(instruments)
-        )
+            if reasons:
+                output.extend([
+                    "",
+                    "Reasons:"
+                ])
 
+                for reason in reasons:
+                    output.append(f"- {reason}")
 
+            trade_idea = item.get("trade_idea")
 
-        for item in results:
+            if trade_idea:
+                output.extend([
+                    "",
+                    f"Idea: {trade_idea}"
+                ])
 
+            output.append("")
 
-            output += f"""
-
-Инструмент:
-{item.get('ticker')}
-
-
-Цена:
-{item.get('price')} ₽
-
-
-Оборот:
-{item.get('money_volume',0):,.0f} ₽
-
-
-Объем:
-{item.get('volume_ratio',0)} x
-
-
-Рейтинг:
-{item.get('volume_score',0)} / 100
-
-
-------------------------------
-
-"""
-
-
-
-        self.result_box.setText(
-            output
-        )
-
-
-
+        self.result_box.setText("\n".join(output))
 
 
 

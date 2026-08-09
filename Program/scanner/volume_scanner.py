@@ -75,13 +75,28 @@ class VolumeScanner:
 
 
     def start(self):
+        """
+        Compatibility wrapper для старого CLI-запуска.
+        """
+        return self.scan()
+
+
+    def scan(self, instruments=None):
+        """
+        Основной публичный метод VolumeScanner.
+
+        Если instruments переданы извне — используем их.
+        Если нет — загружаем самостоятельно.
+        """
+
 
         print(
             "📊 Volume Scanner v0.5"
         )
 
 
-        instruments = self.loader.load()
+        if instruments is None:
+            instruments = self.loader.load()
 
 
         if not instruments:
