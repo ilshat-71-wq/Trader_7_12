@@ -91,6 +91,8 @@ class InstrumentLoader:
                 asset = "GOLD"
 
 
+            elif "IMOEX" in text or "ИНДЕКС МОСБИРЖИ" in text:
+                asset = "IMOEX"
             elif "MX" in text:
 
                 asset = "MX"

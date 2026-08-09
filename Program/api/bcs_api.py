@@ -406,7 +406,7 @@ class BCSAPI:
         now = datetime.utcnow()
 
         start = now - timedelta(
-            minutes=30
+            minutes=60
         )
 
         payload = {

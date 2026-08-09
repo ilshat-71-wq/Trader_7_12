@@ -177,6 +177,40 @@ class VolumeScanner:
                 timeframe_minutes=5
             )
 
+            # -------------------------------------------------
+            # DATA QUALITY FILTER
+            # -------------------------------------------------
+            #
+            # Не допускаем в анализ инструменты с недостаточным
+            # количеством рыночных данных.
+            #
+            # Минимум:
+            #   20 trades
+            #   4 закрытые 5M candles
+            #
+            # Это защищает scanner от случайных сигналов
+            # на инструментах с несколькими сделками.
+            # -------------------------------------------------
+
+            MIN_TRADES = 20
+            MIN_CANDLES = 4
+
+            if (
+                len(records) < MIN_TRADES
+                or len(candles) < MIN_CANDLES
+            ):
+
+                print(
+                    "⚠️ DATA QUALITY SKIP:",
+                    ticker,
+                    "trades:",
+                    len(records),
+                    "candles:",
+                    len(candles)
+                )
+
+                continue
+
             market_data[ticker] = {
                 "item": item,
                 "records": records,
@@ -260,6 +294,21 @@ class VolumeScanner:
         # ---------------------------------------------------------
 
         for ticker, data in market_data.items():
+
+            # -----------------------------------------------------
+            # BENCHMARK НЕ ЯВЛЯЕТСЯ ТОРГОВЫМ ИНСТРУМЕНТОМ
+            # IMOEXF используется только для Relative Strength.
+            # -----------------------------------------------------
+
+            if benchmark and ticker == benchmark_ticker:
+
+                print(
+                    "⏭️ RS benchmark skip:",
+                    ticker
+                )
+
+                continue
+
 
             item = data["item"]
 
@@ -712,20 +761,20 @@ class VolumeScanner:
 
                         previous_low=previous_low
 
+                        )
                     )
-                )
 
                 analysis.update(
                     breakout_quality
                 )
 
-            analysis["current_price"] = (
-                current_price
-            )
+                analysis["current_price"] = (
+                    current_price
+                )
 
-            result.append(
-                analysis
-            )
+                result.append(
+                    analysis
+                )
 
         # ---------------------------------------------------------
         # NO DATA

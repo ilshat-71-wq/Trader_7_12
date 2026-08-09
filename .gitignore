@@ -56,3 +56,8 @@ env/
 # --------------------------------------------------
 
 Data/
+
+# Local development backups
+*.before_*
+*.backup_*
+*.rs_error
