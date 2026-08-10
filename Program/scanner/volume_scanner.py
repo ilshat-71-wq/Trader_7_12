@@ -95,7 +95,7 @@ class VolumeScanner:
         )
 
         if instruments is None:
-            instruments = self.loader.load()
+            instruments = self.loader.load_trading_universe()
 
         if not instruments:
 
@@ -139,7 +139,7 @@ class VolumeScanner:
             "================ MARKET DATA COLLECTION ================"
         )
 
-        for item in instruments[:50]:
+        for item in instruments:
 
             ticker = item.get(
                 "ticker"
@@ -889,6 +889,14 @@ class VolumeScanner:
                         "confidence"
                     ],
 
+                    breakout_quality=item.get(
+                        "breakout_quality_score",
+                        item.get(
+                            "breakout_quality",
+                            0
+                        )
+                    ),
+
                     breakout_score=item.get(
                         "breakout_score",
                         0
@@ -932,6 +940,23 @@ class VolumeScanner:
 
             item["trade_filter_reason"] = (
                 filter_result["reason"]
+            )
+
+            print(
+                "DEBUG FILTER RESULT:",
+                item.get("ticker"),
+                "allowed=", item.get("trade_allowed"),
+                "level=", item.get("trade_filter_level"),
+                "reason=", item.get("trade_filter_reason"),
+                "confidence=", signal_result.get("confidence"),
+                "trade_score=", item.get("trade_score"),
+                "breakout_score=", item.get("breakout_score"),
+                "breakout_quality=", item.get(
+                    "breakout_quality_score",
+                    item.get("breakout_quality", 0)
+                ),
+                "volume_score=", item.get("volume_score"),
+                "rr=", item.get("rr_ratio")
             )
 
             confirmation = (
@@ -978,6 +1003,12 @@ class VolumeScanner:
                     )
 
                 )
+            )
+
+            print(
+                "DEBUG CONFIRMATION RESULT:",
+                item.get("ticker"),
+                confirmation
             )
 
             item["confirmation_score"] = (

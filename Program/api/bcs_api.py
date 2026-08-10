@@ -405,71 +405,154 @@ class BCSAPI:
 
         now = datetime.utcnow()
 
-        start = now - timedelta(
-            minutes=60
-        )
+        # -------------------------------------------------
+        # BCS API: MAXIMUM 1 HOUR PER REQUEST
+        # -------------------------------------------------
+        #
+        # BCS не разрешает запрашивать /last-trades
+        # более чем за 1 час одним запросом.
+        #
+        # Поэтому собираем последние 4 часа четырьмя
+        # последовательными запросами по 1 часу.
+        # -------------------------------------------------
 
-        payload = {
+        records = []
 
-            "ticker": ticker,
+        for hour_index in range(4):
 
-            "classCode": class_code,
-
-            "startDateTime": start.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            ),
-
-            "endDateTime": now.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
+            end_time = (
+                now - timedelta(
+                    hours=hour_index
+                )
             )
 
-        }
+            start_time = (
+                end_time - timedelta(
+                    hours=1
+                )
+            )
 
+            payload = {
 
-        print("TRADE PAYLOAD:")
-        print(payload)
+                "ticker":
+                    ticker,
 
+                "classCode":
+                    class_code,
 
-        r = RequestHelper.post(
+                "startDateTime":
+                    start_time.strftime(
+                        "%Y-%m-%dT%H:%M:%S.000Z"
+                    ),
 
-            url,
+                "endDateTime":
+                    end_time.strftime(
+                        "%Y-%m-%dT%H:%M:%S.000Z"
+                    )
 
-            headers={
+            }
 
-                **self.headers(),
+            print(
+                "TRADE PAYLOAD:",
+                payload
+            )
 
-                "Content-Type":
-                    "application/json"
+            r = RequestHelper.post(
 
-            },
+                url,
 
-            json=payload
+                headers={
 
+                    **self.headers(),
+
+                    "Content-Type":
+                        "application/json"
+
+                },
+
+                json=payload
+
+            )
+
+            print(
+                "Trades status:",
+                r.status_code
+            )
+
+            print(
+                "Trades raw:",
+                r.text[:500]
+            )
+
+            if r.status_code != 200:
+                continue
+
+            try:
+
+                data = r.json()
+
+            except ValueError:
+
+                continue
+
+            chunk = data.get(
+                "records",
+                []
+            )
+
+            if chunk:
+
+                records.extend(
+                    chunk
+                )
+
+        # -------------------------------------------------
+        # REMOVE DUPLICATES
+        # -------------------------------------------------
+
+        unique_records = []
+
+        seen = set()
+
+        for record in records:
+
+            key = (
+                record.get("time"),
+                record.get("price"),
+                record.get("volume")
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            unique_records.append(
+                record
+            )
+
+        # -------------------------------------------------
+        # SORT CHRONOLOGICALLY
+        # -------------------------------------------------
+
+        unique_records.sort(
+            key=lambda x: x.get(
+                "time",
+                ""
+            )
         )
-
 
         print(
-            "Trades status:",
-            r.status_code
+            "TRADES COLLECTED:",
+            ticker,
+            class_code,
+            len(unique_records)
         )
-
-
-        print(
-            "Trades raw:",
-            r.text[:500]
-        )
-
-
-        if r.status_code == 200:
-
-            return r.json()
-
 
         return {
-            "records": []
+            "records":
+                unique_records
         }
-
-
 
     # ---------------------------------------------------------
 

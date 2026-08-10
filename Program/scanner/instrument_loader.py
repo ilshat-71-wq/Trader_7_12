@@ -7,61 +7,53 @@ class InstrumentLoader:
 
         self.api = BCSAPI()
 
-
+    # ---------------------------------------------------------
+    # ACTIVE CONTRACTS
     # ---------------------------------------------------------
 
     def get_active_contracts(self):
 
         return self.load()
 
-
-
+    # ---------------------------------------------------------
+    # LOAD
     # ---------------------------------------------------------
 
     def load(self):
 
         print("📚 Загрузка ближайших фьючерсов")
 
-
         if not self.api.authorize():
 
             return []
 
-
         futures = self.api.get_instruments(
             "FUTURES"
         )
-
 
         print(
             "Всего фьючерсов:",
             len(futures)
         )
 
-
         instruments = []
 
-
         for item in futures:
-
 
             ticker = item.get(
                 "ticker",
                 ""
             )
 
-
             name = item.get(
                 "shortName",
                 ""
             )
 
-
             display = item.get(
                 "displayName",
                 ""
             )
-
 
             text = (
                 ticker
@@ -71,75 +63,84 @@ class InstrumentLoader:
                 + display
             ).upper()
 
-
-
             asset = None
 
+            # -------------------------------------------------
+            # BRENT
+            # -------------------------------------------------
 
             if "BR" in text:
 
                 asset = "BR"
 
+            # -------------------------------------------------
+            # SI
+            # -------------------------------------------------
 
-            elif "MTSI" in text or ticker.startswith("SI"):
+            elif (
+                "MTSI" in text
+                or ticker.startswith("SI")
+            ):
 
                 asset = "SI"
 
+            # -------------------------------------------------
+            # GOLD
+            # -------------------------------------------------
 
             elif "GOLD" in text:
 
                 asset = "GOLD"
 
+            # -------------------------------------------------
+            # IMOEX
+            # -------------------------------------------------
 
-            elif "IMOEX" in text or "ИНДЕКС МОСБИРЖИ" in text:
+            elif (
+                "IMOEX" in text
+                or "ИНДЕКС МОСБИРЖИ" in text
+            ):
+
                 asset = "IMOEX"
+
+            # -------------------------------------------------
+            # MX
+            # -------------------------------------------------
+
             elif "MX" in text:
 
                 asset = "MX"
 
+            if not asset:
 
+                continue
 
-            if asset:
+            boards = item.get(
+                "boards",
+                []
+            )
 
+            class_code = ""
 
-                boards = item.get(
-                    "boards",
-                    []
+            if boards:
+
+                class_code = boards[0].get(
+                    "classCode",
+                    ""
                 )
 
-
-                class_code = ""
-
-
-                if boards:
-
-                    class_code = boards[0].get(
-                        "classCode",
-                        ""
-                    )
-
-
-                instruments.append(
-
-                    {
-                        "asset": asset,
-
-                        "ticker": ticker,
-
-                        "classCode": class_code,
-
-                        "name": name
-
-                    }
-
-                )
-
-
+            instruments.append(
+                {
+                    "asset": asset,
+                    "ticker": ticker,
+                    "classCode": class_code,
+                    "name": name
+                }
+            )
 
         result = self.select_nearest(
             instruments
         )
-
 
         print()
 
@@ -147,20 +148,20 @@ class InstrumentLoader:
             "====== ACTIVE CONTRACTS ======"
         )
 
-
         for item in result:
 
             print(item)
 
-
-
         return result
 
-
-
+    # ---------------------------------------------------------
+    # CONTRACT DATE
     # ---------------------------------------------------------
 
-    def contract_date(self, ticker):
+    def contract_date(
+        self,
+        ticker
+    ):
 
         months = {
 
@@ -179,93 +180,288 @@ class InstrumentLoader:
 
         }
 
+        if not ticker:
 
-        if len(ticker) < 2:
+            return None
 
-            return 999999
+        # Обычно тикер содержит код месяца
+        # перед последними двумя цифрами года.
+        #
+        # Например:
+        # BMU6
+        # GDU6
+        # MMU6
+        # MTU6
 
+        try:
 
-        month_code = ticker[-2]
+            month_code = ticker[-2]
+            year_code = ticker[-1]
 
-        year_code = ticker[-1]
+        except IndexError:
 
+            return None
 
         month = months.get(
-            month_code,
-            12
+            month_code
         )
 
+        if month is None:
 
-        year = 2020 + int(
-            year_code
-        )
+            return None
 
+        try:
+
+            year = 2020 + int(
+                year_code
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            return None
 
         return (
-
-            year * 100
-            +
+            year,
             month
-
         )
 
-
-
+    # ---------------------------------------------------------
+    # SELECT NEAREST
     # ---------------------------------------------------------
 
-    def select_nearest(self, instruments):
+    def select_nearest(
+        self,
+        instruments
+    ):
 
+        if not instruments:
 
-        selected = {}
+            return []
 
+        result = []
 
-        for item in instruments:
+        assets = {
+            "BR",
+            "GOLD",
+            "IMOEX",
+            "MX",
+            "SI"
+        }
 
+        for asset in assets:
 
-            asset = item["asset"]
+            candidates = [
+                item
+                for item in instruments
+                if item.get("asset") == asset
+            ]
 
+            if not candidates:
 
-            if asset not in selected:
+                continue
 
-                selected[asset] = item
+            candidates_with_date = []
 
+            for item in candidates:
+
+                date = self.contract_date(
+                    item.get("ticker")
+                )
+
+                if date:
+
+                    candidates_with_date.append(
+                        (
+                            date,
+                            item
+                        )
+                    )
+
+            if candidates_with_date:
+
+                candidates_with_date.sort(
+                    key=lambda x: x[0]
+                )
+
+                result.append(
+                    candidates_with_date[0][1]
+                )
 
             else:
 
-                old = selected[asset]
+                result.append(
+                    candidates[0]
+                )
 
+        return result
 
-                if self.contract_date(
-                    item["ticker"]
-                ) < self.contract_date(
-                    old["ticker"]
-                ):
+    # ---------------------------------------------------------
+    # LOAD STOCKS
+    # ---------------------------------------------------------
 
-                    selected[asset] = item
+    def load_stocks(self):
 
-
-
-        return list(
-            selected.values()
+        print(
+            "📚 Загрузка акций TQBR"
         )
 
+        if not self.api.authorize():
 
+            return []
 
-# ---------------------------------------------------------
+        stocks = self.api.get_instruments(
+            "STOCK"
+        )
 
+        if not stocks:
 
-if __name__ == "__main__":
+            print(
+                "❌ Акции не загружены"
+            )
 
+            return []
 
-    loader = InstrumentLoader()
+        result = []
 
+        seen = set()
 
-    data = loader.get_active_contracts()
+        for item in stocks:
 
+            ticker = item.get(
+                "ticker",
+                ""
+            )
 
-    print()
+            if not ticker:
 
-    print(
-        "Всего активных:",
-        len(data)
-    )
+                continue
+
+            if ticker in seen:
+
+                continue
+
+            seen.add(
+                ticker
+            )
+
+            boards = item.get(
+                "boards",
+                []
+            )
+
+            class_code = "TQBR"
+
+            if boards:
+
+                for board in boards:
+
+                    board_class = board.get(
+                        "classCode",
+                        ""
+                    )
+
+                    if board_class:
+
+                        class_code = board_class
+
+                        if board_class == "TQBR":
+
+                            break
+
+            result.append(
+                {
+                    "asset": "STOCK",
+                    "ticker": ticker,
+                    "classCode": class_code,
+                    "name": item.get(
+                        "shortName",
+                        ""
+                    ),
+                    "displayName": item.get(
+                        "displayName",
+                        ""
+                    ),
+                    "lotSize": item.get(
+                        "lotSize",
+                        1
+                    )
+                }
+            )
+
+        print(
+            "Всего акций:",
+            len(result)
+        )
+
+        return result
+
+    # ---------------------------------------------------------
+    # LOAD TRADING UNIVERSE
+    # ---------------------------------------------------------
+
+    def load_trading_universe(self):
+
+        print()
+        print(
+            "📚 Загрузка торгового universe"
+        )
+
+        stocks = self.load_stocks()
+
+        futures = self.load()
+
+        benchmark = next(
+            (
+                item
+                for item in futures
+                if item.get("asset") == "IMOEX"
+                and item.get("ticker") == "IMOEXF"
+            ),
+            None
+        )
+
+        result = list(stocks)
+
+        if benchmark:
+
+            result.append(
+                {
+                    "asset": "IMOEX",
+                    "ticker": benchmark.get(
+                        "ticker"
+                    ),
+                    "classCode": benchmark.get(
+                        "classCode",
+                        "SPBFUT"
+                    ),
+                    "name": benchmark.get(
+                        "name",
+                        "IMOEXF"
+                    )
+                }
+            )
+
+        print()
+        print(
+            "====== TRADING UNIVERSE ======"
+        )
+
+        print(
+            "Stocks:",
+            len(stocks)
+        )
+
+        print(
+            "Benchmark:",
+            benchmark
+        )
+
+        print(
+            "Total:",
+            len(result)
+        )
+
+        return result

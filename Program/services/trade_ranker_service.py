@@ -3,13 +3,14 @@ Trader_7_12 Pro
 
 Trade Ranker Service
 
-Версия 0.3
+Версия 0.4
 
 Назначение:
 
 - выбор лучших торговых идей
 - фильтрация слабых сигналов
-- приоритет EXECUTE > WATCH > EARLY
+- обязательный STRONG_TRADE filter gate
+- приоритет EXECUTE > WATCH
 - сортировка по качеству
 - подготовка TOP кандидатов
 """
@@ -22,9 +23,9 @@ class TradeRankerService:
         ranked = []
 
         confirmation_priority = {
-            "EXECUTE": 3,
-            "WATCH": 2,
-            "EARLY": 1,
+            "EXECUTE": 2,
+            "WATCH": 1,
+            "EARLY": 0,
             "REJECT": 0,
         }
 
@@ -59,6 +60,15 @@ class TradeRankerService:
                 False
             )
 
+            trade_filter_level = item.get(
+                "trade_filter_level",
+                "BLOCK"
+            )
+
+            # -----------------------------------------------------
+            # NO SIGNAL
+            # -----------------------------------------------------
+
             if signal == "NO_SIGNAL":
 
                 print(
@@ -68,6 +78,10 @@ class TradeRankerService:
                 )
 
                 continue
+
+            # -----------------------------------------------------
+            # MINIMUM CONFIDENCE
+            # -----------------------------------------------------
 
             if confidence < 55:
 
@@ -79,6 +93,10 @@ class TradeRankerService:
 
                 continue
 
+            # -----------------------------------------------------
+            # MINIMUM RR
+            # -----------------------------------------------------
+
             if rr and rr < 2:
 
                 print(
@@ -89,15 +107,49 @@ class TradeRankerService:
 
                 continue
 
-            if confirmation_decision == "REJECT":
+            # -----------------------------------------------------
+            # CONFIRMATION GATE
+            #
+            # EARLY is NOT a trade candidate.
+            # Only WATCH and EXECUTE may reach TOP.
+            # -----------------------------------------------------
+
+            if confirmation_decision not in (
+                "WATCH",
+                "EXECUTE",
+            ):
 
                 print(
-                    "RANKER DROP CONFIRMATION:",
+                    "RANKER DROP CONFIRMATION LEVEL:",
                     item.get("ticker"),
                     confirmation_decision
                 )
 
                 continue
+
+            # -----------------------------------------------------
+            # TRADE FILTER GATE
+            #
+            # WATCHLIST means:
+            # observe only.
+            #
+            # STRONG_TRADE means:
+            # candidate is allowed into TOP ranking.
+            # -----------------------------------------------------
+
+            if trade_filter_level != "STRONG_TRADE":
+
+                print(
+                    "RANKER DROP FILTER LEVEL:",
+                    item.get("ticker"),
+                    trade_filter_level
+                )
+
+                continue
+
+            # -----------------------------------------------------
+            # FINAL TRADE ALLOWED GATE
+            # -----------------------------------------------------
 
             if not trade_allowed:
 
@@ -109,6 +161,10 @@ class TradeRankerService:
                 continue
 
             ranked.append(item)
+
+        # ---------------------------------------------------------
+        # TRADE SCORE VALUE
+        # ---------------------------------------------------------
 
         def trade_score_value(item):
 
@@ -131,6 +187,10 @@ class TradeRankerService:
                 )
 
             return trade_score
+
+        # ---------------------------------------------------------
+        # FINAL SORT
+        # ---------------------------------------------------------
 
         ranked.sort(
 
@@ -184,6 +244,7 @@ class TradeRankerService:
             ),
 
             reverse=True
+
         )
 
         return ranked[:limit]
