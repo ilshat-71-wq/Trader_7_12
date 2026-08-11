@@ -4,6 +4,7 @@ Trader_7_12 Pro
 Relative Strength Service v0.1
 
 Назначение:
+
 - сравнение доходности инструмента с benchmark
 - benchmark: IMOEXF — ближайший фьючерс на индекс Мосбиржи
 - подготовка Relative Strength для VolumeScanner
@@ -11,15 +12,15 @@ Relative Strength Service v0.1
 Формула:
 
 instrument_return =
-    (instrument_current - instrument_previous)
-    / instrument_previous * 100
+(instrument_current - instrument_previous)
+/ instrument_previous * 100
 
 benchmark_return =
-    (benchmark_current - benchmark_previous)
-    / benchmark_previous * 100
+(benchmark_current - benchmark_previous)
+/ benchmark_previous * 100
 
 relative_strength =
-    instrument_return - benchmark_return
+instrument_return - benchmark_return
 """
 
 
@@ -44,10 +45,13 @@ class RelativeStrengthService:
         try:
             previous_price = float(previous_price)
             current_price = float(current_price)
+
         except (TypeError, ValueError):
+
             return 0.0
 
         if previous_price <= 0:
+
             return 0.0
 
         return (
@@ -131,7 +135,15 @@ class RelativeStrengthService:
         <50 = слабее рынка
         """
 
-        rs = float(relative_strength)
+        try:
+
+            rs = float(
+                relative_strength
+            )
+
+        except (TypeError, ValueError):
+
+            return 50.0
 
         # RS после calculate_return хранится
         # в процентных пунктах:
@@ -140,9 +152,10 @@ class RelativeStrengthService:
         # -1.00 = -1%
         #
         # Нормализация:
+        #
         # +2.50% относительно benchmark -> 100
         #  0.00%                         -> 50
-        # -2.50%                         -> 0
+        # -2.50% относительно benchmark -> 0
 
         score = 50 + (
             rs * 20
@@ -171,28 +184,45 @@ class RelativeStrengthService:
         Направление относительно benchmark.
         """
 
-        rs = float(relative_strength)
+        try:
+
+            rs = float(
+                relative_strength
+            )
+
+        except (TypeError, ValueError):
+
+            return "NEUTRAL"
 
         # RS хранится в процентных пунктах:
+        #
         # +1.00 = +1%
         # -1.00 = -1%
 
         # Сильная относительная сила:
         # инструмент существенно сильнее IMOEX.
+
         if rs >= 1.50:
+
             return "STRONG"
 
         # Положительная относительная сила.
+
         if rs >= 0.50:
+
             return "POSITIVE"
 
         # Сильная относительная слабость:
         # инструмент существенно слабее IMOEX.
+
         if rs <= -1.50:
+
             return "WEAK"
 
         # Отрицательная относительная сила.
+
         if rs <= -0.50:
+
             return "NEGATIVE"
 
         return "NEUTRAL"

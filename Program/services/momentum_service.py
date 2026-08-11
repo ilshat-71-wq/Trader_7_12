@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Momentum Service
 
-Версия 0.4
+Версия 0.5
 
 Назначение:
 - анализ силы свечи
@@ -12,13 +12,17 @@ Momentum Service
 - настоящий breakout относительно предыдущих уровней
 - определение directional momentum
 - подготовка данных для momentum / pullback setup
+
+Важно:
+объем и денежный оборот усиливают уже существующее направление.
+Они НЕ создают направление самостоятельно.
 """
 
 
 class MomentumService:
 
     def __init__(self):
-        self.version = "0.4"
+        self.version = "0.5"
 
     # ---------------------------------------------------------
 
@@ -104,6 +108,10 @@ class MomentumService:
                 average_money_volume
             )
 
+        # ---------------------------------------------------------
+        # BREAKOUT
+        # ---------------------------------------------------------
+
         breakout_strength = 0
         true_breakout = False
 
@@ -120,7 +128,7 @@ class MomentumService:
                 true_breakout = True
 
         # ---------------------------------------------------------
-        # MOMENTUM
+        # DIRECTIONAL CANDLE MOMENTUM
         # ---------------------------------------------------------
 
         momentum_score = 0
@@ -141,40 +149,66 @@ class MomentumService:
 
         # ---------------------------------------------------------
         # VOLUME
+        #
+        # IMPORTANT:
+        #
+        # Volume confirms the existing direction.
+        #
+        # LONG  + high volume = positive contribution
+        # SHORT + high volume = negative contribution
+        #
+        # Volume alone cannot create direction.
         # ---------------------------------------------------------
 
-        if volume_ratio >= 2:
+        if close > open_price:
 
-            momentum_score += 25
+            if volume_ratio >= 2:
+                momentum_score += 25
 
-        elif volume_ratio >= 1.5:
+            elif volume_ratio >= 1.5:
+                momentum_score += 15
 
-            momentum_score += 15
+            elif volume_ratio < 0.7:
+                momentum_score -= 10
 
-        elif volume_ratio < 0.7:
+        elif close < open_price:
 
-            # Низкий текущий объём не должен полностью
-            # разрушать уже сформированный momentum.
-            momentum_score -= 10
+            if volume_ratio >= 2:
+                momentum_score -= 25
+
+            elif volume_ratio >= 1.5:
+                momentum_score -= 15
+
+            elif volume_ratio < 0.7:
+                momentum_score += 10
 
         # ---------------------------------------------------------
         # MONEY VOLUME
+        #
+        # Same directional principle as ordinary volume.
         # ---------------------------------------------------------
 
-        if money_volume_ratio >= 2:
-            momentum_score += 15
+        if close > open_price:
+
+            if money_volume_ratio >= 2:
+                momentum_score += 15
+
+        elif close < open_price:
+
+            if money_volume_ratio >= 2:
+                momentum_score -= 15
 
         # ---------------------------------------------------------
-        # BREAKOUT
+        # BREAKOUT CONFIRMATION
         # ---------------------------------------------------------
 
         if true_breakout:
 
-            momentum_score += (
-                25
-                if breakout_strength > 0
-                else -25
-            )
+            if breakout_strength > 0:
+                momentum_score += 25
+
+            elif breakout_strength < 0:
+                momentum_score -= 25
 
         # ---------------------------------------------------------
         # CLAMP
@@ -211,6 +245,10 @@ class MomentumService:
         elif momentum_score <= -45:
 
             signal = "SHORT_WATCH"
+
+        # ---------------------------------------------------------
+        # RESULT
+        # ---------------------------------------------------------
 
         return {
             "momentum_score":
@@ -249,3 +287,26 @@ class MomentumService:
             "signal":
                 signal
         }
+
+
+if __name__ == "__main__":
+
+    service = MomentumService()
+
+    test_candle = {
+        "open": 4020.0,
+        "high": 4022.0,
+        "low": 4007.0,
+        "close": 4008.0,
+        "volume": 2_400_000,
+        "money_volume": 9_600_000_000
+    }
+
+    result = service.analyze(
+        test_candle,
+        average_volume=1_000_000,
+        average_money_volume=4_000_000_000
+    )
+
+    print("MOMENTUM SELF TEST:")
+    print(result)

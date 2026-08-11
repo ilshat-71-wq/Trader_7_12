@@ -1,19 +1,42 @@
-"""
-Trader_7_12 Pro
+"""Trader_7_12 Pro
 
-Trade Decision Engine v0.9
+Trade Decision Engine v1.1
 
 Назначение:
 
-- финальный отбор торговых возможностей
-- фильтрация слабых сигналов
-- пропуск только подтвержденных торговых сигналов
+- финальный gate торгового решения
 - защита от TRADE при NO_SIGNAL
-- разделение WATCH / EARLY / TRADE
-- проверка объема
+- защита от TRADE при EARLY
+- WATCH для недостаточно подтверждённых сигналов
+- проверка направления
+- проверка trade score
+- проверка rating
 - проверка ликвидности
-- проверка согласованности направления
-- защита от TRADE при LOW confidence
+- проверка объёма
+- проверка momentum
+- проверка breakout
+- проверка breakout quality
+- проверка confidence
+
+ВАЖНО:
+
+Есть два допустимых типа сильного setup:
+
+1. BREAKOUT TRADE
+   Сильный сигнал + подтверждённый breakout.
+
+2. MOMENTUM / PULLBACK TRADE
+   Сильный направленный momentum без breakout.
+   Такой setup может быть кандидатом на первый pullback.
+
+Слабый объём сам по себе НЕ запрещает momentum/pullback setup,
+если momentum действительно сильный.
+
+Единая классификация:
+
+    SKIP
+    WATCH
+    TRADE
 """
 
 
@@ -21,164 +44,279 @@ class TradeDecisionEngine:
 
     def __init__(self):
 
-        self.version = "0.9"
+        self.version = "1.1"
 
-    # -------------------------------------------------
-    # Главная проверка сделки
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # SAFE NUMBER
+    # ---------------------------------------------------------
 
-    def evaluate(
-        self,
-        row
+    @staticmethod
+    def _number(value, default=0.0):
+
+        try:
+
+            return float(value)
+
+        except (TypeError, ValueError):
+
+            return default
+
+    # ---------------------------------------------------------
+    # RESULT
+    # ---------------------------------------------------------
+
+    @staticmethod
+    def _result(
+        decision,
+        row,
+        direction,
+        signal,
+        score,
+        rating,
+        momentum,
+        volume_ratio,
+        money_volume,
+        breakout_quality,
+        confidence,
+        reasons
     ):
 
-        score = getattr(
-            row,
-            "trade_score",
-            0
-        )
+        return {
 
-        rating = getattr(
-            row,
-            "rating",
-            0
-        )
+            "decision": decision,
 
-        momentum = getattr(
-            row,
-            "momentum_score",
-            0
-        )
+            "ticker": getattr(
+                row,
+                "ticker",
+                ""
+            ),
 
-        money_volume = getattr(
-            row,
-            "money_volume",
-            0
-        )
+            "direction": direction,
 
-        volume_ratio = getattr(
-            row,
-            "volume_ratio",
-            0
-        )
+            "signal": signal,
 
-        direction = getattr(
-            row,
-            "direction",
-            ""
-        )
+            "trade_score": score,
 
-        signal = getattr(
-            row,
-            "signal",
-            ""
-        )
+            "rating": rating,
 
-        breakout_quality = getattr(
-            row,
-            "breakout_quality",
+            "momentum_score": momentum,
+
+            "volume_ratio": volume_ratio,
+
+            "money_volume": money_volume,
+
+            "breakout_quality": breakout_quality,
+
+            "confidence": confidence,
+
+            "reasons": reasons
+
+        }
+
+    # ---------------------------------------------------------
+    # EVALUATE
+    # ---------------------------------------------------------
+
+    def evaluate(self, row):
+
+        # -----------------------------------------------------
+        # INPUT DATA
+        # -----------------------------------------------------
+
+        score = self._number(
             getattr(
                 row,
-                "breakout_quality_score",
+                "trade_score",
                 0
             )
         )
 
-        # -------------------------------------------------
-        # NORMALIZE NUMBERS
-        # -------------------------------------------------
-
-        try:
-            score = float(score)
-        except (
-            TypeError,
-            ValueError
-        ):
-            score = 0.0
-
-        try:
-            rating = float(rating)
-        except (
-            TypeError,
-            ValueError
-        ):
-            rating = 0.0
-
-        try:
-            momentum = float(momentum)
-        except (
-            TypeError,
-            ValueError
-        ):
-            momentum = 0.0
-
-        try:
-            money_volume = float(
-                money_volume
+        rating = self._number(
+            getattr(
+                row,
+                "rating",
+                0
             )
-        except (
-            TypeError,
-            ValueError
-        ):
-            money_volume = 0.0
+        )
 
-        try:
-            volume_ratio = float(
-                volume_ratio
+        momentum = self._number(
+            getattr(
+                row,
+                "momentum_score",
+                0
             )
-        except (
-            TypeError,
-            ValueError
-        ):
-            volume_ratio = 0.0
+        )
 
-        try:
-            breakout_quality = float(
-                breakout_quality
+        money_volume = self._number(
+            getattr(
+                row,
+                "money_volume",
+                getattr(
+                    row,
+                    "money_volume_real",
+                    0
+                )
             )
-        except (
-            TypeError,
-            ValueError
-        ):
-            breakout_quality = 0.0
+        )
 
-        # -------------------------------------------------
-        # 1. DIRECTION
-        # -------------------------------------------------
+        volume_ratio = self._number(
+            getattr(
+                row,
+                "volume_ratio",
+                0
+            )
+        )
+
+        breakout_quality = self._number(
+            getattr(
+                row,
+                "breakout_quality",
+                getattr(
+                    row,
+                    "breakout_quality_score",
+                    0
+                )
+            )
+        )
+
+        breakout_score = self._number(
+            getattr(
+                row,
+                "breakout_score",
+                0
+            )
+        )
+
+        confidence = self._number(
+            getattr(
+                row,
+                "confidence",
+                0
+            )
+        )
+
+        direction = str(
+            getattr(
+                row,
+                "direction",
+                ""
+            )
+        ).upper()
+
+        signal = str(
+            getattr(
+                row,
+                "signal",
+                getattr(
+                    row,
+                    "final_signal",
+                    ""
+                )
+            )
+        ).upper()
+
+        breakout_direction = str(
+            getattr(
+                row,
+                "breakout_direction",
+                ""
+            )
+        ).upper()
+
+        breakout_strength = self._number(
+            getattr(
+                row,
+                "breakout_strength",
+                0
+            )
+        )
+
+        # -----------------------------------------------------
+        # DEBUG INPUT
+        # -----------------------------------------------------
+
+        print(
+            "DEBUG TRADE DECISION:",
+            getattr(
+                row,
+                "ticker",
+                ""
+            ),
+            "signal=",
+            signal,
+            "direction=",
+            direction,
+            "score=",
+            score,
+            "rating=",
+            rating,
+            "momentum=",
+            momentum,
+            "volume_ratio=",
+            volume_ratio,
+            "breakout_score=",
+            breakout_score,
+            "breakout_quality=",
+            breakout_quality,
+            "confidence=",
+            confidence
+        )
+
+        # -----------------------------------------------------
+        # 1. VALID DIRECTION
+        # -----------------------------------------------------
 
         if direction not in (
             "LONG",
             "SHORT"
         ):
 
-            return {
-                "decision": "SKIP",
-                "reason": "No valid direction"
-            }
+            return self._result(
+                "SKIP",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "No valid direction"
+                ]
+            )
 
-        # -------------------------------------------------
-        # 2. SIGNAL
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # 2. NO SIGNAL
+        # -----------------------------------------------------
 
-        active_signals = (
-            "LONG_WATCH",
-            "EARLY_LONG",
-            "STRONG_LONG",
-            "SHORT_WATCH",
-            "EARLY_SHORT",
-            "STRONG_SHORT"
-        )
+        if signal in (
+            "",
+            "NO_SIGNAL"
+        ):
 
-        if signal not in active_signals:
+            return self._result(
+                "SKIP",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "No active signal"
+                ]
+            )
 
-            return {
-                "decision": "SKIP",
-                "reason": "No active signal"
-            }
-
-        # -------------------------------------------------
-        # 3. DIRECTION CONSISTENCY
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # 3. SIGNAL / DIRECTION CONSISTENCY
+        # -----------------------------------------------------
 
         long_signals = (
             "LONG_WATCH",
@@ -192,524 +330,678 @@ class TradeDecisionEngine:
             "STRONG_SHORT"
         )
 
-        if signal in long_signals:
+        if signal in long_signals and direction != "LONG":
 
-            if direction != "LONG":
-
-                return {
-                    "decision": "SKIP",
-                    "reason": "Direction mismatch"
-                }
-
-        if signal in short_signals:
-
-            if direction != "SHORT":
-
-                return {
-                    "decision": "SKIP",
-                    "reason": "Direction mismatch"
-                }
-
-        # -------------------------------------------------
-        # 4. BASIC SCORE
-        # -------------------------------------------------
-
-        if score < 35:
-
-            return {
-                "decision": "SKIP",
-                "reason": "Low trade score"
-            }
-
-        # -------------------------------------------------
-        # 5. RATING
-        # -------------------------------------------------
-
-        if rating < 40:
-
-            return {
-                "decision": "SKIP",
-                "reason": "Low rating"
-            }
-
-        # -------------------------------------------------
-        # 6. LIQUIDITY
-        # -------------------------------------------------
-
-        if money_volume < 3_000_000:
-
-            return {
-                "decision": "SKIP",
-                "reason": "Low liquidity"
-            }
-
-        # -------------------------------------------------
-        # 7. VOLUME
-        # -------------------------------------------------
-
-        if volume_ratio < 1.2:
-
-            return {
-                "decision": "SKIP",
-                "reason": "No volume expansion"
-            }
-
-        # -------------------------------------------------
-        # 8. MOMENTUM
-        # -------------------------------------------------
-
-        if direction == "LONG":
-
-            if momentum < 45:
-
-                return {
-                    "decision": "SKIP",
-                    "reason": "Weak long momentum"
-                }
-
-        elif direction == "SHORT":
-
-            if momentum > -45:
-
-                return {
-                    "decision": "SKIP",
-                    "reason": "Weak short momentum"
-                }
-
-        # -------------------------------------------------
-        # 9. WATCH / EARLY / STRONG
-        # -------------------------------------------------
-
-        # LONG_WATCH / SHORT_WATCH:
-        #
-        # Это наблюдение, а НЕ торговая команда.
-        #
-        # Даже если momentum сильный, такой сигнал
-        # должен ждать дополнительного подтверждения.
-
-        watch_signals = (
-            "LONG_WATCH",
-            "SHORT_WATCH"
-        )
-
-        if signal in watch_signals:
-
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "LOW",
-                "reasons": [
-                    "Active watch signal",
-                    "Waiting for stronger confirmation"
+            return self._result(
+                "SKIP",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Long signal with non-long direction"
                 ]
-            }
+            )
 
-        # -------------------------------------------------
-        # 10. EARLY SIGNAL
-        # -------------------------------------------------
+        if signal in short_signals and direction != "SHORT":
 
-        early_signals = (
+            return self._result(
+                "SKIP",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Short signal with non-short direction"
+                ]
+            )
+
+        # -----------------------------------------------------
+        # 4. EARLY
+        # -----------------------------------------------------
+
+        if signal in (
             "EARLY_LONG",
             "EARLY_SHORT"
-        )
+        ):
 
-        if signal in early_signals:
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Early setup",
+                    "Waiting for confirmation"
+                ]
+            )
 
-            # Early setup должен иметь заметный momentum
-            # и хороший trade score.
+        # -----------------------------------------------------
+        # 5. WATCH
+        # -----------------------------------------------------
 
-            if score < 55:
+        if signal in (
+            "LONG_WATCH",
+            "SHORT_WATCH"
+        ):
 
-                return {
-                    "decision": "WATCH",
-                    "ticker": getattr(
-                        row,
-                        "ticker",
-                        ""
-                    ),
-                    "direction": direction,
-                    "signal": signal,
-                    "trade_score": score,
-                    "rating": rating,
-                    "momentum_score": momentum,
-                    "volume_ratio": volume_ratio,
-                    "money_volume": money_volume,
-                    "breakout_quality": breakout_quality,
-                    "confidence": "LOW",
-                    "reasons": [
-                        "Early setup",
-                        "Trade score below confirmation threshold"
-                    ]
-                }
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Watch signal",
+                    "Waiting for stronger confirmation"
+                ]
+            )
 
-            if direction == "LONG":
+        # -----------------------------------------------------
+        # 6. ONLY STRONG SIGNAL CAN TRADE
+        # -----------------------------------------------------
 
-                if momentum < 55:
-
-                    return {
-                        "decision": "WATCH",
-                        "ticker": getattr(
-                            row,
-                            "ticker",
-                            ""
-                        ),
-                        "direction": direction,
-                        "signal": signal,
-                        "trade_score": score,
-                        "rating": rating,
-                        "momentum_score": momentum,
-                        "volume_ratio": volume_ratio,
-                        "money_volume": money_volume,
-                        "breakout_quality": breakout_quality,
-                        "confidence": "LOW",
-                        "reasons": [
-                            "Early long setup",
-                            "Momentum needs confirmation"
-                        ]
-                    }
-
-            elif direction == "SHORT":
-
-                if momentum > -55:
-
-                    return {
-                        "decision": "WATCH",
-                        "ticker": getattr(
-                            row,
-                            "ticker",
-                            ""
-                        ),
-                        "direction": direction,
-                        "signal": signal,
-                        "trade_score": score,
-                        "rating": rating,
-                        "momentum_score": momentum,
-                        "volume_ratio": volume_ratio,
-                        "money_volume": money_volume,
-                        "breakout_quality": breakout_quality,
-                        "confidence": "LOW",
-                        "reasons": [
-                            "Early short setup",
-                            "Momentum needs confirmation"
-                        ]
-                    }
-
-        # -------------------------------------------------
-        # 11. STRONG SIGNAL
-        # -------------------------------------------------
-
-        strong_signals = (
+        if signal not in (
             "STRONG_LONG",
             "STRONG_SHORT"
-        )
+        ):
 
-        if signal not in strong_signals:
-
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "LOW",
-                "reasons": [
-                    "Setup requires confirmation"
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Signal requires confirmation"
                 ]
-            }
+            )
 
-        # -------------------------------------------------
-        # 12. STRONG TRADE SCORE
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # 7. TRADE SCORE
+        # -----------------------------------------------------
 
-        if score < 70:
+        if score < 55:
 
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "LOW",
-                "reasons": [
-                    "Strong signal but insufficient trade score"
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Trade score below 55"
                 ]
-            }
+            )
 
-        # -------------------------------------------------
-        # 13. STRONG RATING
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # 8. RATING
+        # -----------------------------------------------------
 
         if rating < 55:
 
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "LOW",
-                "reasons": [
-                    "Strong signal but rating is insufficient"
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Rating below 55"
                 ]
-            }
+            )
 
-        # -------------------------------------------------
-        # 14. STRONG VOLUME
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # 9. LIQUIDITY
+        # ---------------------------------------------------------
+        #
+        # Минимальный денежный оборот.
+        #
+        # 3 млн сохраняем как абсолютный нижний предел.
+        # Для наших ликвидных инструментов фактически он намного
+        # выше, но здесь не создаём искусственный дополнительный gate.
+        # ---------------------------------------------------------
 
-        if volume_ratio < 1.5:
+        if money_volume < 3_000_000:
 
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "LOW",
-                "reasons": [
-                    "Strong signal but volume confirmation is insufficient"
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Insufficient money volume"
                 ]
-            }
+            )
 
-        # -------------------------------------------------
-        # 15. STRONG MOMENTUM
-        # -------------------------------------------------
+        # ---------------------------------------------------------
+        # 10. MOMENTUM DIRECTION
+        # ---------------------------------------------------------
+
+        if direction == "LONG" and momentum < 50:
+
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Long momentum below 50"
+                ]
+            )
+
+        if direction == "SHORT" and momentum > -50:
+
+            return self._result(
+                "WATCH",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                [
+                    "Short momentum above -50"
+                ]
+            )
+
+        # ---------------------------------------------------------
+        # 11. BREAKOUT DIRECTION CONFLICT
+        # ---------------------------------------------------------
 
         if direction == "LONG":
 
-            if momentum < 60:
+            if (
+                breakout_direction == "SHORT"
+                or breakout_strength < 0
+            ):
 
-                return {
-                    "decision": "WATCH",
-                    "ticker": getattr(
-                        row,
-                        "ticker",
-                        ""
-                    ),
-                    "direction": direction,
-                    "signal": signal,
-                    "trade_score": score,
-                    "rating": rating,
-                    "momentum_score": momentum,
-                    "volume_ratio": volume_ratio,
-                    "money_volume": money_volume,
-                    "breakout_quality": breakout_quality,
-                    "confidence": "LOW",
-                    "reasons": [
-                        "Strong long signal but momentum is insufficient"
-                    ]
-                }
-
-        elif direction == "SHORT":
-
-            if momentum > -60:
-
-                return {
-                    "decision": "WATCH",
-                    "ticker": getattr(
-                        row,
-                        "ticker",
-                        ""
-                    ),
-                    "direction": direction,
-                    "signal": signal,
-                    "trade_score": score,
-                    "rating": rating,
-                    "momentum_score": momentum,
-                    "volume_ratio": volume_ratio,
-                    "money_volume": money_volume,
-                    "breakout_quality": breakout_quality,
-                    "confidence": "LOW",
-                    "reasons": [
-                        "Strong short signal but momentum is insufficient"
-                    ]
-                }
-
-        # -------------------------------------------------
-        # 16. BREAKOUT QUALITY
-        # -------------------------------------------------
-
-        if breakout_quality < 35:
-
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
+                return self._result(
+                    "WATCH",
                     row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": "MEDIUM",
-                "reasons": [
-                    "Strong signal but breakout confirmation is insufficient"
-                ]
-            }
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Breakout conflicts with long direction"
+                    ]
+                )
 
-        # -------------------------------------------------
-        # 17. CONFIDENCE
-        # -------------------------------------------------
+        if direction == "SHORT":
 
-        confidence = "MEDIUM"
+            if (
+                breakout_direction == "LONG"
+                or breakout_strength > 0
+            ):
 
-        if (
-            score >= 80
-            and rating >= 70
-            and volume_ratio >= 2
-            and breakout_quality >= 50
-        ):
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Breakout conflicts with short direction"
+                    ]
+                )
 
-            confidence = "HIGH"
+        # ---------------------------------------------------------
+        # 12. DETERMINE SETUP TYPE
+        # ---------------------------------------------------------
+        #
+        # BREAKOUT:
+        # есть реальный breakout.
+        #
+        # MOMENTUM / PULLBACK:
+        # сильный momentum, но breakout ещё не подтверждён.
+        #
+        # Это важно:
+        #
+        # отсутствие breakout НЕ означает автоматически NO TRADE.
+        #
+        # Для momentum/pullback сделки мы НЕ требуем:
+        #
+        # volume_ratio >= 1.5
+        # breakout_quality >= 35
+        # breakout_score >= 25
+        #
+        # Эти параметры нужны именно для breakout confirmation.
+        # ---------------------------------------------------------
 
-        elif (
-            score >= 70
-            and rating >= 60
-            and volume_ratio >= 1.5
+        confirmed_breakout = (
+
+            breakout_score >= 25
+
             and breakout_quality >= 35
-        ):
 
-            confidence = "MEDIUM"
+            and (
 
-        else:
+                breakout_strength != 0
 
-            confidence = "LOW"
+                or breakout_direction in (
+                    "LONG",
+                    "SHORT"
+                )
+            )
 
-        # -------------------------------------------------
-        # 18. LOW CONFIDENCE CANNOT TRADE
-        # -------------------------------------------------
+        )
 
-        if confidence == "LOW":
+        momentum_pullback_setup = (
 
-            return {
-                "decision": "WATCH",
-                "ticker": getattr(
+            abs(momentum) >= 60
+
+            and (
+
+                (
+                    direction == "LONG"
+                    and momentum >= 60
+                )
+
+                or
+
+                (
+                    direction == "SHORT"
+                    and momentum <= -60
+                )
+
+            )
+
+        )
+
+        # ---------------------------------------------------------
+        # 13. BREAKOUT SETUP
+        # ---------------------------------------------------------
+
+        if confirmed_breakout:
+
+            # ---------------------------------------------
+            # Volume confirmation for breakout
+            # ---------------------------------------------
+
+            if volume_ratio < 1.5:
+
+                return self._result(
+                    "WATCH",
                     row,
-                    "ticker",
-                    ""
-                ),
-                "direction": direction,
-                "signal": signal,
-                "trade_score": score,
-                "rating": rating,
-                "momentum_score": momentum,
-                "volume_ratio": volume_ratio,
-                "money_volume": money_volume,
-                "breakout_quality": breakout_quality,
-                "confidence": confidence,
-                "reasons": [
-                    "Strong signal but confidence is too low"
-                ]
-            }
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Breakout detected",
+                        "Waiting for volume confirmation"
+                    ]
+                )
 
-        # -------------------------------------------------
-        # 19. TRADE
-        # -------------------------------------------------
+            # ---------------------------------------------
+            # Breakout confidence
+            # ---------------------------------------------
 
-        reasons = [
-            "Strong momentum",
-            "Volume confirmation",
-            "Strong trade score"
-        ]
+            if confidence < 70:
 
-        if rating >= 70:
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Breakout setup",
+                        "Confidence below 70"
+                    ]
+                )
 
-            reasons.append(
-                "High rating"
-            )
+            # ---------------------------------------------
+            # Breakout quality
+            # ---------------------------------------------
 
-        if volume_ratio >= 2:
+            if breakout_quality < 35:
 
-            reasons.append(
-                "Volume spike"
-            )
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Breakout quality below 35"
+                    ]
+                )
 
-        if breakout_quality >= 50:
+            reasons = [
+                "Strong signal",
+                "Breakout setup confirmed",
+                "Trade score confirmed",
+                "Momentum confirmed",
+                "Volume confirmed",
+                "Confidence confirmed"
+            ]
 
-            reasons.append(
-                "Breakout confirmed"
-            )
+            if rating >= 70:
 
-        return {
-            "decision": "TRADE",
-            "ticker": getattr(
+                reasons.append(
+                    "High rating"
+                )
+
+            if volume_ratio >= 2:
+
+                reasons.append(
+                    "Volume spike"
+                )
+
+            if breakout_quality >= 50:
+
+                reasons.append(
+                    "High breakout quality"
+                )
+
+            if confidence >= 80:
+
+                reasons.append(
+                    "High confidence"
+                )
+
+            return self._result(
+                "TRADE",
                 row,
-                "ticker",
-                ""
-            ),
-            "direction": direction,
-            "signal": signal,
-            "trade_score": score,
-            "rating": rating,
-            "momentum_score": momentum,
-            "volume_ratio": volume_ratio,
-            "money_volume": money_volume,
-            "breakout_quality": breakout_quality,
-            "confidence": confidence,
-            "reasons": reasons
-        }
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                reasons
+            )
 
-    # -------------------------------------------------
-    # Массовая обработка
-    # -------------------------------------------------
+        # ---------------------------------------------------------
+        # 14. MOMENTUM / PULLBACK SETUP
+        # ---------------------------------------------------------
+        #
+        # Здесь главное изменение версии 1.1.
+        #
+        # Например:
+        #
+        # momentum = -80
+        # volume_ratio = 0.42
+        # breakout_quality = 0
+        #
+        # Такой инструмент больше НЕ блокируется автоматически.
+        #
+        # Он становится momentum/pullback trade candidate.
+        #
+        # Это соответствует исходной идее:
+        #
+        # сильное движение -> первый pullback -> вход.
+        # ---------------------------------------------------------
 
-    def rank(
-        self,
-        rows
-    ):
+        if momentum_pullback_setup:
+
+            # ---------------------------------------------
+            # Confidence для momentum setup
+            # ---------------------------------------------
+
+            if confidence < 60:
+
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Strong momentum",
+                        "Waiting for confidence confirmation"
+                    ]
+                )
+
+            # ---------------------------------------------
+            # Rating
+            # ---------------------------------------------
+
+            if rating < 55:
+
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Momentum setup",
+                        "Rating below 55"
+                    ]
+                )
+
+            # ---------------------------------------------
+            # Trade score
+            # ---------------------------------------------
+
+            if score < 55:
+
+                return self._result(
+                    "WATCH",
+                    row,
+                    direction,
+                    signal,
+                    score,
+                    rating,
+                    momentum,
+                    volume_ratio,
+                    money_volume,
+                    breakout_quality,
+                    confidence,
+                    [
+                        "Momentum setup",
+                        "Trade score below 55"
+                    ]
+                )
+
+            # ---------------------------------------------
+            # IMPORTANT:
+            #
+            # Здесь volume_ratio < 1.5 НЕ является BLOCK.
+            #
+            # Низкий текущий объём может означать:
+            #
+            # - рынок уже сделал импульс;
+            # - текущая свеча идёт на снижении активности;
+            # - ожидается первый pullback;
+            # - нужен confirmation candle.
+            #
+            # Поэтому мы разрешаем TRADE candidate.
+            # ---------------------------------------------
+
+            reasons = [
+                "Strong momentum",
+                "Momentum / pullback setup",
+                "Trade score confirmed",
+                "Direction confirmed",
+                "Confidence confirmed"
+            ]
+
+            if volume_ratio >= 2:
+
+                reasons.append(
+                    "Volume spike"
+                )
+
+            elif volume_ratio >= 1:
+
+                reasons.append(
+                    "Volume supported"
+                )
+
+            else:
+
+                reasons.append(
+                    "Pullback entry preferred"
+                )
+
+            if rating >= 70:
+
+                reasons.append(
+                    "High rating"
+                )
+
+            if momentum <= -70:
+
+                reasons.append(
+                    "Strong downside momentum"
+                )
+
+            elif momentum >= 70:
+
+                reasons.append(
+                    "Strong upside momentum"
+                )
+
+            return self._result(
+                "TRADE",
+                row,
+                direction,
+                signal,
+                score,
+                rating,
+                momentum,
+                volume_ratio,
+                money_volume,
+                breakout_quality,
+                confidence,
+                reasons
+            )
+
+        # ---------------------------------------------------------
+        # 15. STRONG SIGNAL WITHOUT SUFFICIENT SETUP
+        # ---------------------------------------------------------
+
+        return self._result(
+            "WATCH",
+            row,
+            direction,
+            signal,
+            score,
+            rating,
+            momentum,
+            volume_ratio,
+            money_volume,
+            breakout_quality,
+            confidence,
+            [
+                "Strong signal",
+                "Setup confirmation insufficient"
+            ]
+        )
+
+    # ---------------------------------------------------------
+    # RANK
+    # ---------------------------------------------------------
+
+    def rank(self, rows):
 
         results = []
 
@@ -728,25 +1020,45 @@ class TradeDecisionEngine:
                 )
 
         results.sort(
+
             key=lambda x: (
+
+                x.get(
+                    "confidence",
+                    0
+                ),
+
                 x.get(
                     "trade_score",
                     0
                 ),
-                x.get(
-                    "momentum_score",
-                    0
+
+                abs(
+                    x.get(
+                        "momentum_score",
+                        0
+                    )
                 ),
+
                 x.get(
                     "rating",
                     0
                 ),
+
                 x.get(
                     "volume_ratio",
                     0
+                ),
+
+                x.get(
+                    "breakout_quality",
+                    0
                 )
+
             ),
+
             reverse=True
+
         )
 
         return results
