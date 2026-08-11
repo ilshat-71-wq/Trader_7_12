@@ -1,16 +1,19 @@
 """
 Trader_7_12 Pro
 
-Trade Decision Engine v0.8
+Trade Decision Engine v0.9
 
 Назначение:
 
 - финальный отбор торговых возможностей
 - фильтрация слабых сигналов
-- пропуск только реальных торговых сигналов
+- пропуск только подтвержденных торговых сигналов
 - защита от TRADE при NO_SIGNAL
+- разделение WATCH / EARLY / TRADE
 - проверка объема
+- проверка ликвидности
 - проверка согласованности направления
+- защита от TRADE при LOW confidence
 """
 
 
@@ -18,8 +21,7 @@ class TradeDecisionEngine:
 
     def __init__(self):
 
-        self.version = "0.8"
-
+        self.version = "0.9"
 
     # -------------------------------------------------
     # Главная проверка сделки
@@ -72,9 +74,76 @@ class TradeDecisionEngine:
             ""
         )
 
+        breakout_quality = getattr(
+            row,
+            "breakout_quality",
+            getattr(
+                row,
+                "breakout_quality_score",
+                0
+            )
+        )
 
         # -------------------------------------------------
-        # 1. Направление обязательно
+        # NORMALIZE NUMBERS
+        # -------------------------------------------------
+
+        try:
+            score = float(score)
+        except (
+            TypeError,
+            ValueError
+        ):
+            score = 0.0
+
+        try:
+            rating = float(rating)
+        except (
+            TypeError,
+            ValueError
+        ):
+            rating = 0.0
+
+        try:
+            momentum = float(momentum)
+        except (
+            TypeError,
+            ValueError
+        ):
+            momentum = 0.0
+
+        try:
+            money_volume = float(
+                money_volume
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            money_volume = 0.0
+
+        try:
+            volume_ratio = float(
+                volume_ratio
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            volume_ratio = 0.0
+
+        try:
+            breakout_quality = float(
+                breakout_quality
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            breakout_quality = 0.0
+
+        # -------------------------------------------------
+        # 1. DIRECTION
         # -------------------------------------------------
 
         if direction not in (
@@ -87,9 +156,8 @@ class TradeDecisionEngine:
                 "reason": "No valid direction"
             }
 
-
         # -------------------------------------------------
-        # 2. NO_SIGNAL не может быть TRADE
+        # 2. SIGNAL
         # -------------------------------------------------
 
         active_signals = (
@@ -101,7 +169,6 @@ class TradeDecisionEngine:
             "STRONG_SHORT"
         )
 
-
         if signal not in active_signals:
 
             return {
@@ -109,9 +176,8 @@ class TradeDecisionEngine:
                 "reason": "No active signal"
             }
 
-
         # -------------------------------------------------
-        # 3. Проверяем согласованность направления
+        # 3. DIRECTION CONSISTENCY
         # -------------------------------------------------
 
         long_signals = (
@@ -126,7 +192,6 @@ class TradeDecisionEngine:
             "STRONG_SHORT"
         )
 
-
         if signal in long_signals:
 
             if direction != "LONG":
@@ -135,7 +200,6 @@ class TradeDecisionEngine:
                     "decision": "SKIP",
                     "reason": "Direction mismatch"
                 }
-
 
         if signal in short_signals:
 
@@ -146,9 +210,8 @@ class TradeDecisionEngine:
                     "reason": "Direction mismatch"
                 }
 
-
         # -------------------------------------------------
-        # 4. Минимальный score
+        # 4. BASIC SCORE
         # -------------------------------------------------
 
         if score < 35:
@@ -158,9 +221,8 @@ class TradeDecisionEngine:
                 "reason": "Low trade score"
             }
 
-
         # -------------------------------------------------
-        # 5. Минимальный rating
+        # 5. RATING
         # -------------------------------------------------
 
         if rating < 40:
@@ -170,9 +232,8 @@ class TradeDecisionEngine:
                 "reason": "Low rating"
             }
 
-
         # -------------------------------------------------
-        # 6. Минимальная ликвидность
+        # 6. LIQUIDITY
         # -------------------------------------------------
 
         if money_volume < 3_000_000:
@@ -182,9 +243,8 @@ class TradeDecisionEngine:
                 "reason": "Low liquidity"
             }
 
-
         # -------------------------------------------------
-        # 7. Расширение объема
+        # 7. VOLUME
         # -------------------------------------------------
 
         if volume_ratio < 1.2:
@@ -194,9 +254,8 @@ class TradeDecisionEngine:
                 "reason": "No volume expansion"
             }
 
-
         # -------------------------------------------------
-        # 8. Проверка momentum
+        # 8. MOMENTUM
         # -------------------------------------------------
 
         if direction == "LONG":
@@ -208,8 +267,7 @@ class TradeDecisionEngine:
                     "reason": "Weak long momentum"
                 }
 
-
-        if direction == "SHORT":
+        elif direction == "SHORT":
 
             if momentum > -45:
 
@@ -218,34 +276,400 @@ class TradeDecisionEngine:
                     "reason": "Weak short momentum"
                 }
 
+        # -------------------------------------------------
+        # 9. WATCH / EARLY / STRONG
+        # -------------------------------------------------
+
+        # LONG_WATCH / SHORT_WATCH:
+        #
+        # Это наблюдение, а НЕ торговая команда.
+        #
+        # Даже если momentum сильный, такой сигнал
+        # должен ждать дополнительного подтверждения.
+
+        watch_signals = (
+            "LONG_WATCH",
+            "SHORT_WATCH"
+        )
+
+        if signal in watch_signals:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "LOW",
+                "reasons": [
+                    "Active watch signal",
+                    "Waiting for stronger confirmation"
+                ]
+            }
 
         # -------------------------------------------------
-        # Подтверждения
+        # 10. EARLY SIGNAL
         # -------------------------------------------------
 
-        reasons = []
+        early_signals = (
+            "EARLY_LONG",
+            "EARLY_SHORT"
+        )
 
+        if signal in early_signals:
+
+            # Early setup должен иметь заметный momentum
+            # и хороший trade score.
+
+            if score < 55:
+
+                return {
+                    "decision": "WATCH",
+                    "ticker": getattr(
+                        row,
+                        "ticker",
+                        ""
+                    ),
+                    "direction": direction,
+                    "signal": signal,
+                    "trade_score": score,
+                    "rating": rating,
+                    "momentum_score": momentum,
+                    "volume_ratio": volume_ratio,
+                    "money_volume": money_volume,
+                    "breakout_quality": breakout_quality,
+                    "confidence": "LOW",
+                    "reasons": [
+                        "Early setup",
+                        "Trade score below confirmation threshold"
+                    ]
+                }
+
+            if direction == "LONG":
+
+                if momentum < 55:
+
+                    return {
+                        "decision": "WATCH",
+                        "ticker": getattr(
+                            row,
+                            "ticker",
+                            ""
+                        ),
+                        "direction": direction,
+                        "signal": signal,
+                        "trade_score": score,
+                        "rating": rating,
+                        "momentum_score": momentum,
+                        "volume_ratio": volume_ratio,
+                        "money_volume": money_volume,
+                        "breakout_quality": breakout_quality,
+                        "confidence": "LOW",
+                        "reasons": [
+                            "Early long setup",
+                            "Momentum needs confirmation"
+                        ]
+                    }
+
+            elif direction == "SHORT":
+
+                if momentum > -55:
+
+                    return {
+                        "decision": "WATCH",
+                        "ticker": getattr(
+                            row,
+                            "ticker",
+                            ""
+                        ),
+                        "direction": direction,
+                        "signal": signal,
+                        "trade_score": score,
+                        "rating": rating,
+                        "momentum_score": momentum,
+                        "volume_ratio": volume_ratio,
+                        "money_volume": money_volume,
+                        "breakout_quality": breakout_quality,
+                        "confidence": "LOW",
+                        "reasons": [
+                            "Early short setup",
+                            "Momentum needs confirmation"
+                        ]
+                    }
+
+        # -------------------------------------------------
+        # 11. STRONG SIGNAL
+        # -------------------------------------------------
+
+        strong_signals = (
+            "STRONG_LONG",
+            "STRONG_SHORT"
+        )
+
+        if signal not in strong_signals:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "LOW",
+                "reasons": [
+                    "Setup requires confirmation"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 12. STRONG TRADE SCORE
+        # -------------------------------------------------
+
+        if score < 70:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "LOW",
+                "reasons": [
+                    "Strong signal but insufficient trade score"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 13. STRONG RATING
+        # -------------------------------------------------
+
+        if rating < 55:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "LOW",
+                "reasons": [
+                    "Strong signal but rating is insufficient"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 14. STRONG VOLUME
+        # -------------------------------------------------
+
+        if volume_ratio < 1.5:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "LOW",
+                "reasons": [
+                    "Strong signal but volume confirmation is insufficient"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 15. STRONG MOMENTUM
+        # -------------------------------------------------
 
         if direction == "LONG":
 
-            reasons.append(
-                "Positive momentum"
-            )
+            if momentum < 60:
 
+                return {
+                    "decision": "WATCH",
+                    "ticker": getattr(
+                        row,
+                        "ticker",
+                        ""
+                    ),
+                    "direction": direction,
+                    "signal": signal,
+                    "trade_score": score,
+                    "rating": rating,
+                    "momentum_score": momentum,
+                    "volume_ratio": volume_ratio,
+                    "money_volume": money_volume,
+                    "breakout_quality": breakout_quality,
+                    "confidence": "LOW",
+                    "reasons": [
+                        "Strong long signal but momentum is insufficient"
+                    ]
+                }
 
         elif direction == "SHORT":
 
+            if momentum > -60:
+
+                return {
+                    "decision": "WATCH",
+                    "ticker": getattr(
+                        row,
+                        "ticker",
+                        ""
+                    ),
+                    "direction": direction,
+                    "signal": signal,
+                    "trade_score": score,
+                    "rating": rating,
+                    "momentum_score": momentum,
+                    "volume_ratio": volume_ratio,
+                    "money_volume": money_volume,
+                    "breakout_quality": breakout_quality,
+                    "confidence": "LOW",
+                    "reasons": [
+                        "Strong short signal but momentum is insufficient"
+                    ]
+                }
+
+        # -------------------------------------------------
+        # 16. BREAKOUT QUALITY
+        # -------------------------------------------------
+
+        if breakout_quality < 35:
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": "MEDIUM",
+                "reasons": [
+                    "Strong signal but breakout confirmation is insufficient"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 17. CONFIDENCE
+        # -------------------------------------------------
+
+        confidence = "MEDIUM"
+
+        if (
+            score >= 80
+            and rating >= 70
+            and volume_ratio >= 2
+            and breakout_quality >= 50
+        ):
+
+            confidence = "HIGH"
+
+        elif (
+            score >= 70
+            and rating >= 60
+            and volume_ratio >= 1.5
+            and breakout_quality >= 35
+        ):
+
+            confidence = "MEDIUM"
+
+        else:
+
+            confidence = "LOW"
+
+        # -------------------------------------------------
+        # 18. LOW CONFIDENCE CANNOT TRADE
+        # -------------------------------------------------
+
+        if confidence == "LOW":
+
+            return {
+                "decision": "WATCH",
+                "ticker": getattr(
+                    row,
+                    "ticker",
+                    ""
+                ),
+                "direction": direction,
+                "signal": signal,
+                "trade_score": score,
+                "rating": rating,
+                "momentum_score": momentum,
+                "volume_ratio": volume_ratio,
+                "money_volume": money_volume,
+                "breakout_quality": breakout_quality,
+                "confidence": confidence,
+                "reasons": [
+                    "Strong signal but confidence is too low"
+                ]
+            }
+
+        # -------------------------------------------------
+        # 19. TRADE
+        # -------------------------------------------------
+
+        reasons = [
+            "Strong momentum",
+            "Volume confirmation",
+            "Strong trade score"
+        ]
+
+        if rating >= 70:
+
             reasons.append(
-                "Negative momentum"
+                "High rating"
             )
-
-
-        if money_volume >= 10_000_000:
-
-            reasons.append(
-                "Strong liquidity"
-            )
-
 
         if volume_ratio >= 2:
 
@@ -253,75 +677,30 @@ class TradeDecisionEngine:
                 "Volume spike"
             )
 
-
-        elif volume_ratio >= 1.2:
+        if breakout_quality >= 50:
 
             reasons.append(
-                "Volume expansion"
+                "Breakout confirmed"
             )
 
-
-        # -------------------------------------------------
-        # Confidence
-        # -------------------------------------------------
-
-        confidence = "LOW"
-
-
-        if score >= 80:
-
-            confidence = "HIGH"
-
-        elif score >= 60:
-
-            confidence = "MEDIUM"
-
-
-        # -------------------------------------------------
-        # Финальное решение
-        # -------------------------------------------------
-
         return {
-
-            "decision":
-                "TRADE",
-
-            "ticker":
-                getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-
-            "direction":
-                direction,
-
-            "signal":
-                signal,
-
-            "trade_score":
-                score,
-
-            "rating":
-                rating,
-
-            "momentum_score":
-                momentum,
-
-            "volume_ratio":
-                volume_ratio,
-
-            "money_volume":
-                money_volume,
-
-            "confidence":
-                confidence,
-
-            "reasons":
-                reasons
-
+            "decision": "TRADE",
+            "ticker": getattr(
+                row,
+                "ticker",
+                ""
+            ),
+            "direction": direction,
+            "signal": signal,
+            "trade_score": score,
+            "rating": rating,
+            "momentum_score": momentum,
+            "volume_ratio": volume_ratio,
+            "money_volume": money_volume,
+            "breakout_quality": breakout_quality,
+            "confidence": confidence,
+            "reasons": reasons
         }
-
 
     # -------------------------------------------------
     # Массовая обработка
@@ -334,13 +713,11 @@ class TradeDecisionEngine:
 
         results = []
 
-
         for row in rows:
 
             result = self.evaluate(
                 row
             )
-
 
             if result.get(
                 "decision"
@@ -350,31 +727,26 @@ class TradeDecisionEngine:
                     result
                 )
 
-
         results.sort(
-
             key=lambda x: (
-
                 x.get(
                     "trade_score",
                     0
                 ),
-
                 x.get(
                     "momentum_score",
                     0
                 ),
-
                 x.get(
                     "rating",
                     0
+                ),
+                x.get(
+                    "volume_ratio",
+                    0
                 )
-
             ),
-
             reverse=True
-
         )
-
 
         return results

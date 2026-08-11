@@ -4,7 +4,10 @@ from services.trade_service import TradeService
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 from services.rating_service import RatingService
-from scanner.signal_engine import SignalEngine
+from services.volume_score_service import VolumeScoreService
+from services.breakout_service import BreakoutService
+from services.breakout_quality_service import BreakoutQualityService
+from services.signal_engine import SignalEngine
 from scanner.trade_decision_engine import TradeDecisionEngine
 from services.final_trade_service import FinalTradeService
 from models.scanner_row import ScannerRow
@@ -34,6 +37,9 @@ trade_service = TradeService()
 candle_service = CandleService()
 momentum_service = MomentumService()
 rating_service = RatingService()
+volume_score_service = VolumeScoreService()
+breakout_service = BreakoutService()
+breakout_quality_service = BreakoutQualityService()
 signal_engine = SignalEngine()
 decision_engine = TradeDecisionEngine()
 
@@ -258,15 +264,45 @@ for instrument in selected:
         )
 
 
-        signal = signal_engine.analyze(
-            {
-                **quote,
-                "ticker": ticker
+        volume_analysis = volume_score_service.calculate(volume=volume, average_volume=average_volume, money_volume=money_volume, average_money_volume=average_money_volume)
+
+        breakout = breakout_service.analyze(current_price=last, previous_high=previous_high, previous_low=previous_low, volume_ratio=volume_analysis.get("volume_ratio", 0))
+
+        breakout_quality = {}
+        if candles:
+            current_candle = candles[-1]
+            breakout_quality = breakout_quality_service.analyze(current_price=last, open_price=current_candle.get("open", 0), high_price=current_candle.get("high", 0), low_price=current_candle.get("low", 0), close_price=current_candle.get("close", 0), previous_high=previous_high, previous_low=previous_low)
+
+        signal_analysis = {
+            **quote,
+            "ticker": ticker,
+            "volume_score": float(
+                volume_analysis.get("volume_score", 0)
+            ),
+            "momentum_score": float(
+                momentum.get("momentum_score", 0)
+                if isinstance(momentum, dict)
+                else 0
+            ),
+            "breakout_score": float(breakout.get("breakout_score", 0) if isinstance(breakout, dict) else 0),
+            "breakout_quality_score": float(breakout_quality.get("breakout_quality_score", 0) if isinstance(breakout_quality, dict) else 0),
+            "breakout_strength": float(
+                momentum.get("breakout_strength", 0)
+                if isinstance(momentum, dict)
+                else 0
+            ),
+            "trade_score": {
+                "trade_score": float(
+                    rating.get("rating", 0)
+                    if isinstance(rating, dict)
+                    else rating
+                )
             },
-            momentum,
-            volume,
-            money_volume,
-            rating
+            "relative_strength_score": 50.0
+        }
+
+        signal = signal_engine.analyze(
+            signal_analysis
         )
 
 
@@ -293,7 +329,10 @@ for instrument in selected:
                 "volume_ratio",
                 0
             ),
-            volume_score=0,
+            volume_score=signal_analysis.get(
+                "volume_score",
+                0
+            ),
             momentum_score=momentum.get(
                 "momentum_score",
                 0
@@ -302,13 +341,19 @@ for instrument in selected:
                 "range_position",
                 0
             ),
-            trade_score=signal.get(
+            trade_score=signal_analysis.get(
+                "trade_score",
+                {}
+            ).get(
                 "trade_score",
                 0
             ),
-            direction=signal.get(
-                "direction",
-                ""
+            direction=(
+                "LONG"
+                if signal.get("signal", "").endswith("LONG")
+                else "SHORT"
+                if signal.get("signal", "").endswith("SHORT")
+                else ""
             ),
             confidence=signal.get(
                 "confidence",
@@ -318,7 +363,7 @@ for instrument in selected:
                 "reasons",
                 []
             ),
-            signal=momentum.get(
+            signal=signal.get(
                 "signal",
                 "NO_SIGNAL"
             )
