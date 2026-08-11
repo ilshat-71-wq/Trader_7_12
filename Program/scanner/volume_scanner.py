@@ -97,6 +97,61 @@ class VolumeScanner:
         if instruments is None:
             instruments = self.loader.load_trading_universe()
 
+        # ---------------------------------------------------------
+        # SCANNER UNIVERSE
+        # ---------------------------------------------------------
+        # Для основного market-data scan используем:
+        #   • акции SPBRU
+        #   • IMOEXF как benchmark
+        #
+        # Вместо 1110 инструментов получаем около 78.
+        # Вся последующая торговая логика остаётся без изменений.
+        # ---------------------------------------------------------
+
+        filtered_instruments = []
+
+        for instrument in instruments:
+
+            if (
+                instrument.get("asset") == "STOCK"
+                and instrument.get("classCode") == "SPBRU"
+            ):
+                filtered_instruments.append(instrument)
+
+            elif (
+                instrument.get("asset") == "IMOEX"
+                and instrument.get("ticker") == "IMOEXF"
+            ):
+                filtered_instruments.append(instrument)
+
+        instruments = filtered_instruments
+
+        print()
+        print(
+            "🔎 Scanner universe:",
+            len(instruments),
+            "instruments"
+        )
+
+        print(
+            "   SPBRU:",
+            sum(
+                1
+                for x in instruments
+                if x.get("classCode") == "SPBRU"
+            )
+        )
+
+        print(
+            "   IMOEXF:",
+            "YES"
+            if any(
+                x.get("ticker") == "IMOEXF"
+                for x in instruments
+            )
+            else "NO"
+        )
+
         if not instruments:
 
             print(
@@ -162,12 +217,6 @@ class VolumeScanner:
                 []
             )
 
-            print(
-                "MARKET DATA:",
-                ticker,
-                "trades:",
-                len(records)
-            )
 
             if not records:
                 continue
@@ -368,11 +417,6 @@ class VolumeScanner:
             if not prices:
                 continue
 
-            print(
-                "DEBUG candles:",
-                ticker,
-                len(candles)
-            )
 
             average_volume = (
                 total_volume / 5
@@ -426,7 +470,7 @@ class VolumeScanner:
                         for c in previous_candles
                     )
 
-            current_price = prices[0]
+            current_price = prices[-1]
 
             low = min(
                 prices

@@ -394,9 +394,9 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_last_trades(
-            self,
-            ticker,
-            class_code
+        self,
+        ticker,
+        class_code
     ):
 
         url = (
@@ -405,16 +405,8 @@ class BCSAPI:
 
         now = datetime.utcnow()
 
-        # -------------------------------------------------
-        # BCS API: MAXIMUM 1 HOUR PER REQUEST
-        # -------------------------------------------------
-        #
-        # BCS не разрешает запрашивать /last-trades
-        # более чем за 1 час одним запросом.
-        #
-        # Поэтому собираем последние 4 часа четырьмя
-        # последовательными запросами по 1 часу.
-        # -------------------------------------------------
+        # BCS: maximum 1 hour per request.
+        # One network failure must not stop scanner.
 
         records = []
 
@@ -452,37 +444,39 @@ class BCSAPI:
 
             }
 
-            print(
-                "TRADE PAYLOAD:",
-                payload
-            )
 
-            r = RequestHelper.post(
+            try:
 
-                url,
+                r = RequestHelper.post(
 
-                headers={
+                    url,
 
-                    **self.headers(),
+                    headers={
 
-                    "Content-Type":
-                        "application/json"
+                        **self.headers(),
 
-                },
+                        "Content-Type":
+                            "application/json"
 
-                json=payload
+                    },
 
-            )
+                    json=payload
 
-            print(
-                "Trades status:",
-                r.status_code
-            )
+                )
 
-            print(
-                "Trades raw:",
-                r.text[:500]
-            )
+            except Exception as exc:
+
+                print(
+                    "⚠️ Trades request failed:",
+                    ticker,
+                    class_code,
+                    type(exc).__name__,
+                    str(exc)
+                )
+
+                continue
+
+
 
             if r.status_code != 200:
                 continue
@@ -492,6 +486,12 @@ class BCSAPI:
                 data = r.json()
 
             except ValueError:
+
+                print(
+                    "⚠️ Trades JSON parse failed:",
+                    ticker,
+                    class_code
+                )
 
                 continue
 
@@ -506,9 +506,7 @@ class BCSAPI:
                     chunk
                 )
 
-        # -------------------------------------------------
-        # REMOVE DUPLICATES
-        # -------------------------------------------------
+        # Remove duplicates.
 
         unique_records = []
 
@@ -517,9 +515,26 @@ class BCSAPI:
         for record in records:
 
             key = (
-                record.get("time"),
-                record.get("price"),
-                record.get("volume")
+
+                record.get(
+                    "dateTime",
+                    record.get(
+                        "time"
+                    )
+                ),
+
+                record.get(
+                    "price"
+                ),
+
+                record.get(
+                    "volume"
+                ),
+
+                record.get(
+                    "quantity"
+                )
+
             )
 
             if key in seen:
@@ -531,15 +546,19 @@ class BCSAPI:
                 record
             )
 
-        # -------------------------------------------------
-        # SORT CHRONOLOGICALLY
-        # -------------------------------------------------
+        # Oldest -> newest.
 
         unique_records.sort(
-            key=lambda x: x.get(
-                "time",
-                ""
+
+            key=lambda x:
+            x.get(
+                "dateTime",
+                x.get(
+                    "time",
+                    ""
+                )
             )
+
         )
 
         print(
@@ -549,12 +568,39 @@ class BCSAPI:
             len(unique_records)
         )
 
+        if unique_records:
+
+            print(
+                "FIRST TRADE:",
+                unique_records[0].get(
+                    "dateTime",
+                    unique_records[0].get(
+                        "time"
+                    )
+                ),
+                unique_records[0].get(
+                    "price"
+                )
+            )
+
+            print(
+                "LAST TRADE:",
+                unique_records[-1].get(
+                    "dateTime",
+                    unique_records[-1].get(
+                        "time"
+                    )
+                ),
+                unique_records[-1].get(
+                    "price"
+                )
+            )
+
         return {
             "records":
                 unique_records
         }
 
-    # ---------------------------------------------------------
 
     def get_order_book(
             self,
