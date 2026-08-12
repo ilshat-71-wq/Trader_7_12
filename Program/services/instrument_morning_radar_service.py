@@ -23,9 +23,7 @@ IMOEX пока НЕ входит в итоговый score.
 Relative Strength будет добавлен отдельным этапом.
 """
 
-from services.morning_radar_service import (
-    MorningRadarService
-)
+from services.morning_radar_service import MorningRadarService
 
 
 class InstrumentMorningRadarService:
@@ -35,7 +33,6 @@ class InstrumentMorningRadarService:
     # ---------------------------------------------------------
 
     DEFAULT_INSTRUMENTS = {
-
         "SBER": "SPBRU",
         "LKOH": "SPBRU",
         "ROSN": "SPBRU",
@@ -549,6 +546,7 @@ class InstrumentMorningRadarService:
         """
 
         print()
+
         print(
             "=" * 90
         )
@@ -608,6 +606,7 @@ class InstrumentMorningRadarService:
             )
 
         print()
+
         print(
             "=" * 90
         )
