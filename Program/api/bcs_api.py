@@ -670,106 +670,218 @@ class BCSAPI:
 
     # ---------------------------------------------------------
 
+    
     def get_candles(
-            self,
-            ticker,
-            class_code,
-            interval="MINUTE_5"
+        self,
+        ticker,
+        class_code,
+        interval="M5",
+        start_time=None,
+        end_time=None
     ):
+        """
+        Загрузка исторических свечей BCS.
 
+        Поддерживаемые BCS timeFrame:
+
+            M1
+            M5
+            M15
+            M30
+            H1
+            H4
+            D
+
+        Для дневных свечей используется:
+            D
+
+        D1 / DAY / 1D не используются.
+
+        Если start_time/end_time не переданы,
+        используется стандартное окно последних 4 часов.
+        """
 
         url = (
-
-            f"{self.market_url}/candles"
-
+            f"{self.market_url}/candles-chart"
         )
 
+        # ---------------------------------------------------------
+        # NORMALIZE TIME
+        # ---------------------------------------------------------
 
+        def normalize_time(value):
 
-        now = datetime.now(
+            if value is None:
+                return None
 
-            timezone.utc
+            if isinstance(value, datetime):
 
-        )
+                dt = value
 
+            else:
 
-        start = now - timedelta(
+                text = str(value).strip()
 
-            hours=4
+                if text.endswith("Z"):
 
-        )
+                    text = (
+                        text[:-1]
+                        + "+00:00"
+                    )
 
-
-
-        payload = {
-
-
-            "ticker":
-
-                ticker,
-
-
-            "classCode":
-
-                class_code,
-
-
-            "interval":
-
-                interval,
-
-
-            "startDateTime":
-
-                start.strftime(
-
-                    "%Y-%m-%dT%H:%M:%S.000Z"
-
-                ),
-
-
-            "endDateTime":
-
-                now.strftime(
-
-                    "%Y-%m-%dT%H:%M:%S.000Z"
-
+                dt = datetime.fromisoformat(
+                    text
                 )
 
-        }
+            if dt.tzinfo is None:
 
+                dt = dt.replace(
+                    tzinfo=timezone.utc
+                )
 
+            return dt.astimezone(
+                timezone.utc
+            )
 
-        r = RequestHelper.post(
+        # ---------------------------------------------------------
+        # TIME RANGE
+        # ---------------------------------------------------------
 
-            url,
-
-            headers={
-
-                **self.headers(),
-
-                "Content-Type":
-
-                    "application/json"
-
-            },
-
-            json=payload
-
+        now = datetime.now(
+            timezone.utc
         )
 
+        try:
 
+            if end_time is not None:
+
+                end_dt = normalize_time(
+                    end_time
+                )
+
+            else:
+
+                end_dt = now
+
+            if start_time is not None:
+
+                start_dt = normalize_time(
+                    start_time
+                )
+
+            else:
+
+                start_dt = (
+                    end_dt
+                    - timedelta(
+                        hours=4
+                    )
+                )
+
+        except (
+            TypeError,
+            ValueError
+        ) as exc:
+
+            print()
+            print(
+                "❌ Invalid candle time:",
+                exc
+            )
+
+            return {}
+
+        if (
+            start_dt is None
+            or end_dt is None
+        ):
+
+            return {}
+
+        if start_dt >= end_dt:
+
+            print()
+            print(
+                "❌ Invalid candle period"
+            )
+
+            print(
+                "START:",
+                start_dt
+            )
+
+            print(
+                "END:",
+                end_dt
+            )
+
+            return {}
+
+        # ---------------------------------------------------------
+        # REQUEST
+        # ---------------------------------------------------------
+
+        params = {
+            "ticker": ticker,
+            "classCode": class_code,
+            "startDate": start_dt.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            ),
+            "endDate": end_dt.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            ),
+            "timeFrame": interval
+        }
+
+        print()
+        print(
+            "CANDLES URL:"
+        )
+
+        print(url)
+
+        print()
+        print(
+            "CANDLES PARAMS:"
+        )
+
+        print(params)
+
+        r = RequestHelper.get(
+            url,
+            headers=self.headers(),
+            params=params
+        )
+
+        print(
+            "Candles status:",
+            r.status_code
+        )
+
+        print(
+            "Candles raw:",
+            r.text[:1000]
+        )
 
         if r.status_code == 200:
 
-            return r.json()
+            try:
 
+                return r.json()
 
+            except ValueError:
+
+                print(
+                    "❌ Candles JSON error"
+                )
+
+                return {}
 
         return {}
 
+
     # ---------------------------------------------------------
-    # HISTORY TRADES
+# HISTORY TRADES
     # ---------------------------------------------------------
 
     def get_trades_history(
@@ -862,74 +974,79 @@ class BCSAPI:
             end_time
     ):
 
-        url = (
-            f"{self.market_url}/last-trades"
+        from datetime import datetime, timedelta
+
+        start = datetime.fromisoformat(
+            start_time.replace("Z", "+00:00")
         )
 
-
-        payload = {
-
-            "ticker":
-                ticker,
-
-            "classCode":
-                class_code,
-
-            "startDateTime":
-                start_time,
-
-            "endDateTime":
-                end_time
-
-        }
-
-
-        print()
-
-        print(
-            "PERIOD TRADES PAYLOAD:"
+        end = datetime.fromisoformat(
+            end_time.replace("Z", "+00:00")
         )
 
-        print(payload)
+        records = []
 
+        current = start
 
+        while current < end:
 
-        r = RequestHelper.post(
+            chunk_end = min(
+                current + timedelta(hours=1),
+                end
+            )
 
-            url,
+            payload = {
+                "ticker": ticker,
+                "classCode": class_code,
+                "startDateTime": current.isoformat(),
+                "endDateTime": chunk_end.isoformat()
+            }
 
-            headers={
+            print()
+            print("PERIOD TRADES PAYLOAD:")
+            print(payload)
 
-                **self.headers(),
+            r = RequestHelper.post(
+                f"{self.market_url}/last-trades",
+                headers={
+                    **self.headers(),
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
 
-                "Content-Type":
-                    "application/json"
+            print(
+                "Period trades status:",
+                r.status_code
+            )
 
-            },
+            if r.status_code == 200:
 
-            json=payload
+                data = r.json()
 
-        )
+                chunk_records = data.get(
+                    "records",
+                    []
+                )
 
+                records.extend(
+                    chunk_records
+                )
 
-        print(
-            "Period trades status:",
-            r.status_code
-        )
+                print(
+                    "Chunk records:",
+                    len(chunk_records)
+                )
 
+            else:
 
-        print(
-            "Period trades raw:",
-            r.text[:500]
-        )
+                print(
+                    "Period trades raw:",
+                    r.text[:500]
+                )
 
-
-        if r.status_code == 200:
-
-            return r.json()
-
+            current = chunk_end
 
         return {
-            "records": []
+            "records": records
         }
-
