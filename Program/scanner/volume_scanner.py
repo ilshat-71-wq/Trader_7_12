@@ -25,6 +25,7 @@ from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 from services.volume_score_service import VolumeScoreService
 from services.money_flow_service import MoneyFlowService
+from services.morning_money_radar_service import MorningMoneyRadarService
 from services.trade_score_service import TradeScoreService
 from services.diagnostic_service import DiagnosticService
 from services.breakout_service import BreakoutService
@@ -40,6 +41,8 @@ from services.trade_journal_service import TradeJournalService
 from services.trade_outcome_service import TradeOutcomeService
 from services.outcome_manager_service import OutcomeManagerService
 from services.relative_strength_service import RelativeStrengthService
+from services.history_candle_service import HistoryCandleService
+from datetime import datetime, timedelta, timezone
 
 
 class VolumeScanner:
@@ -51,6 +54,7 @@ class VolumeScanner:
         self.api = BCSAPI()
 
         self.candle_service = CandleService()
+        self.history_candle_service = HistoryCandleService()
 
         self.relative_strength_service = RelativeStrengthService()
 
@@ -60,6 +64,7 @@ class VolumeScanner:
         self.diagnostic_service = DiagnosticService()
         self.volume_score_service = VolumeScoreService()
         self.money_flow_service = MoneyFlowService()
+        self.morning_money_radar_service = MorningMoneyRadarService()
         self.breakout_service = BreakoutService()
         self.breakout_quality_service = BreakoutQualityService()
         self.trade_plan_service = TradePlanService()
@@ -262,10 +267,29 @@ class VolumeScanner:
 
                 continue
 
+            # -------------------------------------------------
+            # MORNING MONEY
+            # -------------------------------------------------
+            # Фактический денежный оборот по полученным сделкам.
+            # money = price * volume
+            # -------------------------------------------------
+
+            morning_money_volume = sum(
+                float(trade.get("price", 0) or 0)
+                * float(
+                    trade.get(
+                        "volume",
+                        trade.get("quantity", 0)
+                    ) or 0
+                )
+                for trade in records
+            )
+
             market_data[ticker] = {
                 "item": item,
                 "records": records,
-                "candles": candles
+                "candles": candles,
+                "morning_money_volume": morning_money_volume
             }
 
         # ---------------------------------------------------------
@@ -724,6 +748,28 @@ class VolumeScanner:
 
             analysis["money_volume_real"] = (
                 money_volume
+            )
+
+            # -----------------------------------------------------
+            # MORNING MONEY RADAR
+            # -----------------------------------------------------
+
+            morning_money_volume = (
+                data.get(
+                    "morning_money_volume",
+                    0
+                )
+            )
+
+            morning_money_radar = (
+                self.morning_money_radar_service.calculate(
+                    morning_money_volume=morning_money_volume,
+                    average_daily_money_volume=average_money_volume
+                )
+            )
+
+            analysis.update(
+                morning_money_radar
             )
 
         # -----------------------------------------------------

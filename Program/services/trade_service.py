@@ -105,7 +105,7 @@ class TradeService:
 
 
 
-        result = self.api.get_trades_history(
+        result = self.api.get_trades_period(
 
             ticker,
 
