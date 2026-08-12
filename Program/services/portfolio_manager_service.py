@@ -3,11 +3,14 @@ Trader_7_12 Pro
 
 Portfolio Manager Service
 
-Версия 0.1
+Версия 0.2
 
 Назначение:
-- выбор лучших независимых торговых идей
+
 - ограничение количества одновременно рекомендуемых сделок
+- сохранение порядка, определённого TradeRankerService
+- безопасная работа с trade_score
+- финальный portfolio-level cap
 """
 
 
@@ -18,14 +21,13 @@ class PortfolioManagerService:
         if not trades:
             return []
 
-        trades = sorted(
-            trades,
-            key=lambda x: (
-                x.get("confirmation_score", 0),
-                x.get("confidence", 0),
-                x.get("trade_score", {}).get("trade_score", 0)
-            ),
-            reverse=True
-        )
+        if max_positions <= 0:
+            return []
 
-        return trades[:max_positions]
+        # TradeRankerService уже выполнил основной ranking.
+        # Portfolio Manager не должен менять его порядок.
+        #
+        # Здесь задача только одна:
+        # ограничить количество финальных позиций.
+
+        return list(trades[:max_positions])
