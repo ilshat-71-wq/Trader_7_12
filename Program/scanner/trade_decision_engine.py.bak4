@@ -391,52 +391,6 @@ class TradeDecisionEngine:
             "EARLY_SHORT"
         ):
 
-            momentum_direction_ok = (
-
-                (
-                    signal == "EARLY_LONG"
-                    and direction == "LONG"
-                    and momentum >= 60
-                )
-
-                or
-
-                (
-                    signal == "EARLY_SHORT"
-                    and direction == "SHORT"
-                    and momentum <= -60
-                )
-
-            )
-
-            if (
-                momentum_direction_ok
-                and confidence >= 55
-                and score >= 55
-                and rating >= 55
-            ):
-
-                return self._result(
-                    "WATCH",
-                    row,
-                    direction,
-                    signal,
-                    score,
-                    rating,
-                    momentum,
-                    volume_ratio,
-                    money_volume,
-                    breakout_quality,
-                    confidence,
-                    [
-                        "Early setup",
-                        "Strong momentum confirmed",
-                    "Waiting for entry confirmation",
-                    "Early confirmation pending",
-                    "Entry confirmation pending"
-                    ]
-                )
-
             return self._result(
                 "WATCH",
                 row,
@@ -455,6 +409,7 @@ class TradeDecisionEngine:
                 ]
             )
 
+        # -----------------------------------------------------
         # 5. WATCH
         # -----------------------------------------------------
 

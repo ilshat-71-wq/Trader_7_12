@@ -417,7 +417,7 @@ class TradeDecisionEngine:
             ):
 
                 return self._result(
-                    "WATCH",
+                    "TRADE",
                     row,
                     direction,
                     signal,
@@ -431,9 +431,9 @@ class TradeDecisionEngine:
                     [
                         "Early setup",
                         "Strong momentum confirmed",
-                    "Waiting for entry confirmation",
-                    "Early confirmation pending",
-                    "Entry confirmation pending"
+                        "Trade score confirmed",
+                        "Rating confirmed",
+                        "Confidence confirmed"
                     ]
                 )
 

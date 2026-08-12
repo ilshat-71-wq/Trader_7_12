@@ -24,6 +24,7 @@ from api.bcs_api import BCSAPI
 from services.candle_service import CandleService
 from services.momentum_service import MomentumService
 from services.volume_score_service import VolumeScoreService
+from services.money_flow_service import MoneyFlowService
 from services.trade_score_service import TradeScoreService
 from services.diagnostic_service import DiagnosticService
 from services.breakout_service import BreakoutService
@@ -58,6 +59,7 @@ class VolumeScanner:
         self.trade_score_service = TradeScoreService()
         self.diagnostic_service = DiagnosticService()
         self.volume_score_service = VolumeScoreService()
+        self.money_flow_service = MoneyFlowService()
         self.breakout_service = BreakoutService()
         self.breakout_quality_service = BreakoutQualityService()
         self.trade_plan_service = TradePlanService()
@@ -724,55 +726,69 @@ class VolumeScanner:
                 money_volume
             )
 
-            # -----------------------------------------------------
+        # -----------------------------------------------------
             # VOLUME SCORE
             # -----------------------------------------------------
-
+    
             volume_score = (
                 self.volume_score_service.calculate(
-
+    
                     volume=int(
                         total_volume
                     ),
-
+    
                     average_volume=average_volume,
-
+    
                     money_volume=money_volume,
-
+    
                     average_money_volume=average_money_volume
-
+    
                 )
             )
-
+    
             analysis.update(
                 volume_score
             )
-
+    
+            # -----------------------------------------------------
+            # MONEY FLOW
+            # -----------------------------------------------------
+    
+            money_flow = (
+                self.money_flow_service.calculate(
+                    money_volume=money_volume,
+                    average_money_volume=average_money_volume
+                )
+            )
+    
+            analysis.update(
+                money_flow
+            )
+    
             # -----------------------------------------------------
             # BREAKOUT
             # -----------------------------------------------------
-
+    
             breakout = (
                 self.breakout_service.analyze(
-
+    
                     current_price=current_price,
-
+    
                     previous_high=previous_high,
-
+    
                     previous_low=previous_low,
-
+    
                     volume_ratio=volume_score[
                         "volume_ratio"
                     ]
-
+    
                 )
             )
-
+    
             analysis.update(
                 breakout
             )
-
-            # -----------------------------------------------------
+    
             # BREAKOUT QUALITY
             # -----------------------------------------------------
 

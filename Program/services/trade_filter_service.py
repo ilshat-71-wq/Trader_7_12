@@ -3,18 +3,19 @@ Trader_7_12 Pro
 
 Trade Filter Service
 
-Версия 0.3
+Версия 0.4
 
 Назначение:
+
 - финальный фильтр сделки
 - контроль качества входа
 - защита от слабых сигналов
 - оценка торгового допуска
+- отдельный допуск сильного EARLY momentum setup
 """
 
 
 class TradeFilterService:
-
 
     def check(
         self,
@@ -28,6 +29,9 @@ class TradeFilterService:
         volume_score=0
     ):
 
+        # -----------------------------------------------------
+        # NO SIGNAL
+        # -----------------------------------------------------
 
         if signal in (
             "NO_SIGNAL",
@@ -35,16 +39,62 @@ class TradeFilterService:
         ):
 
             return {
-
                 "allowed": False,
-
                 "level": "BLOCK",
-
                 "reason": "No signal"
-
             }
 
+        # -----------------------------------------------------
+        # EARLY MOMENTUM TRADE
+        # -----------------------------------------------------
+        #
+        # Разрешаем ранний вход без подтверждённого breakout,
+        # если momentum уже достаточно сильный и остальные
+        # параметры setup подтверждены.
+        #
+        # LONG:
+        #   momentum >= 60
+        #
+        # SHORT:
+        #   momentum <= -60
+        #
+        # Breakout для этой ветки НЕ обязателен.
+        # -----------------------------------------------------
 
+        early_momentum_ok = (
+
+            (
+                signal == "EARLY_LONG"
+                and momentum_score >= 60
+            )
+
+            or
+
+            (
+                signal == "EARLY_SHORT"
+                and momentum_score <= -60
+            )
+
+        )
+
+        if (
+            early_momentum_ok
+            and confidence >= 55
+            and trade_score >= 55
+            and volume_score >= 40
+            and rr_ratio >= 2
+        ):
+
+            return {
+                "allowed": True,
+                "level": "EARLY_TRADE",
+                "reason":
+                    "Strong momentum early setup"
+            }
+
+        # -----------------------------------------------------
+        # STRONG BREAKOUT TRADE
+        # -----------------------------------------------------
 
         if (
 
@@ -73,7 +123,9 @@ class TradeFilterService:
 
             }
 
-
+        # -----------------------------------------------------
+        # DEVELOPING BREAKOUT
+        # -----------------------------------------------------
 
         if (
 
@@ -100,7 +152,9 @@ class TradeFilterService:
 
             }
 
-
+        # -----------------------------------------------------
+        # BLOCK
+        # -----------------------------------------------------
 
         return {
 

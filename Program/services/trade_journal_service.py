@@ -3,15 +3,18 @@ Trader_7_12 Pro
 
 Trade Journal Service
 
-Версия 0.2
+Версия 0.3
 
 Назначение:
 
 - запись торговых идей
 - сохранение решений системы
-- разделение WATCH / CONFIRMED / OPEN
+- lifecycle WATCH / CONFIRMED / EXECUTE
+- преобразование EXECUTE -> ENTER для журнала
+- контроль OPEN / CLOSED сделок
+- защита закрытых сделок
+- deduplication активной торговой идеи
 - сохранение результатов закрытых сделок
-- анализ результатов
 """
 
 import json
@@ -38,6 +41,9 @@ class TradeJournalService:
                 encoding="utf-8"
             )
 
+    # ---------------------------------------------------------
+    # LOAD / SAVE
+    # ---------------------------------------------------------
 
     def _load(self):
 
@@ -46,7 +52,6 @@ class TradeJournalService:
                 encoding="utf-8"
             )
         )
-
 
     def _save(self, data):
 
@@ -59,70 +64,139 @@ class TradeJournalService:
             encoding="utf-8"
         )
 
+    # ---------------------------------------------------------
+    # STATUS
+    # ---------------------------------------------------------
+
+    def _status_for_decision(
+        self,
+        decision
+    ):
+
+        if decision == "EXECUTE":
+            return "OPEN"
+
+        if decision == "ENTER":
+            return "OPEN"
+
+        if decision == "CONFIRMED":
+            return "CONFIRMED"
+
+        return "WATCHING"
+
+    # ---------------------------------------------------------
+    # DECISION PRIORITY
+    # ---------------------------------------------------------
+
+    def _decision_priority(
+        self,
+        decision
+    ):
+
+        return {
+            "WATCH": 1,
+            "CONFIRMED": 2,
+            "EXECUTE": 3,
+            "ENTER": 3,
+        }.get(
+            decision,
+            0
+        )
+
+    # ---------------------------------------------------------
+    # ADD / UPDATE TRADE IDEA
+    # ---------------------------------------------------------
 
     def add_trade_idea(
         self,
         item
     ):
 
-        decision = item.get(
+        raw_decision = item.get(
             "confirmation_decision",
             ""
         )
+
+        # -----------------------------------------------------
+        # EXECUTE is the confirmation-layer command.
+        #
+        # ENTER is the journal-layer representation
+        # of a real open position.
+        # -----------------------------------------------------
+
+        if raw_decision == "EXECUTE":
+
+            decision = "ENTER"
+
+        else:
+
+            decision = raw_decision
 
         if decision not in (
             "WATCH",
             "CONFIRMED",
             "ENTER"
         ):
+
             return None
 
+        ticker = item.get(
+            "ticker"
+        )
+
+        signal = item.get(
+            "final_signal"
+        )
 
         journal = self._load()
 
+        new_status = (
+            self._status_for_decision(
+                decision
+            )
+        )
 
-        # ---------------------------------------------------------
-        # TRADE STATUS
-        # ---------------------------------------------------------
+        now = datetime.now().isoformat()
+
+        # -----------------------------------------------------
+        # FIND ACTIVE LIFECYCLE
+        # -----------------------------------------------------
         #
-        # WATCH
-        #     → идея находится под наблюдением
+        # Один ticker + один signal =
+        # одна текущая торговая идея.
         #
-        # CONFIRMED
-        #     → сигнал подтверждён, но реального входа ещё нет
-        #
-        # ENTER
-        #     → система дала команду на вход
-        #     → позиция считается OPEN
-        #
-        # Это важно для Outcome Manager:
-        # он должен контролировать только реальные OPEN сделки.
-        # ---------------------------------------------------------
+        # CLOSED записи не трогаем.
+        # -----------------------------------------------------
 
-        if decision == "ENTER":
+        active_trade = None
 
-            status = "OPEN"
+        for trade in journal:
 
-        elif decision == "CONFIRMED":
+            if trade.get(
+                "status"
+            ) == "CLOSED":
 
-            status = "CONFIRMED"
+                continue
 
-        else:
+            if (
+                trade.get("ticker") == ticker
+                and trade.get("signal") == signal
+            ):
 
-            status = "WATCHING"
+                active_trade = trade
+                break
 
+        # -----------------------------------------------------
+        # NEW RECORD
+        # -----------------------------------------------------
 
         record = {
 
-            "time": datetime.now().isoformat(),
+            "time": now,
 
-            "ticker": item.get(
-                "ticker"
-            ),
+            "ticker": ticker,
 
-            "signal": item.get(
-                "final_signal"
-            ),
+            "signal": signal,
 
             "side": item.get(
                 "side"
@@ -154,10 +228,13 @@ class TradeJournalService:
 
             "rr": item.get(
                 "rr_ratio",
-                0
+                item.get(
+                    "rr",
+                    0
+                )
             ),
 
-            "status": status,
+            "status": new_status,
 
             "exit_price": None,
 
@@ -176,77 +253,171 @@ class TradeJournalService:
 
         }
 
+        # -----------------------------------------------------
+        # NO ACTIVE TRADE
+        # -----------------------------------------------------
 
-        # ---------------------------------------------------------
-        # DEDUPLICATION
-        # ---------------------------------------------------------
+        if active_trade is None:
+
+            journal.append(
+                record
+            )
+
+            self._save(
+                journal
+            )
+
+            return record
+
+        # -----------------------------------------------------
+        # ACTIVE TRADE EXISTS
+        # -----------------------------------------------------
         #
-        # Не создаём несколько одинаковых текущих идей
-        # по одному инструменту / сигналу / решению.
+        # WATCH / CONFIRMED / ENTER are stages of the
+        # same lifecycle.
         #
-        # При этом WATCH, CONFIRMED и ENTER являются
-        # разными стадиями и могут существовать отдельно.
-        # ---------------------------------------------------------
+        # However, once a trade is OPEN, a later WATCH
+        # must never downgrade it back to WATCHING.
+        # -----------------------------------------------------
 
-        for trade in journal:
+        current_status = active_trade.get(
+            "status"
+        )
 
-            if (
-                trade.get("ticker") == record.get("ticker")
-                and trade.get("signal") == record.get("signal")
-                and trade.get("decision") == record.get("decision")
+        current_decision = active_trade.get(
+            "decision",
+            ""
+        )
+
+        # -----------------------------------------------------
+        # OPEN PROTECTION
+        # -----------------------------------------------------
+
+        if current_status == "OPEN":
+
+            # Do not downgrade an OPEN position.
+
+            if decision in (
+                "WATCH",
+                "CONFIRMED"
             ):
 
-                # Не перезаписываем уже закрытую сделку.
-                if trade.get("status") == "CLOSED":
+                return active_trade
 
-                    continue
+            # ENTER again means refresh the active
+            # entry parameters without creating
+            # a duplicate record.
 
+            if decision == "ENTER":
 
-                trade.update(
+                active_trade.update(
                     {
-                        "time": record.get("time"),
-                        "signal": record.get("signal"),
-                        "side": record.get("side"),
-                        "status": record.get("status"),
-                        "confidence": record.get("confidence"),
+                        "time": now,
+                        "decision": "ENTER",
+                        "entry": record.get(
+                            "entry"
+                        ),
+                        "stop": record.get(
+                            "stop"
+                        ),
+                        "target": record.get(
+                            "target"
+                        ),
+                        "rr": record.get(
+                            "rr"
+                        ),
+                        "confidence": record.get(
+                            "confidence"
+                        ),
                         "confirmation_score": record.get(
                             "confirmation_score"
                         ),
-                        "decision": record.get("decision"),
-                        "entry": record.get("entry"),
-                        "stop": record.get("stop"),
-                        "target": record.get("target"),
-                        "rr": record.get("rr"),
-                        "reasons": record.get("reasons"),
+                        "reasons": record.get(
+                            "reasons"
+                        ),
                     }
                 )
-
 
                 self._save(
                     journal
                 )
 
+                return active_trade
 
-                return trade
+        # -----------------------------------------------------
+        # LIFECYCLE UPGRADE
+        # -----------------------------------------------------
 
-
-        journal.append(
-            record
+        current_priority = (
+            self._decision_priority(
+                current_decision
+            )
         )
 
+        new_priority = (
+            self._decision_priority(
+                decision
+            )
+        )
+
+        # -----------------------------------------------------
+        # Do not downgrade an existing lifecycle.
+        # -----------------------------------------------------
+
+        if new_priority < current_priority:
+
+            return active_trade
+
+        # -----------------------------------------------------
+        # Update active lifecycle.
+        # -----------------------------------------------------
+
+        active_trade.update(
+            {
+                "time": now,
+                "decision": decision,
+                "entry": record.get(
+                    "entry"
+                ),
+                "stop": record.get(
+                    "stop"
+                ),
+                "target": record.get(
+                    "target"
+                ),
+                "rr": record.get(
+                    "rr"
+                ),
+                "status": new_status,
+                "confidence": record.get(
+                    "confidence"
+                ),
+                "confirmation_score": record.get(
+                    "confirmation_score"
+                ),
+                "reasons": record.get(
+                    "reasons"
+                ),
+            }
+        )
 
         self._save(
             journal
         )
 
+        return active_trade
 
-        return record
-
+    # ---------------------------------------------------------
+    # HISTORY
+    # ---------------------------------------------------------
 
     def get_history(self):
 
         return self._load()
 
+    # ---------------------------------------------------------
+    # UPDATE TRADE
+    # ---------------------------------------------------------
 
     def update_trade(
         self,
@@ -256,20 +427,19 @@ class TradeJournalService:
 
         journal = self._load()
 
-
-        if index < 0 or index >= len(journal):
+        if (
+            index < 0
+            or index >= len(journal)
+        ):
 
             return None
-
 
         journal[index].update(
             update_data
         )
 
-
         self._save(
             journal
         )
-
 
         return journal[index]
