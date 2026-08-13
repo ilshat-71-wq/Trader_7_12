@@ -771,12 +771,20 @@ class BCSAPI:
 
             else:
 
-                start_dt = (
-                    end_dt
-                    - timedelta(
-                        hours=4
+                if interval == "D":
+                    start_dt = (
+                        end_dt
+                        - timedelta(
+                            days=30
+                        )
                     )
-                )
+                else:
+                    start_dt = (
+                        end_dt
+                        - timedelta(
+                            hours=4
+                        )
+                    )
 
         except (
             TypeError,
