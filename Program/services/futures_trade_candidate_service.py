@@ -70,6 +70,29 @@ class FuturesTradeCandidateService:
         else:
             rs_bonus = 0.0
 
+        # Directional futures price-change adjustment:
+        # LONG  -> rising futures are favorable
+        # SHORT -> falling futures are favorable
+        # The adjustment is intentionally capped so it cannot dominate
+        # SPOT radar and futures confirmation.
+        futures_change = cls._float(
+            confirmation.get("price_change_percent")
+        )
+
+        if direction == "LONG":
+            directional_change = futures_change
+        elif direction == "SHORT":
+            directional_change = -futures_change
+        else:
+            directional_change = 0.0
+
+        if directional_change > 0:
+            futures_change_bonus = min(directional_change * 5.0, 5.0)
+        elif directional_change < 0:
+            futures_change_bonus = max(directional_change * 5.0, -5.0)
+        else:
+            futures_change_bonus = 0.0
+
         money_volume = cls._float(
             confirmation.get("money_volume", radar.get("spot_money_volume"))
         )
@@ -85,6 +108,7 @@ class FuturesTradeCandidateService:
             radar_score * 0.60
             + confirmation_score * 0.30
             + rs_bonus
+            + futures_change_bonus
             + liquidity_bonus
         )
         return round(min(score, 100.0), 2)
