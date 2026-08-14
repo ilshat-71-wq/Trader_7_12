@@ -54,6 +54,10 @@ class FinalTradeService:
         if direction not in {"LONG", "SHORT"}:
             return None
 
+        setup_state = str(candidate.get("setup_state") or "WAIT").upper()
+        if setup_state != "READY":
+            return None
+
         plan = self.trade_plan_service.generate_candidate_plan(candidate)
         if not plan.get("trade_plan"):
             return None
@@ -94,6 +98,9 @@ class FinalTradeService:
             "radar_score": self._float(candidate.get("radar_score")),
             "confirmation_score": self._float(candidate.get("confirmation_score")),
             "relative_strength": self._float(candidate.get("relative_strength")),
+            "trade_count": int(self._float(candidate.get("trade_count"))),
+            "money_volume": self._float(candidate.get("money_volume")),
+            "price_change_percent": self._float(candidate.get("price_change_percent")),
             "setup": candidate.get("setup", "NONE"),
             "setup_state": candidate.get("setup_state", "WAIT"),
             "reason": "READY candidate passed Trade Plan, RR and position-risk checks",

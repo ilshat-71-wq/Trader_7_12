@@ -71,6 +71,14 @@ class TestFinalTradeService:
     def test_not_ready_candidate_is_rejected(self):
         assert self.service.build(self.candidate(status="BLOCKED")) is None
 
+    def test_wait_setup_is_rejected(self):
+        candidate = self.candidate()
+        candidate["setup_state"] = "WAIT"
+        candidate["setup"] = "NONE"
+        candidate["entry_trigger"] = 0.0
+
+        assert self.service.build(candidate) is None
+
     def test_invalid_direction_is_rejected(self):
         assert self.service.build(self.candidate(direction="NONE")) is None
 
@@ -127,6 +135,7 @@ def run_tests():
         ("test_build_ready_final_trade", test.test_build_ready_final_trade),
         ("test_short_final_trade", test.test_short_final_trade),
         ("test_not_ready_candidate_is_rejected", test.test_not_ready_candidate_is_rejected),
+        ("test_wait_setup_is_rejected", test.test_wait_setup_is_rejected),
         ("test_invalid_direction_is_rejected", test.test_invalid_direction_is_rejected),
         ("test_invalid_futures_price_is_rejected", test.test_invalid_futures_price_is_rejected),
         ("test_position_respects_lot_size", test.test_position_respects_lot_size),
