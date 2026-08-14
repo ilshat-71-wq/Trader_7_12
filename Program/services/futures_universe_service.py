@@ -11,7 +11,7 @@ Purpose:
 - exclude expired / perpetual / technical contracts where they can be
   identified from the instrument metadata;
 - do NOT choose a fixed list of instruments;
-- do NOT perform Futures -> SPOT mapping yet.
+- do NOT perform Futures -> SPOT mapping here.
 
 The service is intentionally limited to universe construction. Trading
 logic belongs to later stages.
@@ -23,16 +23,16 @@ from api.bcs_api import BCSAPI
 
 
 class FuturesUniverseService:
-    """Build the dynamic futures universe used by the project."""
+    """Build the current dynamic futures universe used by the project."""
 
     FUTURES_TYPE = "FUTURES"
 
     def __init__(self, api=None):
         self.api = api or BCSAPI()
 
-    def load(self):
+    def load(self, authorize=True):
         """Return the current dynamic futures universe."""
-        if not self.api.authorize():
+        if authorize and not self.api.authorize():
             return []
 
         instruments = self.api.get_instruments(self.FUTURES_TYPE)
@@ -104,8 +104,19 @@ class FuturesUniverseService:
             "classCode": class_code,
             "name": name,
             "displayName": str(item.get("displayName") or "").strip(),
+            "shortName": str(item.get("shortName") or "").strip(),
             "expiry": expiry.isoformat(),
             "lotSize": item.get("lotSize", 1),
+            "underlyingTicker": item.get("underlyingTicker"),
+            "underlying_ticker": item.get("underlying_ticker"),
+            "underlyingSecurityCode": item.get("underlyingSecurityCode"),
+            "underlyingSecurity": item.get("underlyingSecurity"),
+            "baseTicker": item.get("baseTicker"),
+            "base_ticker": item.get("base_ticker"),
+            "spotTicker": item.get("spotTicker"),
+            "spot_ticker": item.get("spot_ticker"),
+            "underlyingAsset": item.get("underlyingAsset"),
+            "underlyingAssetTicker": item.get("underlyingAssetTicker"),
         }
 
     @staticmethod
