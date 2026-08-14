@@ -54,7 +54,7 @@ class FuturesSpotMappingService:
         if not self.api.authorize():
             return []
 
-        futures = self.futures_universe_service.load()
+        futures = self.futures_universe_service.load(authorize=False)
         stocks = self.api.get_instruments("STOCK")
 
         if not isinstance(stocks, list):
@@ -95,8 +95,7 @@ class FuturesSpotMappingService:
         if explicit:
             candidates = stock_index.get(explicit, [])
             if len(candidates) == 1:
-                stock = candidates[0]
-                return self._result(future, stock, "EXPLICIT")
+                return self._result(future, candidates[0], "EXPLICIT")
             if len(candidates) > 1:
                 return None
 
@@ -165,9 +164,9 @@ class FuturesSpotMappingService:
         if len(matches) > 1:
             return []
 
-        # Then allow a unique exact short-name token match. This is useful
+        # Then allow a unique exact short-name phrase match. This is useful
         # for metadata such as "SBER futures" when the underlying field is
-        # absent. Never accept a substring match that can create ambiguity.
+        # absent. Never accept an ambiguous match.
         for stock in stocks:
             ticker = str(stock.get("ticker") or "").strip().upper()
             short_name = str(
