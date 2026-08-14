@@ -27,7 +27,7 @@ from services.final_trade_service import FinalTradeService
 class MorningTradingPipelineService:
     """Build the final morning shortlist from the existing services."""
 
-    VERSION = "0.1"
+    VERSION = "0.2"
 
     def __init__(
         self,
@@ -39,7 +39,10 @@ class MorningTradingPipelineService:
         self.radar_service = radar_service or FuturesMorningRadarService()
 
         if confirmation_service is None:
-            confirmation_service = FuturesConfirmationService(api=BCSAPI())
+            api = BCSAPI()
+            if not api.authorize():
+                raise RuntimeError("BCS API authorization failed")
+            confirmation_service = FuturesConfirmationService(api=api)
         self.confirmation_service = confirmation_service
 
         self.candidate_service = (
