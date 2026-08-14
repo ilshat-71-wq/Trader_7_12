@@ -38,6 +38,14 @@ class MorningScannerRunner:
             print(f"  target: {item.get('take_profit', '-')}")
             print(f"  RR: {item.get('rr_ratio', '-')}")
             print(f"  score: {item.get('candidate_score', item.get('final_score', '-'))}")
+            print(f"  radar: {item.get('radar_score', '-')}")
+            print(f"  confirmation: {item.get('confirmation_score', '-')}")
+            print(f"  RS: {item.get('relative_strength', '-')}")
+            print(f"  trades: {item.get('trade_count', '-')}")
+            print(f"  money volume: {item.get('money_volume', '-')}")
+            print(f"  futures change: {item.get('price_change_percent', '-')}%")
+            print(f"  setup: {item.get('setup', '-')}")
+            print(f"  setup state: {item.get('setup_state', '-')}")
             print("-" * 76)
 
 

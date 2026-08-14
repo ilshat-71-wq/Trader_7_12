@@ -398,208 +398,101 @@ class BCSAPI:
         ticker,
         class_code
     ):
+        """Load recent futures trades for confirmation."""
 
-        url = (
-            f"{self.market_url}/last-trades"
-        )
+        url = f"{self.market_url}/last-trades"
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(minutes=30)
 
-        # BCS: maximum 1 hour per request.
-        # One network failure must not stop scanner.
-
-        records = []
-
-        for hour_index in range(4):
-
-            end_time = (
-                now - timedelta(
-                    hours=hour_index
-                )
+        payload = {
+            "ticker": ticker,
+            "classCode": class_code,
+            "startDateTime": start_time.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            ),
+            "endDateTime": now.strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
             )
+        }
 
-            start_time = (
-                end_time - timedelta(
-                    hours=1
-                )
+        try:
+            r = RequestHelper.post(
+                url,
+                headers={
+                    **self.headers(),
+                    "Content-Type": "application/json"
+                },
+                json=payload
             )
-
-            payload = {
-
-                "ticker":
-                    ticker,
-
-                "classCode":
-                    class_code,
-
-                "startDateTime":
-                    start_time.strftime(
-                        "%Y-%m-%dT%H:%M:%S.000Z"
-                    ),
-
-                "endDateTime":
-                    end_time.strftime(
-                        "%Y-%m-%dT%H:%M:%S.000Z"
-                    )
-
-            }
-
-
-            try:
-
-                r = RequestHelper.post(
-
-                    url,
-
-                    headers={
-
-                        **self.headers(),
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    json=payload
-
-                )
-
-            except Exception as exc:
-
-                print(
-                    "⚠️ Trades request failed:",
-                    ticker,
-                    class_code,
-                    type(exc).__name__,
-                    str(exc)
-                )
-
-                continue
-
-
-
-            if r.status_code != 200:
-                continue
-
-            try:
-
-                data = r.json()
-
-            except ValueError:
-
-                print(
-                    "⚠️ Trades JSON parse failed:",
-                    ticker,
-                    class_code
-                )
-
-                continue
-
-            chunk = data.get(
-                "records",
-                []
+        except Exception as exc:
+            print(
+                "⚠️ Trades request failed:",
+                ticker,
+                class_code,
+                type(exc).__name__,
+                str(exc)
             )
+            return {"records": []}
 
-            if chunk:
-
-                records.extend(
-                    chunk
-                )
-
-        # Remove duplicates.
-
-        unique_records = []
-
-        seen = set()
-
-        for record in records:
-
-            key = (
-
-                record.get(
-                    "dateTime",
-                    record.get(
-                        "time"
-                    )
-                ),
-
-                record.get(
-                    "price"
-                ),
-
-                record.get(
-                    "volume"
-                ),
-
-                record.get(
-                    "quantity"
-                )
-
+        if r.status_code != 200:
+            print(
+                "⚠️ Trades HTTP:",
+                ticker,
+                class_code,
+                r.status_code,
+                r.text[:300]
             )
+            return {"records": []}
 
-            if key in seen:
-                continue
-
-            seen.add(key)
-
-            unique_records.append(
-                record
+        try:
+            data = r.json()
+        except ValueError:
+            print(
+                "⚠️ Trades JSON parse failed:",
+                ticker,
+                class_code
             )
+            return {"records": []}
 
-        # Oldest -> newest.
+        records = data.get("records", [])
 
-        unique_records.sort(
+        if not isinstance(records, list):
+            records = []
 
-            key=lambda x:
-            x.get(
+        records.sort(
+            key=lambda x: x.get(
                 "dateTime",
-                x.get(
-                    "time",
-                    ""
-                )
+                x.get("time", "")
             )
-
         )
 
         print(
             "TRADES COLLECTED:",
             ticker,
             class_code,
-            len(unique_records)
+            len(records)
         )
 
-        if unique_records:
-
+        if records:
             print(
                 "FIRST TRADE:",
-                unique_records[0].get(
+                records[0].get(
                     "dateTime",
-                    unique_records[0].get(
-                        "time"
-                    )
+                    records[0].get("time")
                 ),
-                unique_records[0].get(
-                    "price"
-                )
+                records[0].get("price")
             )
-
             print(
                 "LAST TRADE:",
-                unique_records[-1].get(
+                records[-1].get(
                     "dateTime",
-                    unique_records[-1].get(
-                        "time"
-                    )
+                    records[-1].get("time")
                 ),
-                unique_records[-1].get(
-                    "price"
-                )
+                records[-1].get("price")
             )
 
-        return {
-            "records":
-                unique_records
-        }
+        return {"records": records}
 
 
     def get_order_book(
@@ -841,34 +734,10 @@ class BCSAPI:
             "timeFrame": interval
         }
 
-        print()
-        print(
-            "CANDLES URL:"
-        )
-
-        print(url)
-
-        print()
-        print(
-            "CANDLES PARAMS:"
-        )
-
-        print(params)
-
         r = RequestHelper.get(
             url,
             headers=self.headers(),
             params=params
-        )
-
-        print(
-            "Candles status:",
-            r.status_code
-        )
-
-        print(
-            "Candles raw:",
-            r.text[:1000]
         )
 
         if r.status_code == 200:

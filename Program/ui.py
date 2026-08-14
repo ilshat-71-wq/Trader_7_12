@@ -27,7 +27,7 @@ from PySide6.QtCore import Qt
 
 
 
-from scanner.volume_scanner import VolumeScanner
+from services.morning_trading_pipeline_service import MorningTradingPipelineService
 
 
 
@@ -53,7 +53,7 @@ class TraderWindow(QWidget):
 
 
 
-        self.scanner = VolumeScanner()
+        self.scanner = MorningTradingPipelineService()
 
 
         self.init_ui()
@@ -121,140 +121,61 @@ class TraderWindow(QWidget):
 
     def run_market_scan(self):
         self.result_box.setText(
-            "📡 Сканирование рынка BCS...\n\n"
-            "VolumeScanner анализирует ликвидность, объём, momentum и breakout."
+            "📡 Сканирование рынка BCS...\\n\\n"
+            "SPOT Radar → Futures Confirmation → Final Trade"
         )
 
         try:
-            results = self.scanner.scan()
+            results = self.scanner.scan(limit=3)
         except Exception as exc:
             self.result_box.setText(
-                "❌ Ошибка сканирования:\n\n"
+                "❌ Ошибка сканирования:\\n\\n"
                 f"{exc}"
             )
             return
 
         if not results:
             self.result_box.setText(
-                "⚠️ Торговые данные отсутствуют."
+                "🌙 Готовых торговых идей сейчас нет.\\n\\n"
+                "Pipeline не нашёл кандидатов, прошедших все проверки."
             )
             return
-
-        # Показываем только реальные торговые идеи.
-        tradable = [
-            item for item in results
-            if item.get("signal") not in ("NO_SIGNAL", None)
-        ]
-
-        if not tradable:
-            self.result_box.setText(
-                "🌙 Активных торговых идей нет.\n\n"
-                "Scanner завершил анализ без сигнала."
-            )
-            return
-
-        tradable.sort(
-            key=lambda item: float(item.get("confidence", 0)),
-            reverse=True
-        )
 
         output = [
             "================================",
             "TRADER_7_12 PRO",
-            "TOP TRADE IDEAS",
+            "MORNING TRADE SHORTLIST",
             "================================",
             "",
-            f"Всего результатов: {len(results)}",
-            f"Торговых идей: {len(tradable)}",
-            ""
+            f"Готовых сделок: {len(results)}",
+            "",
         ]
 
-        for index, item in enumerate(tradable[:3], start=1):
-            ticker = item.get("ticker", "UNKNOWN")
-            signal = item.get(
-                "final_signal",
-                item.get("signal", "NO_SIGNAL")
-            )
-
-            confidence = item.get("confidence", 0)
-            trade_score = item.get("trade_score", {})
-            trade_score_value = (
-                trade_score.get("trade_score", 0)
-                if isinstance(trade_score, dict)
-                else trade_score
-            )
-
-            entry = item.get("entry")
-            stop = item.get("stop_loss", item.get("stop"))
-            target = item.get("target")
-
-            rr = item.get("rr_ratio", 0)
-
-            volume_score = item.get("volume_score", 0)
-            volume_ratio = item.get("volume_ratio", 0)
-            momentum = item.get("momentum_score", 0)
-            breakout = item.get("breakout_score", 0)
-
-            confirmation = item.get(
-                "confirmation_decision",
-                "UNKNOWN"
-            )
-
+        for index, item in enumerate(results, 1):
             output.extend([
+                f"#{index}  {item.get('futures_ticker', '-')}"
+                f" / {item.get('spot_ticker', '-')}",
+                f"Направление: {item.get('direction', '-')}",
+                f"Вход:        {item.get('entry', '-')}",
+                f"Стоп:        {item.get('stop_loss', '-')}",
+                f"Цель:        {item.get('take_profit', '-')}",
+                f"RR:          {item.get('rr_ratio', '-')}",
+                f"Score:       {item.get('candidate_score', '-')}",
+                f"Radar:       {item.get('radar_score', '-')}",
+                f"Confirmation:{item.get('confirmation_score', '-')}",
+                f"RS:          {item.get('relative_strength', '-')}",
+                f"Setup:       {item.get('setup', '-')}",
+                f"Setup state: {item.get('setup_state', '-')}",
+                f"Risk:        {item.get('actual_risk_amount', '-')}",
+                f"Quantity:    {item.get('quantity', '-')}",
                 "",
-                f"#{index}  {ticker}",
                 "--------------------------------",
-                f"Signal:       {signal}",
-                f"Confidence:   {confidence}",
-                f"Trade score:  {trade_score_value}",
-                f"Confirmation: {confirmation}",
-                "",
-                f"Entry:        {entry}",
-                f"Stop:         {stop}",
-                f"Target:       {target}",
-                f"RR:           {rr}",
-                "",
-                f"Volume score: {volume_score}",
-                f"Volume ratio: {volume_ratio}",
-                f"Momentum:     {momentum}",
-                f"Breakout:     {breakout}",
             ])
 
-            reasons = item.get("reasons", [])
-
-            if reasons:
-                output.extend([
-                    "",
-                    "Reasons:"
-                ])
-
-                for reason in reasons:
-                    output.append(f"- {reason}")
-
-            trade_idea = item.get("trade_idea")
-
-            if trade_idea:
-                output.extend([
-                    "",
-                    f"Idea: {trade_idea}"
-                ])
-
-            output.append("")
+        output.extend([
+            "",
+            "READ ONLY — ОРДЕРА НЕ ОТПРАВЛЯЮТСЯ",
+            "Pipeline: SPOT RADAR → FUTURES CONFIRMATION → FINAL TRADE",
+        ])
 
         self.result_box.setText("\n".join(output))
-
-
-
-if __name__ == "__main__":
-
-
-    app = QApplication([])
-
-
-    window = TraderWindow()
-
-
-    window.show()
-
-
-    app.exec()

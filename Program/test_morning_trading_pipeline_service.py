@@ -98,7 +98,7 @@ class TestMorningTradingPipelineService:
         assert trades[0]["status"] == "READY"
         assert trades[0]["direction"] == "LONG"
         assert trades[0]["futures_ticker"] == "SRU6"
-        assert trades[0]["pipeline_version"] == "0.1"
+        assert trades[0]["pipeline_version"] == "0.2"
 
     def test_pipeline_rejects_blocked_confirmation(self):
         radar = self.radar()
