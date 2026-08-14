@@ -8,18 +8,19 @@ from services.morning_trading_pipeline_service import MorningTradingPipelineServ
 
 
 class MorningScannerRunner:
-    VERSION = "0.1"
+    VERSION = "0.2"
 
     def __init__(self, pipeline=None):
         self.pipeline = pipeline or MorningTradingPipelineService()
 
     def run(self, limit=3):
-        return self.pipeline.run(limit=limit)
+        """Run the real morning pipeline in read-only mode."""
+        return self.pipeline.scan(limit=limit)
 
     @staticmethod
     def print_results(results):
         print("=" * 76)
-        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.1")
+        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.2")
         print("READ ONLY — ORDERS ARE NOT SENT")
         print("=" * 76)
 
@@ -29,13 +30,14 @@ class MorningScannerRunner:
 
         for index, item in enumerate(results, 1):
             print(f"#{index}")
-            print(f"  ticker: {item.get('futures_ticker')}")
-            print(f"  direction: {item.get('direction')}")
-            print(f"  entry: {item.get('entry_price')}")
-            print(f"  stop: {item.get('stop_loss')}")
-            print(f"  target: {item.get('take_profit')}")
-            print(f"  score: {item.get('final_score')}")
-            print(f"  status: {item.get('status')}")
+            print(f"  futures: {item.get('futures_ticker', '-')}")
+            print(f"  spot: {item.get('spot_ticker', '-')}")
+            print(f"  direction: {item.get('direction', '-')}")
+            print(f"  entry: {item.get('entry', item.get('entry_price', '-'))}")
+            print(f"  stop: {item.get('stop_loss', '-')}")
+            print(f"  target: {item.get('take_profit', '-')}")
+            print(f"  RR: {item.get('rr_ratio', '-')}")
+            print(f"  score: {item.get('candidate_score', item.get('final_score', '-'))}")
             print("-" * 76)
 
 
