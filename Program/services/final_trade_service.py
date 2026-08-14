@@ -1,385 +1,141 @@
 """
 Trader_7_12 Pro
 
-Final Trade Service v0.1
+Final Trade Service v0.2
 
-Назначение:
+Final stage of the Spot-first morning trading pipeline.
 
-- объединение Trade Decision
-- построение Trade Plan
-- проверка Risk / Reward
-- расчет размера позиции
-- формирование финальной торговой идеи
+Pipeline:
+SPOT Radar -> Futures Confirmation -> Trade Candidate -> Trade Plan -> Final Trade
+
+The service does not invent direction, does not scan the market and does not
+place orders. It only converts a READY validated futures candidate into a
+risk-checked executable trade idea.
 """
 
 from services.trade_plan_service import TradePlanService
 from services.risk_management_service import RiskManagementService
-from services.trade_idea_service import TradeIdeaService
 
 
 class FinalTradeService:
+    VERSION = "0.2"
 
     def __init__(
         self,
         deposit=1_000_000,
         risk_percent=1.0,
         min_rr=1.5,
-        max_position_percent=20.0
+        max_position_percent=20.0,
     ):
-
-        self.version = "0.1"
-
-        self.trade_plan_service = (
-            TradePlanService()
+        self.trade_plan_service = TradePlanService()
+        self.risk_service = RiskManagementService(
+            deposit=deposit,
+            risk_percent=risk_percent,
+            min_rr=min_rr,
+            max_position_percent=max_position_percent,
         )
 
-        self.risk_service = (
-            RiskManagementService(
-                deposit=deposit,
-                risk_percent=risk_percent,
-                min_rr=min_rr,
-                max_position_percent=max_position_percent
-            )
-        )
+    @staticmethod
+    def _float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
-        self.trade_idea_service = (
-            TradeIdeaService()
-        )
-
-
-    # ---------------------------------------------------------
-    # BUILD FINAL TRADE
-    # ---------------------------------------------------------
-
-    def build(
-        self,
-        row,
-        decision
-    ):
-
-        if not decision:
-
+    def build(self, candidate, lot_size=1):
+        """Build one final trade from a READY candidate."""
+        if not isinstance(candidate, dict):
             return None
 
-
-        if decision.get("decision") != "TRADE":
-
+        if str(candidate.get("status", "")).upper() != "READY":
             return None
 
+        direction = str(candidate.get("direction") or "").upper()
+        if direction not in {"LONG", "SHORT"}:
+            return None
 
-        current_price = float(
-            getattr(
-                row,
-                "last",
-                0
-            )
-        )
-
-
-        signal = getattr(
-            row,
-            "signal",
-            ""
-        )
-
-
-        momentum_score = getattr(
-            row,
-            "momentum_score",
-            0
-        )
-
-
-        trade_score = decision.get(
-            "trade_score",
-            0
-        )
-
-
-        # -----------------------------------------------------
-        # Trade Plan
-        # -----------------------------------------------------
-
-        plan = self.trade_plan_service.generate_plan(
-
-            current_price=current_price,
-
-            signal=signal,
-
-            momentum_score=momentum_score,
-
-            breakout_score=0
-
-        )
-
-
+        plan = self.trade_plan_service.generate_candidate_plan(candidate)
         if not plan.get("trade_plan"):
-
             return None
 
-
-        # -----------------------------------------------------
-        # RR validation
-        # -----------------------------------------------------
-
-        rr_check = self.risk_service.validate_rr(
-
-            plan.get(
-                "rr_ratio",
-                0
-            )
-
-        )
-
-
+        rr_check = self.risk_service.validate_rr(plan.get("rr_ratio", 0))
         if not rr_check.get("valid"):
-
             return None
 
-
-        # -----------------------------------------------------
-        # Position size
-        # -----------------------------------------------------
-
-        instrument = getattr(
-            row,
-            "instrument",
-            {}
+        position = self.risk_service.calculate_position_size(
+            entry=plan.get("entry"),
+            stop_loss=plan.get("stop_loss"),
+            lot_size=lot_size,
         )
-
-
-        if not isinstance(
-            instrument,
-            dict
-        ):
-
-            instrument = {}
-
-
-        lot_size = instrument.get(
-            "lotSize",
-            getattr(
-                row,
-                "lot_size",
-                1
-            )
-        )
-
-
-        position = (
-            self.risk_service.calculate_position_size(
-
-                entry=plan.get(
-                    "entry"
-                ),
-
-                stop_loss=plan.get(
-                    "stop_loss"
-                ),
-
-                lot_size=lot_size
-
-            )
-        )
-
-
         if not position.get("valid"):
-
             return None
 
-
-        # -----------------------------------------------------
-        # Final idea object
-        # -----------------------------------------------------
-
-        item = {
-
-            "ticker":
-                getattr(
-                    row,
-                    "ticker",
-                    ""
-                ),
-
-            "trade_plan":
-                True,
-
-            "direction":
-                plan.get(
-                    "direction"
-                ),
-
-            "final_signal":
-                signal,
-
-            "confidence":
-                decision.get(
-                    "confidence",
-                    "LOW"
-                ),
-
-            "entry":
-                plan.get(
-                    "entry"
-                ),
-
-            "stop_loss":
-                plan.get(
-                    "stop_loss"
-                ),
-
-            "take_profit":
-                plan.get(
-                    "take_profit"
-                ),
-
-            "rr_ratio":
-                plan.get(
-                    "rr_ratio"
-                ),
-
-            "reasons":
-                decision.get(
-                    "reasons",
-                    []
-                ),
-
-            "trade_score":
-                trade_score,
-
-            "rating":
-                getattr(
-                    row,
-                    "rating",
-                    0
-                ),
-
-            "momentum_score":
-                momentum_score,
-
-            "position":
-                position,
-
-            "rr_validation":
-                rr_check
-
+        return {
+            "version": self.VERSION,
+            "status": "READY",
+            "futures_ticker": plan.get("futures_ticker"),
+            "futures_class_code": plan.get("futures_class_code"),
+            "spot_ticker": plan.get("spot_ticker"),
+            "direction": direction,
+            "entry": plan.get("entry"),
+            "stop_loss": plan.get("stop_loss"),
+            "take_profit": plan.get("take_profit"),
+            "rr_ratio": plan.get("rr_ratio"),
+            "risk_distance": plan.get("risk_distance"),
+            "quantity": position.get("quantity", 0),
+            "lots": position.get("lots", 0),
+            "lot_size": position.get("lot_size", 1),
+            "position_value": position.get("position_value", 0),
+            "target_risk_amount": position.get("target_risk_amount", 0),
+            "actual_risk_amount": position.get("actual_risk_amount", 0),
+            "risk_utilization": position.get("risk_utilization", 0),
+            "position_limited": position.get("position_limited", False),
+            "candidate_score": self._float(candidate.get("candidate_score")),
+            "radar_score": self._float(candidate.get("radar_score")),
+            "confirmation_score": self._float(candidate.get("confirmation_score")),
+            "relative_strength": self._float(candidate.get("relative_strength")),
+            "setup": candidate.get("setup", "NONE"),
+            "setup_state": candidate.get("setup_state", "WAIT"),
+            "reason": "READY candidate passed Trade Plan, RR and position-risk checks",
+            "trade_plan": plan,
+            "rr_validation": rr_check,
+            "position": position,
         }
 
+    def build_top(self, candidates, lot_sizes=None, limit=3):
+        """Convert READY candidates into final trades and rank them."""
+        if not isinstance(candidates, list):
+            return []
 
-        idea = self.trade_idea_service.generate(
-            item
-        )
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            raise TypeError("limit must be an integer")
+        if limit < 0:
+            raise ValueError("limit must be >= 0")
 
-
-        if not idea:
-
-            return None
-
-
-        idea["quantity"] = position.get(
-            "quantity",
-            0
-        )
-
-        idea["lots"] = position.get(
-            "lots",
-            0
-        )
-
-        idea["position_value"] = position.get(
-            "position_value",
-            0
-        )
-
-        idea["risk_amount"] = position.get(
-            "actual_risk_amount",
-            0
-        )
-
-        idea["risk_utilization"] = position.get(
-            "risk_utilization",
-            0
-        )
-
-        idea["trade_score"] = trade_score
-
-        idea["rating"] = getattr(
-            row,
-            "rating",
-            0
-        )
-
-        idea["momentum_score"] = momentum_score
-
-        return idea
-
-
-    # ---------------------------------------------------------
-    # BUILD TOP TRADES
-    # ---------------------------------------------------------
-
-    def build_top(
-        self,
-        rows,
-        decision_engine,
-        limit=3
-    ):
-
+        lot_sizes = lot_sizes if isinstance(lot_sizes, dict) else {}
         final_trades = []
 
-
-        for row in rows:
-
-            decision = (
-                decision_engine.evaluate(
-                    row
-                )
-            )
-
-
-            if decision.get(
-                "decision"
-            ) != "TRADE":
-
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
                 continue
-
-
-            idea = self.build(
-                row,
-                decision
-            )
-
-
-            if idea:
-
-                final_trades.append(
-                    idea
-                )
-
+            ticker = str(candidate.get("futures_ticker") or "").upper()
+            lot_size = lot_sizes.get(ticker, candidate.get("lot_size", 1))
+            trade = self.build(candidate, lot_size=lot_size)
+            if trade is not None:
+                final_trades.append(trade)
 
         final_trades.sort(
-
-            key=lambda x: (
-                x.get(
-                    "trade_score",
-                    0
-                ),
-
-                x.get(
-                    "momentum_score",
-                    0
-                ),
-
-                x.get(
-                    "rating",
-                    0
-                )
-
+            key=lambda item: (
+                item.get("candidate_score", 0),
+                item.get("confirmation_score", 0),
+                item.get("radar_score", 0),
             ),
-
-            reverse=True
-
+            reverse=True,
         )
 
+        for rank, trade in enumerate(final_trades, start=1):
+            trade["rank"] = rank
 
         return final_trades[:limit]
