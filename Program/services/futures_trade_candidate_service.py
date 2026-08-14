@@ -1,7 +1,7 @@
 """
 Trader_7_12 Pro
 
-Futures Trade Candidate Service
+Futures Trade Candidate Service.
 
 Stage 5 of the Spot-first architecture.
 
@@ -20,7 +20,7 @@ futures.
 class FuturesTradeCandidateService:
     """Build and rank final morning trade candidates."""
 
-    VERSION = "0.1"
+    VERSION = "0.2"
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -104,13 +104,23 @@ class FuturesTradeCandidateService:
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
+            "futures_price": cls._float(
+                confirmation.get("last_price")
+            ),
             "spot_ticker": radar.get("spot_ticker"),
             "spot_class_code": radar.get("spot_class_code"),
+            "spot_price": cls._float(radar.get("spot_price")),
             "radar_score": round(cls._float(radar.get("radar_score")), 2),
             "relative_strength": cls._float(radar.get("relative_strength")),
             "confirmation_score": cls._float(confirmation.get("score")),
             "money_volume": cls._float(confirmation.get("money_volume")),
             "trade_count": int(cls._float(confirmation.get("trade_count"))),
+            "setup": radar.get("setup", "NONE"),
+            "setup_direction": radar.get("setup_direction", direction),
+            "setup_state": radar.get("setup_state", "WAIT"),
+            "entry_trigger": cls._float(radar.get("entry_trigger")),
+            "previous_high": cls._float(radar.get("previous_high")),
+            "previous_low": cls._float(radar.get("previous_low")),
             "candidate_score": score,
         }
 
