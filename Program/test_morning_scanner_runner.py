@@ -6,7 +6,7 @@ class FakePipeline:
         self.result = result
         self.calls = []
 
-    def run(self, limit=3):
+    def scan(self, limit=3):
         self.calls.append(limit)
         return self.result[:limit]
 
