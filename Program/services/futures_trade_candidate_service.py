@@ -54,8 +54,21 @@ class FuturesTradeCandidateService:
             min(100.0, cls._float(confirmation.get("score")))
         )
 
-        rs = abs(cls._float(radar.get("relative_strength")))
-        rs_bonus = min(rs * 20.0, 10.0)
+        direction = cls._direction(radar)
+        rs = cls._float(radar.get("relative_strength"))
+
+        # Directional relative-strength adjustment:
+        # LONG  -> positive RS is favorable
+        # SHORT -> negative RS is favorable
+        # Opposite RS is penalized.
+        directional_rs = rs if direction == "LONG" else -rs
+
+        if directional_rs > 0:
+            rs_bonus = min(directional_rs * 20.0, 10.0)
+        elif directional_rs < 0:
+            rs_bonus = max(directional_rs * 20.0, -10.0)
+        else:
+            rs_bonus = 0.0
 
         money_volume = cls._float(
             confirmation.get("money_volume", radar.get("spot_money_volume"))
@@ -115,6 +128,9 @@ class FuturesTradeCandidateService:
             "confirmation_score": cls._float(confirmation.get("score")),
             "money_volume": cls._float(confirmation.get("money_volume")),
             "trade_count": int(cls._float(confirmation.get("trade_count"))),
+            "price_change_percent": cls._float(
+                confirmation.get("price_change_percent")
+            ),
             "setup": radar.get("setup", "NONE"),
             "setup_direction": radar.get("setup_direction", direction),
             "setup_state": radar.get("setup_state", "WAIT"),
