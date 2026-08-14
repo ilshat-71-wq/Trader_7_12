@@ -30,7 +30,7 @@ class TestFinalTradeService:
             "setup_state": "READY",
             "entry_trigger": 299.0,
             "previous_high": 305.0,
-            "previous_low": 295.0,
+            "previous_low": 95.0,
             "candidate_score": 88.0,
             "radar_score": 90.0,
             "confirmation_score": 85.0,
@@ -121,6 +121,8 @@ class TestFinalTradeService:
 
 def run_tests():
     test = TestFinalTradeService()
+    test.setup_method()
+
     tests = [
         ("test_build_ready_final_trade", test.test_build_ready_final_trade),
         ("test_short_final_trade", test.test_short_final_trade),
