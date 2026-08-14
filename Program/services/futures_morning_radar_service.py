@@ -7,19 +7,23 @@ Stage 3 of the Spot-first architecture.
 
 Purpose:
 - connect the dynamic futures universe to Futures -> SPOT mapping;
-- run the existing InstrumentMorningRadarService on the mapped SPOT assets;
-- return one ordered shortlist where every radar result still points to its
-  source futures contract.
+- keep one current futures contract per SPOT underlying;
+- run the existing InstrumentMorningRadarService on each unique SPOT;
+- return one ordered shortlist where every radar result points to its
+  selected futures contract.
 
 Architecture:
     FuturesUniverseService
         -> FuturesSpotMappingService
+        -> FuturesMorningRadarService
         -> InstrumentMorningRadarService
-        -> Futures Morning Radar candidates
+        -> shortlist
 
 This service is an orchestration layer only.
 It does not contain trading-entry logic and does not place orders.
 """
+
+from datetime import date
 
 from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.instrument_morning_radar_service import InstrumentMorningRadarService
@@ -28,7 +32,7 @@ from services.instrument_morning_radar_service import InstrumentMorningRadarServ
 class FuturesMorningRadarService:
     """Build the current futures shortlist through the SPOT-first radar."""
 
-    VERSION = "0.1"
+    VERSION = "0.2"
 
     def __init__(self, mapping_service=None, radar_service=None):
         self.mapping_service = (
@@ -40,10 +44,11 @@ class FuturesMorningRadarService:
 
     def scan(self, mappings=None, limit=None):
         """
-        Run Morning Radar for every uniquely mapped SPOT.
+        Run Morning Radar for the current futures contracts.
 
-        ``mappings`` may be supplied by tests or by a later caller. When it
-        is omitted, the dynamic Futures -> SPOT mapping service is used.
+        If several futures contracts point to the same SPOT, only the
+        nearest non-expired contract is analyzed. This prevents the same
+        underlying from appearing several times in the morning shortlist.
         """
         if mappings is None:
             mappings = self.mapping_service.load()
@@ -51,6 +56,7 @@ class FuturesMorningRadarService:
         if not isinstance(mappings, list):
             return []
 
+        mappings = self._select_current_contracts(mappings)
         results = []
 
         for mapping in mappings:
@@ -70,10 +76,7 @@ class FuturesMorningRadarService:
                 mapping.get("spot_class_code") or ""
             ).strip()
 
-            if not futures_ticker or not spot_ticker:
-                continue
-
-            if not spot_class_code:
+            if not futures_ticker or not spot_ticker or not spot_class_code:
                 continue
 
             try:
@@ -111,10 +114,7 @@ class FuturesMorningRadarService:
 
             results.append(result)
 
-        results.sort(
-            key=self._sort_key,
-            reverse=True
-        )
+        results.sort(key=self._sort_key, reverse=True)
 
         for rank, result in enumerate(results, start=1):
             result["rank"] = rank
@@ -131,6 +131,70 @@ class FuturesMorningRadarService:
             return results[:limit]
 
         return results
+
+    @classmethod
+    def _select_current_contracts(cls, mappings):
+        """Keep only the nearest valid futures contract for each SPOT."""
+        selected = {}
+
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+
+            spot_ticker = str(
+                mapping.get("spot_ticker") or ""
+            ).strip().upper()
+            if not spot_ticker:
+                continue
+
+            expiry = cls._parse_expiry(mapping.get("futures_expiry"))
+            if expiry is None:
+                # Do not guess an expiry. Such a mapping is not suitable
+                # for deterministic current-contract selection.
+                continue
+
+            if expiry < date.today():
+                continue
+
+            candidate = dict(mapping)
+            candidate["futures_expiry"] = expiry.isoformat()
+
+            current = selected.get(spot_ticker)
+            if current is None:
+                selected[spot_ticker] = candidate
+                continue
+
+            current_expiry = cls._parse_expiry(
+                current.get("futures_expiry")
+            )
+
+            if current_expiry is None or expiry < current_expiry:
+                selected[spot_ticker] = candidate
+
+        return sorted(
+            selected.values(),
+            key=lambda item: (
+                str(item.get("spot_ticker") or ""),
+                str(item.get("futures_ticker") or ""),
+            )
+        )
+
+    @staticmethod
+    def _parse_expiry(value):
+        if value is None:
+            return None
+
+        if isinstance(value, date):
+            return value
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
 
     @staticmethod
     def _sort_key(item):
@@ -156,7 +220,7 @@ class FuturesMorningRadarService:
         print()
         print(
             f"{'RANK':<6}{'FUTURES':<12}{'SPOT':<9}"
-            f"{'DIR':<8}{'RADAR':<9}{'RS':<10}"
+            f"{'EXPIRY':<12}{'DIR':<8}{'RADAR':<9}{'RS':<10}"
             f"{'SIGNAL':<15}STATUS"
         )
         print("-" * 110)
@@ -166,6 +230,7 @@ class FuturesMorningRadarService:
                 f"{item.get('rank', '-'): <6}"
                 f"{item.get('futures_ticker', '-'): <12}"
                 f"{item.get('spot_ticker', '-'): <9}"
+                f"{item.get('futures_expiry', '-'): <12}"
                 f"{item.get('direction', '-'): <8}"
                 f"{float(item.get('radar_score', 0) or 0):>7.2f}  "
                 f"{float(item.get('relative_strength', 0) or 0):>8.4f} "
@@ -175,5 +240,6 @@ class FuturesMorningRadarService:
 
         print()
         print("Pipeline: FUTURES -> SPOT -> Morning Radar")
+        print("One current futures contract per SPOT is retained.")
         print("No trade execution is performed by this service.")
         print("=" * 110)
