@@ -6,18 +6,13 @@ Futures -> SPOT Mapping Service
 Stage 2 of the Spot-first architecture.
 
 Purpose:
-- build a dynamic mapping from eligible futures to their base SPOT asset;
-- use BCS instrument metadata when an explicit underlying ticker is present;
-- otherwise use conservative matching against the current stock universe;
-- reject ambiguous or unmapped contracts instead of guessing;
-- keep mapping separate from trading logic.
+- map the dynamic MOEX futures universe to the corresponding SPOT asset;
+- use explicit BCS underlying metadata whenever available;
+- support stocks, currencies, commodities and indices instead of a
+  stock-only universe;
+- reject ambiguous or unmapped contracts instead of guessing.
 
-The service does NOT generate a trade signal and does NOT select a futures
-contract for execution. It only answers:
-
-    FUTURES -> BASE SPOT
-
-No fixed seven-instrument universe is used.
+There is deliberately NO fixed seven-instrument universe here.
 """
 
 import re
@@ -27,19 +22,37 @@ from services.futures_universe_service import FuturesUniverseService
 
 
 class FuturesSpotMappingService:
-    """Build a conservative dynamic Futures -> SPOT mapping."""
+    """Build a dynamic, conservative Futures -> SPOT mapping."""
+
+    SPOT_INSTRUMENT_TYPES = (
+        "STOCK",
+        "CURRENCY",
+        "COMMODITY",
+        "INDEX",
+    )
 
     EXPLICIT_SPOT_KEYS = (
         "underlyingTicker",
         "underlying_ticker",
         "underlyingSecurityCode",
-        "underlyingSecurity",
-        "baseTicker",
-        "base_ticker",
+        "underlyingAssetTicker",
         "spotTicker",
         "spot_ticker",
+        "baseTicker",
+        "base_ticker",
+        "underlyingSecurity",
         "underlyingAsset",
-        "underlyingAssetTicker",
+    )
+
+    EXPLICIT_CLASS_KEYS = (
+        "underlyingClassCode",
+        "underlying_class_code",
+        "underlyingSecurityClassCode",
+        "underlying_security_class_code",
+        "spotClassCode",
+        "spot_class_code",
+        "baseClassCode",
+        "base_class_code",
     )
 
     def __init__(self, api=None, futures_universe_service=None):
@@ -50,90 +63,169 @@ class FuturesSpotMappingService:
         )
 
     def load(self):
-        """Return only futures for which a unique SPOT mapping is found."""
+        """Return every eligible future for which a unique SPOT is known."""
         if not self.api.authorize():
             return []
 
         futures = self.futures_universe_service.load(authorize=False)
-        stocks = self.api.get_instruments("STOCK")
+        spots = self._load_spot_instruments()
 
-        if not isinstance(stocks, list):
+        if not isinstance(futures, list) or not spots:
             return []
 
-        stock_index = self._build_stock_index(stocks)
+        spot_index = self._build_spot_index(spots)
         result = []
 
         for future in futures:
-            mapping = self._map_future(future, stocks, stock_index)
+            mapping = self._map_future(future, spots, spot_index)
             if mapping is not None:
                 result.append(mapping)
 
         return result
 
-    def map_futures(self, futures, stocks):
-        """Map supplied normalized futures to supplied raw stock metadata."""
-        stock_index = self._build_stock_index(stocks)
+    def map_futures(self, futures, spots):
+        """Map supplied normalized futures to supplied raw SPOT metadata."""
+        spot_index = self._build_spot_index(spots)
         result = []
 
         for future in futures:
-            mapping = self._map_future(future, stocks, stock_index)
+            mapping = self._map_future(future, spots, spot_index)
             if mapping is not None:
                 result.append(mapping)
 
         return result
 
-    def _map_future(self, future, stocks, stock_index):
+    def _load_spot_instruments(self):
+        """Load supported SPOT types; unavailable types are skipped."""
+        result = []
+        seen = set()
+
+        for instrument_type in self.SPOT_INSTRUMENT_TYPES:
+            try:
+                records = self.api.get_instruments(instrument_type)
+            except Exception:
+                continue
+
+            if not isinstance(records, list):
+                continue
+
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+
+                ticker = str(record.get("ticker") or "").strip().upper()
+                class_code = self._class_code(record)
+
+                if not ticker or not class_code:
+                    continue
+
+                key = (ticker, class_code)
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                result.append(record)
+
+        return result
+
+    @staticmethod
+    def _class_code(item):
+        boards = item.get("boards") or []
+        if isinstance(boards, list):
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+                value = str(board.get("classCode") or "").strip()
+                if value:
+                    return value
+
+        return str(item.get("classCode") or "").strip()
+
+    @classmethod
+    def _build_spot_index(cls, spots):
+        index = {}
+
+        for spot in spots:
+            if not isinstance(spot, dict):
+                continue
+
+            ticker = str(spot.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+
+            index.setdefault(ticker, []).append(spot)
+
+        return index
+
+    @classmethod
+    def _map_future(cls, future, spots, spot_index):
         if not isinstance(future, dict):
             return None
 
-        ticker = str(future.get("ticker") or "").strip().upper()
-        class_code = str(future.get("classCode") or "").strip()
-        if not ticker or not class_code:
+        futures_ticker = str(future.get("ticker") or "").strip().upper()
+        futures_class_code = str(future.get("classCode") or "").strip()
+
+        if not futures_ticker or not futures_class_code:
             return None
 
-        explicit = self._explicit_underlying(future)
-        if explicit:
-            candidates = stock_index.get(explicit, [])
+        explicit = cls._explicit_underlying(future)
+
+        if explicit["ticker"]:
+            candidates = spot_index.get(explicit["ticker"], [])
+
+            if explicit["class_code"]:
+                candidates = [
+                    item for item in candidates
+                    if cls._class_code(item) == explicit["class_code"]
+                ]
+
             if len(candidates) == 1:
-                return self._result(future, candidates[0], "EXPLICIT")
+                return cls._result(future, candidates[0], "EXPLICIT")
+
             if len(candidates) > 1:
                 return None
 
-        text = self._search_text(future)
-        matches = self._match_stocks(text, stocks, stock_index)
+        text = cls._search_text(future)
+        matches = cls._match_spots(text, spots, spot_index)
 
         if len(matches) != 1:
             return None
 
-        return self._result(future, matches[0], "STOCK_METADATA")
-
-    @classmethod
-    def _build_stock_index(cls, stocks):
-        index = {}
-        for stock in stocks:
-            if not isinstance(stock, dict):
-                continue
-
-            ticker = str(stock.get("ticker") or "").strip().upper()
-            if not ticker:
-                continue
-
-            index.setdefault(ticker, []).append(stock)
-        return index
+        return cls._result(future, matches[0], "SPOT_METADATA")
 
     @classmethod
     def _explicit_underlying(cls, future):
+        ticker = ""
+        class_code = ""
+
         for key in cls.EXPLICIT_SPOT_KEYS:
             value = future.get(key)
+
             if isinstance(value, dict):
-                value = (
+                ticker = str(
                     value.get("ticker")
                     or value.get("securityCode")
                     or value.get("code")
-                )
+                    or ""
+                ).strip().upper()
+                class_code = str(
+                    value.get("classCode")
+                    or value.get("class_code")
+                    or ""
+                ).strip()
+            elif value:
+                ticker = str(value).strip().upper()
+
+            if ticker:
+                break
+
+        for key in cls.EXPLICIT_CLASS_KEYS:
+            value = future.get(key)
             if value:
-                return str(value).strip().upper()
-        return ""
+                class_code = str(value).strip()
+                break
+
+        return {"ticker": ticker, "class_code": class_code}
 
     @staticmethod
     def _search_text(future):
@@ -143,17 +235,13 @@ class FuturesSpotMappingService:
             future.get("displayName"),
             future.get("shortName"),
         )
-        return " ".join(
-            str(value or "").upper()
-            for value in values
-        )
+        return " ".join(str(value or "").upper() for value in values)
 
     @classmethod
-    def _match_stocks(cls, text, stocks, stock_index):
+    def _match_spots(cls, text, spots, spot_index):
         matches = []
 
-        # First prefer an exact ticker token in the future metadata.
-        for ticker, candidates in stock_index.items():
+        for ticker, candidates in spot_index.items():
             if len(candidates) != 1:
                 continue
             if cls._contains_token(text, ticker):
@@ -164,27 +252,22 @@ class FuturesSpotMappingService:
         if len(matches) > 1:
             return []
 
-        # Then allow a unique exact short-name phrase match. This is useful
-        # for metadata such as "SBER futures" when the underlying field is
-        # absent. Never accept an ambiguous match.
-        for stock in stocks:
-            ticker = str(stock.get("ticker") or "").strip().upper()
+        for spot in spots:
             short_name = str(
-                stock.get("shortName")
-                or stock.get("displayName")
+                spot.get("shortName")
+                or spot.get("displayName")
                 or ""
             ).strip().upper()
-            if not ticker or not short_name:
-                continue
 
-            if cls._contains_phrase(text, short_name):
-                matches.append(stock)
+            if short_name and cls._contains_phrase(text, short_name):
+                matches.append(spot)
 
         unique = {}
-        for stock in matches:
-            ticker = str(stock.get("ticker") or "").strip().upper()
-            if ticker:
-                unique[ticker] = stock
+        for spot in matches:
+            ticker = str(spot.get("ticker") or "").strip().upper()
+            class_code = cls._class_code(spot)
+            if ticker and class_code:
+                unique[(ticker, class_code)] = spot
 
         return list(unique.values())
 
@@ -199,25 +282,25 @@ class FuturesSpotMappingService:
 
     @staticmethod
     def _contains_phrase(text, phrase):
-        if not phrase:
-            return False
-        return phrase in text
+        return bool(phrase) and phrase in text
 
-    @staticmethod
-    def _result(future, stock, method):
+    @classmethod
+    def _result(cls, future, spot, method):
         return {
             "futures_ticker": future.get("ticker"),
             "futures_class_code": future.get("classCode"),
             "futures_expiry": future.get("expiry"),
-            "spot_ticker": str(stock.get("ticker") or "").strip().upper(),
-            "spot_class_code": str(
-                stock.get("classCode")
-                or "TQBR"
-            ).strip(),
+            "spot_ticker": str(spot.get("ticker") or "").strip().upper(),
+            "spot_class_code": cls._class_code(spot),
             "spot_name": str(
-                stock.get("shortName")
-                or stock.get("displayName")
+                spot.get("shortName")
+                or spot.get("displayName")
                 or ""
             ).strip(),
+            "spot_type": str(
+                spot.get("type")
+                or spot.get("instrumentType")
+                or ""
+            ).strip().upper(),
             "mapping_method": method,
         }
