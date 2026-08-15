@@ -38,15 +38,25 @@ def _forward_outcome(service, item, endpoint):
         return {"available": False}
 
     directional_return = (last_price - entry_price) / entry_price * 100.0 * sign
+
+    # For LONG, favorable movement is the candle high and adverse movement is
+    # the candle low. For SHORT the interpretation is reversed: the low is
+    # favorable and the high is adverse.
     favorable = []
     adverse = []
     for candle in candles:
         high = float(candle.get("high", 0) or 0)
         low = float(candle.get("low", 0) or 0)
-        if high > 0:
-            favorable.append(((high - entry_price) / entry_price * 100.0) * sign)
-        if low > 0:
-            adverse.append(((low - entry_price) / entry_price * 100.0) * sign)
+        if direction == "LONG":
+            if high > 0:
+                favorable.append((high - entry_price) / entry_price * 100.0)
+            if low > 0:
+                adverse.append((low - entry_price) / entry_price * 100.0)
+        else:
+            if low > 0:
+                favorable.append((entry_price - low) / entry_price * 100.0)
+            if high > 0:
+                adverse.append((entry_price - high) / entry_price * 100.0)
 
     return {
         "available": True,
@@ -99,7 +109,6 @@ def main():
     print("-" * 200)
 
     for item in rows:
-        confirmation = item.get("futures_confirmation") or {}
         rs_data = item.get("relative_strength_data") or {}
         rs = float(item.get("relative_strength", 0) or 0)
 
