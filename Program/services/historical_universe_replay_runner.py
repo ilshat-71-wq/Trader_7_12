@@ -33,19 +33,21 @@ def main():
     rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
 
     print()
-    print("=" * 140)
+    print("=" * 160)
     print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
     print(f"DATE: {args.date} | READ ONLY")
-    print("=" * 140)
+    print("=" * 160)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
         f"{'SCORE':>7} {'SETUP':<10} {'READY':<6} {'CONF':<6} "
-        f"{'RS':>7} {'RS STATE':<10} {'SPOT MONEY':>15} {'FUT MONEY':>15} {'CONF SCORE':>11}"
+        f"{'RS':>7} {'STATE':<9} {'ASSET %':>9} {'IMOEX %':>9} {'EXCESS %':>10} "
+        f"{'SPOT MONEY':>15} {'FUT MONEY':>15} {'CONF SCORE':>11}"
     )
-    print("-" * 140)
+    print("-" * 160)
 
     for item in rows:
         confirmation = item.get("futures_confirmation") or {}
+        rs_data = item.get("relative_strength_data") or {}
         rs = float(item.get("relative_strength", 0) or 0)
 
         if not item.get("relative_strength_available"):
@@ -67,18 +69,21 @@ def main():
             f"{str(item.get('ready_time', '-')):<6} "
             f"{str(item.get('confirmation_time', '-')):<6} "
             f"{rs:>7.2f} "
-            f"{rs_state:<10} "
+            f"{rs_state:<9} "
+            f"{float(rs_data.get('asset_change_percent', 0) or 0):>9.2f} "
+            f"{float(rs_data.get('market_change_percent', 0) or 0):>9.2f} "
+            f"{float(rs_data.get('excess_change_percent', 0) or 0):>10.2f} "
             f"{float(item.get('average_daily_money', 0) or 0):>15,.0f} "
             f"{float(item.get('futures_average_daily_money', 0) or 0):>15,.0f} "
             f"{float(confirmation.get('score', 0) or 0):>11.2f}"
         )
 
-    print("=" * 140)
+    print("=" * 160)
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
     print("Historical RS: completed daily candles vs dynamically resolved IMOEX/IMOEX2 benchmark, 3-day lookback.")
     print("RS is used in candidate ranking only when benchmark data is available; no fake RS is assigned.")
     print("Historical replay is read-only and does not perform portfolio or order operations.")
-    print("=" * 140)
+    print("=" * 160)
 
 
 if __name__ == "__main__":
