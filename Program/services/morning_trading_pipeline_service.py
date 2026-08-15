@@ -1,9 +1,4 @@
-"""
-Trader_7_12 Pro
-
-Morning Trading Pipeline v0.3
-
-Single orchestration layer for the Spot-first morning scanner.
+"""Trader_7_12 Pro - Spot-first morning scanner pipeline.
 
 Pipeline:
 Futures Universe / Mapping
@@ -11,8 +6,7 @@ Futures Universe / Mapping
     -> Futures Confirmation
     -> Futures Trade Candidate Ranking
 
-This service selects the best morning candidates only. It does not calculate
-position size, risk, stop-loss, take-profit or execute orders.
+This service selects and ranks morning candidates only.
 """
 
 from api.bcs_api import BCSAPI
@@ -24,7 +18,7 @@ from services.futures_trade_candidate_service import FuturesTradeCandidateServic
 class MorningTradingPipelineService:
     """Build the final morning shortlist from Spot radar and futures confirmation."""
 
-    VERSION = "0.3"
+    VERSION = "0.4"
 
     def __init__(
         self,
@@ -94,5 +88,5 @@ class MorningTradingPipelineService:
 
         print()
         print("Pipeline: SPOT RADAR -> FUTURES CONFIRMATION -> TOP CANDIDATES")
-        print("No risk sizing, SL/TP calculation or order execution is performed.")
+        print("Scanner output is read-only and contains no portfolio or order operations.")
         print("=" * 118)
