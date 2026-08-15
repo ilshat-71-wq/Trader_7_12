@@ -33,19 +33,32 @@ def main():
     rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
 
     print()
-    print("=" * 128)
+    print("=" * 140)
     print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
     print(f"DATE: {args.date} | READ ONLY — NO ORDERS")
-    print("=" * 128)
+    print("=" * 140)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
         f"{'SCORE':>7} {'SETUP':<10} {'READY':<6} {'CONF':<6} "
-        f"{'SPOT MONEY':>15} {'FUT MONEY':>15} {'CONF SCORE':>11}"
+        f"{'RS':>7} {'RS STATE':<10} {'SPOT MONEY':>15} {'FUT MONEY':>15} {'CONF SCORE':>11}"
     )
-    print("-" * 128)
+    print("-" * 140)
 
     for item in rows:
         confirmation = item.get("futures_confirmation") or {}
+        rs_data = item.get("relative_strength_data") or {}
+        rs_available = bool(item.get("relative_strength_available"))
+        rs = float(item.get("relative_strength", 0) or 0)
+
+        if not rs_available:
+            rs_state = "N/A"
+        elif rs > 5:
+            rs_state = "STRONGER"
+        elif rs < -5:
+            rs_state = "WEAKER"
+        else:
+            rs_state = "NEUTRAL"
+
         print(
             f"{item.get('rank', '-'):>3} "
             f"{str(item.get('futures_ticker', '-')):<8} "
@@ -55,16 +68,19 @@ def main():
             f"{str(item.get('setup', '-')):<10} "
             f"{str(item.get('ready_time', '-')):<6} "
             f"{str(item.get('confirmation_time', '-')):<6} "
+            f"{rs:>7.2f} "
+            f"{rs_state:<10} "
             f"{float(item.get('average_daily_money', 0) or 0):>15,.0f} "
             f"{float(item.get('futures_average_daily_money', 0) or 0):>15,.0f} "
             f"{float(confirmation.get('score', 0) or 0):>11.2f}"
         )
 
-    print("=" * 128)
+    print("=" * 140)
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
-    print("Historical RS vs IMOEX: not loaded in this replay path; no fake RS is assigned.")
+    print("Historical RS: completed daily candles vs dynamically resolved IMOEX/IMOEX2 benchmark, 3-day lookback.")
+    print("RS is used in candidate ranking only when benchmark data is available; no fake RS is assigned.")
     print("Risk sizing, deposit, SL/TP, position sizing and order execution are not used.")
-    print("=" * 128)
+    print("=" * 140)
 
 
 if __name__ == "__main__":
