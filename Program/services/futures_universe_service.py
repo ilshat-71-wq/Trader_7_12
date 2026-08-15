@@ -79,16 +79,11 @@ class FuturesUniverseService:
 
         text = f"{ticker} {name} {item.get('displayName') or ''}".upper()
 
-        # Perpetual / technical contracts are not part of the target
-        # dated-futures universe. The metadata is not perfectly uniform,
-        # therefore this is deliberately conservative.
         if self._is_perpetual(item, text):
             return None
 
         expiry = self._extract_expiry(item, ticker)
         if expiry is None:
-            # A dated contract is required for the first production
-            # universe. Unknown formats are excluded instead of guessed.
             return None
 
         if expiry < date.today():
@@ -117,6 +112,11 @@ class FuturesUniverseService:
             "spot_ticker": item.get("spot_ticker"),
             "underlyingAsset": item.get("underlyingAsset"),
             "underlyingAssetTicker": item.get("underlyingAssetTicker"),
+            # BCS Trade API canonical futures-underlying fields.
+            "baseAsset": item.get("baseAsset"),
+            "baseAssetFuture": item.get("baseAssetFuture"),
+            "baseAssetSecuritySecCode": item.get("baseAssetSecuritySecCode"),
+            "baseAssetSecurityClassCode": item.get("baseAssetSecurityClassCode"),
         }
 
     @staticmethod
@@ -161,8 +161,6 @@ class FuturesUniverseService:
             if parsed is not None:
                 return parsed
 
-        # MOEX futures ticker convention: root + month code + one year digit.
-        # We only use it when the final two characters are unambiguous.
         if len(ticker) < 2:
             return None
 
