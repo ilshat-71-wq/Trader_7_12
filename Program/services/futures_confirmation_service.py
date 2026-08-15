@@ -19,9 +19,10 @@ does not choose a different direction, and does not place orders.
 class FuturesConfirmationService:
     """Confirm whether a futures contract is suitable for a SPOT idea."""
 
-    VERSION = "0.2"
+    VERSION = "0.3"
     MIN_TRADES = 20
     MIN_MONEY_VOLUME = 1_000_000.0
+    MIN_HISTORICAL_CANDLES = 3
 
     def __init__(self, api=None):
         self.api = api
@@ -183,6 +184,111 @@ class FuturesConfirmationService:
             len(valid), money_volume, price_change_percent,
             min(score, 100),
             "Futures activity confirms the SPOT direction",
+            last_price,
+        )
+
+    @classmethod
+    def analyze_candles(cls, candles, spot_direction):
+        """Confirm a historical futures idea using only candles available so far.
+
+        BCS historical trade data is unavailable for completed prior days because
+        the trades endpoint only serves the current day. M5 candles therefore
+        provide the deterministic replay equivalent without using future bars.
+        """
+        expected = str(spot_direction or "NONE").upper()
+
+        if not isinstance(candles, list) or not candles:
+            return cls._result(
+                "NO_DATA", "NO_DATA", "NONE", expected,
+                0, 0.0, 0.0, 0,
+                "No historical futures candles available",
+            )
+
+        valid = []
+        money_volume = 0.0
+        for candle in candles:
+            if not isinstance(candle, dict):
+                continue
+            open_price = cls._float(candle.get("open"))
+            close_price = cls._float(candle.get("close"))
+            volume = cls._float(candle.get("volume"))
+            if open_price <= 0 or close_price <= 0:
+                continue
+            valid.append(candle)
+            money_volume += close_price * max(volume, 0.0)
+
+        if not valid:
+            return cls._result(
+                "NO_DATA", "NO_DATA", "NONE", expected,
+                0, 0.0, 0.0, 0,
+                "No valid historical futures candles available",
+            )
+
+        first_price = cls._float(valid[0].get("open"))
+        last_price = cls._float(valid[-1].get("close"))
+        if first_price <= 0 or last_price <= 0:
+            return cls._result(
+                "NO_DATA", "NO_DATA", "NONE", expected,
+                len(valid), money_volume, 0.0, 0,
+                "Invalid historical futures prices",
+            )
+
+        price_change_percent = (last_price - first_price) / first_price * 100
+        direction = "LONG" if last_price > first_price else "SHORT" if last_price < first_price else "FLAT"
+
+        if expected not in {"LONG", "SHORT"}:
+            return cls._result(
+                "BLOCKED", "BLOCKED", direction, expected,
+                len(valid), money_volume, price_change_percent, 0,
+                "SPOT direction is not tradable", last_price,
+            )
+
+        if direction != expected:
+            return cls._result(
+                "BLOCKED", "BLOCKED", direction, expected,
+                len(valid), money_volume, price_change_percent, 0,
+                "Historical futures direction conflicts with SPOT idea", last_price,
+            )
+
+        if len(valid) < cls.MIN_HISTORICAL_CANDLES:
+            return cls._result(
+                "BLOCKED", "BLOCKED", direction, expected,
+                len(valid), money_volume, price_change_percent, 0,
+                "Insufficient historical futures candles", last_price,
+            )
+
+        if money_volume <= 0:
+            return cls._result(
+                "BLOCKED", "BLOCKED", direction, expected,
+                len(valid), money_volume, price_change_percent, 0,
+                "No historical futures money volume", last_price,
+            )
+
+        score = 60
+        if len(valid) >= 12:
+            score += 15
+        elif len(valid) >= 6:
+            score += 10
+        else:
+            score += 5
+
+        if abs(price_change_percent) >= 1:
+            score += 15
+        elif abs(price_change_percent) >= 0.5:
+            score += 10
+        else:
+            score += 5
+
+        if money_volume >= 100_000_000:
+            score += 10
+        elif money_volume >= 10_000_000:
+            score += 5
+
+        return cls._result(
+            "OK", "CONFIRMED", direction, expected,
+            len(valid), money_volume, price_change_percent,
+            min(score, 100),
+            "Historical futures candles confirm the SPOT direction",
             last_price,
         )
 
