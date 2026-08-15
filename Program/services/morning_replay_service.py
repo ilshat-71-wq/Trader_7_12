@@ -6,6 +6,7 @@ Historical Morning Replay Service.
 Purpose:
 - replay a completed trading morning without using future candles;
 - evaluate the Stage 5 SPOT M5 setup detector at selected Moscow times;
+- calculate SPOT momentum at each checkpoint using only candles already available;
 - provide a deterministic weekend test path before live-market validation.
 
 This service does not place orders and does not change trading rules.
@@ -16,21 +17,24 @@ from zoneinfo import ZoneInfo
 
 from services.history_candle_service import HistoryCandleService
 from services.instrument_morning_radar_service import InstrumentMorningRadarService
+from services.momentum_service import MomentumService
 from services.setup_engine import SetupEngine
 
 
 class MorningReplayService:
     """Replay the existing morning setup logic on a historical date."""
 
-    VERSION = "0.2"
+    VERSION = "0.3"
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
     MORNING_START = time(7, 0)
     MORNING_END = time(10, 0)
+    MOMENTUM_AVERAGE_CANDLES = 5
 
-    def __init__(self, history_service=None, radar_service=None, setup_engine=None):
+    def __init__(self, history_service=None, radar_service=None, setup_engine=None, momentum_service=None):
         self.history_service = history_service or HistoryCandleService()
         self.radar_service = radar_service or InstrumentMorningRadarService()
         self.setup_engine = setup_engine or SetupEngine()
+        self.momentum_service = momentum_service or MomentumService()
 
     @classmethod
     def _as_date(cls, value):
@@ -87,8 +91,48 @@ class MorningReplayService:
         result.sort(key=lambda item: str(item.get("time") or ""))
         return result
 
+    def calculate_momentum(self, candles):
+        """Calculate momentum from the latest available candle only."""
+        if not candles:
+            return self.momentum_service.analyze({})
+
+        current = candles[-1]
+        history = candles[:-1]
+        baseline = history[-self.MOMENTUM_AVERAGE_CANDLES:]
+
+        volumes = []
+        money_volumes = []
+        for item in baseline:
+            try:
+                close = float(item.get("close") or 0)
+                volume = float(item.get("volume") or 0)
+            except (TypeError, ValueError):
+                continue
+            if close > 0 and volume > 0:
+                volumes.append(volume)
+                money_volumes.append(close * volume)
+
+        average_volume = sum(volumes) / len(volumes) if volumes else 0.0
+        average_money_volume = sum(money_volumes) / len(money_volumes) if money_volumes else 0.0
+
+        previous = history[-1] if history else {}
+        try:
+            previous_high = float(previous.get("high") or 0)
+            previous_low = float(previous.get("low") or 0)
+        except (TypeError, ValueError):
+            previous_high = 0.0
+            previous_low = 0.0
+
+        return self.momentum_service.analyze(
+            current,
+            average_volume=average_volume,
+            average_money_volume=average_money_volume,
+            previous_high=previous_high,
+            previous_low=previous_low,
+        )
+
     def replay_setup(self, ticker, class_code, direction, trading_date, checkpoints=None):
-        """Evaluate Stage 5 SetupEngine state at each requested historical checkpoint."""
+        """Evaluate Stage 5 setup and SPOT momentum at each historical checkpoint."""
         direction = str(direction or "").upper()
         if direction not in {"LONG", "SHORT"}:
             raise ValueError("direction must be LONG or SHORT")
@@ -107,6 +151,8 @@ class MorningReplayService:
                 checkpoint,
             )
 
+            momentum = self.calculate_momentum(candles)
+
             if len(candles) < 3:
                 setup = self.setup_engine.analyze(candles, direction)
             else:
@@ -121,6 +167,11 @@ class MorningReplayService:
                 "checkpoint": checkpoint.strftime("%H:%M"),
                 "direction": direction,
                 "candles": len(candles),
+                "momentum_score": momentum.get("momentum_score", 0),
+                "momentum_signal": momentum.get("signal", "NO_SIGNAL"),
+                "volume_ratio": momentum.get("volume_ratio", 0),
+                "money_volume_ratio": momentum.get("money_volume_ratio", 0),
+                "breakout_strength": momentum.get("breakout_strength", 0),
                 "setup": setup.get("setup", "NONE"),
                 "setup_state": setup.get("setup_state", "WAIT"),
                 "entry_trigger": float(setup.get("entry_trigger", 0) or 0),
@@ -135,20 +186,22 @@ class MorningReplayService:
     @staticmethod
     def print_results(results):
         print()
-        print("=" * 100)
+        print("=" * 120)
         print("TRADER_7_12 PRO - HISTORICAL MORNING REPLAY")
         print("READ ONLY — NO ORDERS")
-        print("=" * 100)
-        print(f"{'TIME':<8}{'DIR':<7}{'CANDLES':<9}{'SETUP':<18}{'STATE':<8}{'TRIGGER':>12}{'LEVEL':>12}")
-        print("-" * 100)
+        print("=​" * 120)
+        print(f"{'TIME':<8}{'DIR':<7}{'MOM':>7}{'MOMENTUM':<15}{'VOL R':>8}{'MONEY R':>9}{'SETUP':<18}{'STATE':<8}{'TRIGGER':>12}")
+        print("-" * 120)
         for item in results:
             print(
                 f"{item['checkpoint']:<8}"
                 f"{item['direction']:<7}"
-                f"{item['candles']:<9}"
+                f"{item['momentum_score']:>7}"
+                f"{item['momentum_signal']:<15}"
+                f"{item['volume_ratio']:>8.2f}"
+                f"{item['money_volume_ratio']:>9.2f}"
                 f"{item['setup']:<18}"
                 f"{item['setup_state']:<8}"
                 f"{item['entry_trigger']:>12.4f}"
-                f"{item['previous_high']:>12.4f}"
             )
-        print("=" * 100)
+        print("=" * 120)
