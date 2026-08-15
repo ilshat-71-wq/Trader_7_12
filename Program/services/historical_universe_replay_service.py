@@ -12,7 +12,7 @@ from services.morning_replay_service import MorningReplayService
 class HistoricalUniverseReplayService:
     """Replay the SPOT setup and futures confirmation without future data."""
 
-    VERSION = "0.6"
+    VERSION = "0.7"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
@@ -218,11 +218,7 @@ class HistoricalUniverseReplayService:
     def evaluate_futures_candidate(
         self, candidate, direction, trading_date, replay
     ):
-        """Evaluate futures causally at every SPOT READY checkpoint.
-
-        A futures confirmation is never evaluated before the SPOT setup is READY.
-        The first checkpoint with both READY and CONFIRMED is the trade-ready time.
-        """
+        """Evaluate futures causally at every SPOT READY checkpoint."""
         ticker = str(candidate.get("futures_ticker") or "").strip().upper()
         class_code = str(candidate.get("futures_class_code") or "").strip()
         timeline = []
@@ -247,13 +243,15 @@ class HistoricalUniverseReplayService:
                 "confirmation": confirmation,
             })
 
-            if (
-                first_confirmed is None
-                and confirmation.get("status") == "OK"
-            ):
+            if first_confirmed is None and confirmation.get("status") == "OK":
                 first_confirmed = {
                     "checkpoint": checkpoint,
                     "confirmation": confirmation,
+                    "setup": item.get("setup", "NONE"),
+                    "setup_state": item.get("setup_state", "WAIT"),
+                    "entry_trigger": item.get("entry_trigger", 0.0),
+                    "previous_high": item.get("previous_high", 0.0),
+                    "previous_low": item.get("previous_low", 0.0),
                 }
                 break
 
@@ -265,6 +263,15 @@ class HistoricalUniverseReplayService:
             ),
             "futures_confirmation": (
                 first_confirmed.get("confirmation") if first_confirmed else None
+            ),
+            "setup": first_confirmed.get("setup", "NONE") if first_confirmed else "NONE",
+            "setup_state": first_confirmed.get("setup_state", "WAIT") if first_confirmed else "WAIT",
+            "entry_trigger": first_confirmed.get("entry_trigger", 0.0) if first_confirmed else 0.0,
+            "previous_high": first_confirmed.get("previous_high", 0.0) if first_confirmed else 0.0,
+            "previous_low": first_confirmed.get("previous_low", 0.0) if first_confirmed else 0.0,
+            "futures_price": (
+                float((first_confirmed.get("confirmation") or {}).get("last_price", 0) or 0)
+                if first_confirmed else 0.0
             ),
             "futures_confirmation_timeline": timeline,
         }
@@ -359,14 +366,12 @@ class HistoricalUniverseReplayService:
                 "ready_time": best.get("ready_time"),
                 "confirmation_time": best.get("confirmation_time"),
                 "trade_ready_time": best.get("confirmation_time"),
-                "entry_trigger": next(
-                    (
-                        item.get("entry_trigger", 0.0)
-                        for item in replay
-                        if item.get("checkpoint") == best.get("ready_time")
-                    ),
-                    0.0,
-                ),
+                "futures_price": best.get("futures_price", 0.0),
+                "setup": best.get("setup", "NONE"),
+                "setup_state": best.get("setup_state", "WAIT"),
+                "entry_trigger": best.get("entry_trigger", 0.0),
+                "previous_high": best.get("previous_high", 0.0),
+                "previous_low": best.get("previous_low", 0.0),
                 "futures_confirmation": confirmation,
                 "futures_confirmation_timeline": best.get(
                     "futures_confirmation_timeline", []
@@ -412,15 +417,12 @@ class HistoricalUniverseReplayService:
                 f"{float(row['entry_trigger'] or 0):>14.4f}"
             )
         print("-" * 140)
-        print(f"READY SETUPS: {sum(row.get('ready_time') is not None for row in rows)}")
+        print(f"READY SETUPS: {sum(row['ready_time'] is not None for row in rows)}")
         print(
             "FUTURES CONFIRMED: "
-            f"{sum(row.get('confirmation_time') is not None for row in rows)}"
+            f"{sum((row.get('futures_confirmation') or {}).get('status') == 'OK' for row in rows)}"
         )
-        print(
-            "TRADE-READY: "
-            f"{sum(row.get('trade_ready_time') is not None for row in rows)}"
-        )
+        print(f"TRADE-READY: {sum(row.get('trade_ready_time') is not None for row in rows)}")
         print("Historical futures confirmation source: M5 candles (trade history unavailable for completed days).")
         print("Futures confirmation is evaluated only at and after each SPOT READY checkpoint.")
         print("=" * 140)
