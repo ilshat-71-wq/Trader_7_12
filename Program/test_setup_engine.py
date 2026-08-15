@@ -48,7 +48,7 @@ class SetupEngineTests(unittest.TestCase):
             candle(100.1, 99.1, 99.6),
             candle(100.0, 99.2, 99.7),
             candle(101.5, 99.9, 101.3),
-            candle(101.2, 100.9, 101.0),
+            candle(101.2, 100.0, 101.0),
             candle(101.7, 101.0, 101.6),
         ]
         result = SetupEngine._retest(candles, "LONG")
