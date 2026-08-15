@@ -5,7 +5,7 @@ Historical Universe Morning Replay Service.
 
 Purpose:
 - build the dynamic Futures -> SPOT universe for a historical date;
-- choose one nearest valid futures contract per SPOT at that date;
+- choose the two nearest valid futures contracts per SPOT at that date;
 - calculate historical daily direction from completed D candles;
 - filter by historical average daily money turnover;
 - replay the existing SPOT M5 setup detector at morning checkpoints;
@@ -23,9 +23,10 @@ from services.morning_replay_service import MorningReplayService
 
 
 class HistoricalUniverseReplayService:
-    VERSION = "0.1"
+    VERSION = "0.2"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
+    MAX_CONTRACTS_PER_SPOT = 2
 
     def __init__(self, mapping_service=None, history_service=None, replay_service=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
@@ -51,13 +52,13 @@ class HistoricalUniverseReplayService:
             return None
 
     def load_mappings_for_date(self, trading_date):
-        """Load dynamic mappings and keep the nearest contract valid on that date."""
+        """Load dynamic mappings and keep the two nearest valid contracts per SPOT."""
         trading_date = self._as_date(trading_date)
         mappings = self.mapping_service.load()
         if not isinstance(mappings, list):
             return []
 
-        selected = {}
+        grouped = {}
         for mapping in mappings:
             if not isinstance(mapping, dict):
                 continue
@@ -66,11 +67,28 @@ class HistoricalUniverseReplayService:
             if not spot or expiry is None or expiry < trading_date:
                 continue
 
-            current = selected.get(spot)
-            if current is None or expiry < self._parse_expiry(current.get("futures_expiry")):
-                selected[spot] = dict(mapping)
+            candidate = dict(mapping)
+            candidate["futures_expiry"] = expiry.isoformat()
+            grouped.setdefault(spot, []).append(candidate)
 
-        return sorted(selected.values(), key=lambda x: str(x.get("spot_ticker") or ""))
+        selected = []
+        for spot, candidates in grouped.items():
+            candidates.sort(
+                key=lambda item: (
+                    self._parse_expiry(item.get("futures_expiry")) or date.max,
+                    str(item.get("futures_ticker") or ""),
+                )
+            )
+            selected.extend(candidates[:self.MAX_CONTRACTS_PER_SPOT])
+
+        return sorted(
+            selected,
+            key=lambda item: (
+                str(item.get("spot_ticker") or ""),
+                self._parse_expiry(item.get("futures_expiry")) or date.max,
+                str(item.get("futures_ticker") or ""),
+            )
+        )
 
     def load_daily_candles(self, ticker, class_code, trading_date):
         """Load completed daily candles strictly before the replay date."""
@@ -218,6 +236,6 @@ class HistoricalUniverseReplayService:
             )
         print("-" * 130)
         ready_count = sum(1 for row in rows if row["ready_time"] is not None)
-        print(f"MAPPED LIQUID SPOTS: {len(rows)}")
+        print(f"MAPPED LIQUID FUTURES/SPOTS: {len(rows)}")
         print(f"READY SETUPS: {ready_count}")
         print("=" * 130)
