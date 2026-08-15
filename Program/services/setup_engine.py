@@ -125,12 +125,16 @@ class SetupEngine:
             for j in range(i + 1, len(candles)):
                 c = candles[j]
                 tolerance = level * cls.RETEST_TOLERANCE_PERCENT / 100
-                touched = abs((cls._f(c.get("low")) if direction == "LONG" else cls._f(c.get("high"))) - level) <= tolerance
-                if not touched:
+                touch = cls._f(c.get("low")) if direction == "LONG" else cls._f(c.get("high"))
+                if abs(touch - level) > tolerance:
                     continue
                 trigger = cls._f(c.get("high")) if direction == "LONG" else cls._f(c.get("low"))
-                confirmed = cls._f(c.get("close")) > trigger if direction == "LONG" else cls._f(c.get("close")) < trigger
-                return cls._result("RETEST", direction, "READY" if confirmed else "WAIT", trigger, j, j if confirmed else None, level)
+                for k in range(j + 1, len(candles)):
+                    continuation = cls._f(candles[k].get("close"))
+                    confirmed = continuation > trigger if direction == "LONG" else continuation < trigger
+                    if confirmed:
+                        return cls._result("RETEST", direction, "READY", trigger, j, k, level)
+                return cls._result("RETEST", direction, "WAIT", trigger, j, None, level)
         return cls._empty(direction)
 
     @classmethod
