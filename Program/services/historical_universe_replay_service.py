@@ -12,7 +12,7 @@ from services.morning_replay_service import MorningReplayService
 class HistoricalUniverseReplayService:
     """Replay the SPOT setup and futures confirmation without future data."""
 
-    VERSION = "0.4"
+    VERSION = "0.5"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
@@ -143,8 +143,8 @@ class HistoricalUniverseReplayService:
         ), reverse=True)
         return ranked[0] if ranked else None
 
-    def load_futures_trades(self, ticker, class_code, trading_date, end_time):
-        """Load futures trades from 07:00 Moscow through the replay checkpoint."""
+    def load_futures_candles(self, ticker, class_code, trading_date, end_time):
+        """Load only completed/available M5 futures candles through checkpoint."""
         trading_date = self._as_date(trading_date)
         if isinstance(end_time, str):
             end_time = time.fromisoformat(end_time[:8])
@@ -153,20 +153,46 @@ class HistoricalUniverseReplayService:
         if end_moscow < start_moscow:
             return []
         try:
-            data = self.history_service.load_trades(
-                ticker, class_code,
-                start_moscow.astimezone(timezone.utc),
-                end_moscow.astimezone(timezone.utc),
+            data = self.history_service.trade_service.api.get_candles(
+                ticker,
+                class_code,
+                interval="M5",
+                start_time=start_moscow.astimezone(timezone.utc),
+                end_time=end_moscow.astimezone(timezone.utc),
             )
         except Exception:
             return []
-        records = data.get("records", []) if isinstance(data, dict) else []
-        return records if isinstance(records, list) else []
+        bars = data.get("bars", []) if isinstance(data, dict) else []
+        result = []
+        for bar in bars:
+            if not isinstance(bar, dict):
+                continue
+            try:
+                open_price = float(bar.get("open") or 0)
+                close_price = float(bar.get("close") or 0)
+                volume = float(bar.get("volume") or 0)
+            except (TypeError, ValueError):
+                continue
+            if open_price <= 0 or close_price <= 0:
+                continue
+            dt = self.history_service.to_moscow(bar.get("time"))
+            if dt is None or dt.date() != trading_date or dt.time() < time(7, 0) or dt.time() > end_time:
+                continue
+            result.append({
+                "time": bar.get("time"),
+                "open": open_price,
+                "high": float(bar.get("high") or 0),
+                "low": float(bar.get("low") or 0),
+                "close": close_price,
+                "volume": volume,
+            })
+        result.sort(key=lambda item: str(item.get("time") or ""))
+        return result
 
     def confirm_futures_at_checkpoint(self, ticker, class_code, direction, trading_date, checkpoint):
-        """Apply the same confirmation rules as live futures confirmation."""
-        trades = self.load_futures_trades(ticker, class_code, trading_date, checkpoint)
-        return FuturesConfirmationService.analyze_trades(trades, direction)
+        """Confirm historical futures direction from M5 candles only."""
+        candles = self.load_futures_candles(ticker, class_code, trading_date, checkpoint)
+        return FuturesConfirmationService.analyze_candles(candles, direction)
 
     def replay(self, trading_date, min_money=None, checkpoints=None, limit=None):
         trading_date = self._as_date(trading_date)
@@ -259,4 +285,5 @@ class HistoricalUniverseReplayService:
         print("-" * 120)
         print(f"READY SETUPS: {sum(row['ready_time'] is not None for row in rows)}")
         print(f"FUTURES CONFIRMED: {sum((row.get('futures_confirmation') or {}).get('status') == 'OK' for row in rows)}")
+        print("Historical futures confirmation source: M5 candles (trade history unavailable for completed days).")
         print("=" * 120)
