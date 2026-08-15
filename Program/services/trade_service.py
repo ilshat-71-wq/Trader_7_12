@@ -53,6 +53,23 @@ class TradeService:
 
     # ---------------------------------------------------------
 
+    @staticmethod
+    def _serialize_datetime(value):
+        """Convert datetime-like values to BCS-compatible ISO strings."""
+        if hasattr(value, "isoformat"):
+            text = value.isoformat()
+        else:
+            text = str(value).strip()
+
+        if text.endswith("+00:00"):
+            return text[:-6] + "Z"
+
+        if text.endswith("Z"):
+            return text
+
+        return text
+
+
     def load_history(
         self,
         ticker,
@@ -68,6 +85,9 @@ class TradeService:
             f"TradeService HISTORY: {ticker} {class_code}"
         )
 
+
+        start_time = self._serialize_datetime(start_time)
+        end_time = self._serialize_datetime(end_time)
 
         payload = {
 
