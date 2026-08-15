@@ -10,7 +10,7 @@ from services.morning_trading_pipeline_service import MorningTradingPipelineServ
 
 
 class MorningScannerRunner:
-    VERSION = "0.3"
+    VERSION = "0.4"
 
     def __init__(self, pipeline=None):
         self.pipeline = pipeline or MorningTradingPipelineService()
@@ -21,28 +21,38 @@ class MorningScannerRunner:
 
     @staticmethod
     def print_results(results):
-        print("=" * 76)
-        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.3")
-        print("READ ONLY — ORDERS ARE NOT SENT")
-        print("=" * 76)
+        print("=" * 96)
+        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.4")
+        print("READ ONLY — NO ORDERS")
+        print("=" * 96)
 
         if not results:
-            print("NO FINAL TRADE CANDIDATES")
+            print("NO FINAL CANDIDATES")
             return
 
+        print(
+            f"{'#':>3} {'FUTURES':<10} {'SPOT':<8} {'DIR':<7} "
+            f"{'RADAR':>8} {'CONF':>8} {'RS':>8} {'MONEY VOL':>16} {'SCORE':>8}"
+        )
+        print("-" * 96)
+
         for index, item in enumerate(results, 1):
-            print(f"#{index}")
-            print(f"  futures: {item.get('futures_ticker', '-')}")
-            print(f"  spot: {item.get('spot_ticker', '-')}")
-            print(f"  direction: {item.get('direction', '-')}")
-            print(f"  entry: {item.get('entry', item.get('entry_price', '-'))}")
-            print(f"  stop: {item.get('stop_loss', '-')}")
-            print(f"  target: {item.get('take_profit', '-')}")
-            print(f"  RR: {item.get('rr_ratio', '-')}")
-            print(f"  score: {item.get('candidate_score', item.get('final_score', '-'))}")
-            print(f"  setup: {item.get('setup', '-')}")
-            print(f"  setup state: {item.get('setup_state', '-')}")
-            print("-" * 76)
+            print(
+                f"{index:>3} "
+                f"{str(item.get('futures_ticker', '-')):<10} "
+                f"{str(item.get('spot_ticker', '-')):<8} "
+                f"{str(item.get('direction', '-')):<7} "
+                f"{float(item.get('radar_score', 0) or 0):>8.2f} "
+                f"{float(item.get('confirmation_score', 0) or 0):>8.2f} "
+                f"{float(item.get('relative_strength', 0) or 0):>8.2f} "
+                f"{float(item.get('money_volume', 0) or 0):>16,.0f} "
+                f"{float(item.get('candidate_score', item.get('final_score', 0)) or 0):>8.2f}"
+            )
+
+        print()
+        print("Pipeline: SPOT RADAR -> FUTURES CONFIRMATION -> TOP CANDIDATES")
+        print("No risk sizing, SL/TP calculation or order execution is performed.")
+        print("=" * 96)
 
 
 def main():
