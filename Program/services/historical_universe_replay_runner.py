@@ -12,7 +12,7 @@ DEFAULT_CHECKPOINTS = "07:15,07:30,08:00,08:30,09:00,09:30,10:00,10:30,11:00,12:
 
 
 def _forward_outcome(service, item, endpoint):
-    """Measure realized directional move after confirmation; no risk/order logic."""
+    """Measure raw and directional move after confirmation; no risk/order logic."""
     confirmation_time = item.get("confirmation_time")
     entry_price = float(item.get("futures_price", 0) or 0)
     direction = str(item.get("direction") or "").upper()
@@ -26,7 +26,6 @@ def _forward_outcome(service, item, endpoint):
     if not candles:
         return {"available": False}
 
-    # Keep only candles from the confirmation point onward.
     start = str(confirmation_time)[:8]
     candles = [c for c in candles if str(c.get("time") or "")[11:19] >= start]
     if not candles:
@@ -37,11 +36,9 @@ def _forward_outcome(service, item, endpoint):
     if last_price <= 0:
         return {"available": False}
 
-    directional_return = (last_price - entry_price) / entry_price * 100.0 * sign
+    raw_return = (last_price - entry_price) / entry_price * 100.0
+    directional_return = raw_return * sign
 
-    # For LONG, favorable movement is the candle high and adverse movement is
-    # the candle low. For SHORT the interpretation is reversed: the low is
-    # favorable and the high is adverse.
     favorable = []
     adverse = []
     for candle in candles:
@@ -62,6 +59,7 @@ def _forward_outcome(service, item, endpoint):
         "available": True,
         "endpoint": endpoint,
         "last_price": round(last_price, 4),
+        "raw_return_percent": round(raw_return, 2),
         "directional_return_percent": round(directional_return, 2),
         "max_favorable_percent": round(max(favorable), 2) if favorable else 0.0,
         "max_adverse_percent": round(min(adverse), 2) if adverse else 0.0,
@@ -89,24 +87,24 @@ def main():
     )
     rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
 
-    # Only the displayed TOP-N rows receive the short forward validation.
     for item in rows:
         item["_trading_date"] = args.date
         item["outcome_10_00"] = _forward_outcome(service, item, "10:00")
         item["outcome_13_00"] = _forward_outcome(service, item, "13:00")
 
     print()
-    print("=" * 200)
+    print("=" * 220)
     print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
     print(f"DATE: {args.date} | READ ONLY")
-    print("=" * 200)
+    print("=" * 220)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
         f"{'SCORE':>7} {'SETUP':<10} {'READY':<6} {'CONF':<6} "
         f"{'RS':>7} {'STATE':<9} {'EXCESS %':>10} "
-        f"{'10:00 %':>9} {'10:00 MFE':>10} {'13:00 %':>9} {'13:00 MFE':>10}"
+        f"{'10 RAW %':>9} {'10 DIR %':>9} {'10 MFE':>9} "
+        f"{'13 RAW %':>9} {'13 DIR %':>9} {'13 MFE':>9}"
     )
-    print("-" * 200)
+    print("-" * 220)
 
     for item in rows:
         rs_data = item.get("relative_strength_data") or {}
@@ -136,18 +134,20 @@ def main():
             f"{rs:>7.2f} "
             f"{rs_state:<9} "
             f"{float(rs_data.get('excess_change_percent', 0) or 0):>10.2f} "
+            f"{float(out10.get('raw_return_percent', 0) or 0):>9.2f} "
             f"{float(out10.get('directional_return_percent', 0) or 0):>9.2f} "
-            f"{float(out10.get('max_favorable_percent', 0) or 0):>10.2f} "
+            f"{float(out10.get('max_favorable_percent', 0) or 0):>9.2f} "
+            f"{float(out13.get('raw_return_percent', 0) or 0):>9.2f} "
             f"{float(out13.get('directional_return_percent', 0) or 0):>9.2f} "
-            f"{float(out13.get('max_favorable_percent', 0) or 0):>10.2f}"
+            f"{float(out13.get('max_favorable_percent', 0) or 0):>9.2f}"
         )
 
-    print("=" * 200)
+    print("=" * 220)
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
     print("Historical RS: completed daily candles vs dynamically resolved IMOEX/IMOEX2 benchmark, 3-day lookback.")
-    print("Forward outcome: directional futures move after confirmation; MFE is the best favorable intraday move to the endpoint.")
+    print("Outcome: RAW % is the actual futures price move; DIR % adjusts it for LONG/SHORT; MFE is the best favorable move.")
     print("Historical replay is read-only and does not perform portfolio or order operations.")
-    print("=" * 200)
+    print("=" * 220)
 
 
 if __name__ == "__main__":
