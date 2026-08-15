@@ -24,14 +24,18 @@ from services.futures_universe_service import FuturesUniverseService
 class FuturesSpotMappingService:
     """Build a dynamic, conservative Futures -> SPOT mapping."""
 
+    # BCS information-service uses these exact instrument type values.
     SPOT_INSTRUMENT_TYPES = (
         "STOCK",
         "CURRENCY",
-        "COMMODITY",
-        "INDEX",
+        "GOODS",
+        "INDICES",
     )
 
+    # Canonical BCS fields first. The older aliases remain as compatibility
+    # fallbacks because historical payloads can differ.
     EXPLICIT_SPOT_KEYS = (
+        "baseAssetSecuritySecCode",
         "underlyingTicker",
         "underlying_ticker",
         "underlyingSecurityCode",
@@ -45,6 +49,7 @@ class FuturesSpotMappingService:
     )
 
     EXPLICIT_CLASS_KEYS = (
+        "baseAssetSecurityClassCode",
         "underlyingClassCode",
         "underlying_class_code",
         "underlyingSecurityClassCode",
@@ -96,7 +101,7 @@ class FuturesSpotMappingService:
         return result
 
     def _load_spot_instruments(self):
-        """Load supported SPOT types; unavailable types are skipped."""
+        """Load BCS-supported SPOT types; unavailable types are skipped."""
         result = []
         seen = set()
 
@@ -180,7 +185,7 @@ class FuturesSpotMappingService:
                 ]
 
             if len(candidates) == 1:
-                return cls._result(future, candidates[0], "EXPLICIT")
+                return cls._result(future, candidates[0], "BCS_UNDERLYING")
 
             if len(candidates) > 1:
                 return None
@@ -234,6 +239,7 @@ class FuturesSpotMappingService:
             future.get("name"),
             future.get("displayName"),
             future.get("shortName"),
+            future.get("baseAsset"),
         )
         return " ".join(str(value or "").upper() for value in values)
 
