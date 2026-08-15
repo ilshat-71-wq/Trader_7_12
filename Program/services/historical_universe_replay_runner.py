@@ -2,6 +2,7 @@
 
 import argparse
 
+from services.historical_candidate_ranker_service import HistoricalCandidateRankerService
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
 
 
@@ -27,8 +28,10 @@ def main():
         trading_date=args.date,
         min_money=args.min_money,
         checkpoints=checkpoints,
-        limit=args.limit,
+        limit=None,
     )
+
+    rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
     service.print_results(rows, args.date, args.min_money)
 
 
