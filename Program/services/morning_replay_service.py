@@ -5,7 +5,7 @@ Historical Morning Replay Service.
 
 Purpose:
 - replay a completed trading morning without using future candles;
-- evaluate the existing SPOT M5 setup detector at selected Moscow times;
+- evaluate the Stage 5 SPOT M5 setup detector at selected Moscow times;
 - provide a deterministic weekend test path before live-market validation.
 
 This service does not place orders and does not change trading rules.
@@ -16,19 +16,21 @@ from zoneinfo import ZoneInfo
 
 from services.history_candle_service import HistoryCandleService
 from services.instrument_morning_radar_service import InstrumentMorningRadarService
+from services.setup_engine import SetupEngine
 
 
 class MorningReplayService:
     """Replay the existing morning setup logic on a historical date."""
 
-    VERSION = "0.1"
+    VERSION = "0.2"
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
     MORNING_START = time(7, 0)
     MORNING_END = time(10, 0)
 
-    def __init__(self, history_service=None, radar_service=None):
+    def __init__(self, history_service=None, radar_service=None, setup_engine=None):
         self.history_service = history_service or HistoryCandleService()
         self.radar_service = radar_service or InstrumentMorningRadarService()
+        self.setup_engine = setup_engine or SetupEngine()
 
     @classmethod
     def _as_date(cls, value):
@@ -86,7 +88,7 @@ class MorningReplayService:
         return result
 
     def replay_setup(self, ticker, class_code, direction, trading_date, checkpoints=None):
-        """Evaluate setup state at each requested historical checkpoint."""
+        """Evaluate Stage 5 SetupEngine state at each requested historical checkpoint."""
         direction = str(direction or "").upper()
         if direction not in {"LONG", "SHORT"}:
             raise ValueError("direction must be LONG or SHORT")
@@ -95,11 +97,6 @@ class MorningReplayService:
             checkpoints = ["07:15", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00"]
 
         results = []
-        detector = (
-            self.radar_service._detect_long_setup
-            if direction == "LONG"
-            else self.radar_service._detect_short_setup
-        )
 
         for checkpoint in checkpoints:
             checkpoint = self._as_time(checkpoint)
@@ -110,11 +107,11 @@ class MorningReplayService:
                 checkpoint,
             )
 
-            if len(candles) < 4:
-                setup = self.radar_service._empty_setup(direction)
+            if len(candles) < 3:
+                setup = self.setup_engine.analyze(candles, direction)
             else:
-                candles = candles[-self.radar_service.SETUP_LOOKBACK_CANDLES:]
-                setup = detector(candles)
+                candles = candles[-self.setup_engine.MAX_LOOKBACK_CANDLES:]
+                setup = self.setup_engine.analyze(candles, direction)
 
             results.append({
                 "version": self.VERSION,
@@ -127,8 +124,10 @@ class MorningReplayService:
                 "setup": setup.get("setup", "NONE"),
                 "setup_state": setup.get("setup_state", "WAIT"),
                 "entry_trigger": float(setup.get("entry_trigger", 0) or 0),
-                "previous_high": float(setup.get("previous_high", 0) or 0),
-                "previous_low": float(setup.get("previous_low", 0) or 0),
+                "previous_high": float(setup.get("level", 0) or setup.get("previous_high", 0) or 0),
+                "previous_low": 0.0,
+                "setup_index": setup.get("setup_index"),
+                "confirmation_index": setup.get("confirmation_index"),
             })
 
         return results
@@ -140,7 +139,7 @@ class MorningReplayService:
         print("TRADER_7_12 PRO - HISTORICAL MORNING REPLAY")
         print("READ ONLY — NO ORDERS")
         print("=" * 100)
-        print(f"{'TIME':<8}{'DIR':<7}{'CANDLES':<9}{'SETUP':<18}{'STATE':<8}{'TRIGGER':>12}{'HIGH':>12}{'LOW':>12}")
+        print(f"{'TIME':<8}{'DIR':<7}{'CANDLES':<9}{'SETUP':<18}{'STATE':<8}{'TRIGGER':>12}{'LEVEL':>12}")
         print("-" * 100)
         for item in results:
             print(
@@ -151,6 +150,5 @@ class MorningReplayService:
                 f"{item['setup_state']:<8}"
                 f"{item['entry_trigger']:>12.4f}"
                 f"{item['previous_high']:>12.4f}"
-                f"{item['previous_low']:>12.4f}"
             )
         print("=" * 100)
