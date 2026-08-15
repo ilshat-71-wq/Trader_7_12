@@ -30,9 +30,6 @@ from services.futures_universe_service import FuturesUniverseService
 class FuturesSpotMappingService:
     """Build a dynamic, conservative Futures -> SPOT mapping."""
 
-    # Keep the known BCS information-service names together. Some accounts /
-    # payload generations expose a category as an alias; empty responses are
-    # harmless and are simply skipped.
     SPOT_INSTRUMENT_TYPES = (
         "STOCK",
         "CURRENCY",
@@ -49,12 +46,10 @@ class FuturesSpotMappingService:
     }
 
     EXPLICIT_SPOT_KEYS = (
-        # Canonical BCS fields.
         "baseAssetSecuritySecCode",
         "baseAssetSecurity",
         "baseAsset",
         "baseAssetFuture",
-        # Compatibility aliases.
         "underlyingTicker",
         "underlying_ticker",
         "underlyingSecurityCode",
@@ -102,7 +97,7 @@ class FuturesSpotMappingService:
 
         for future in futures:
             mapping = self._map_future(future, spots, spot_index)
-            if cls_is_valid_mapping(mapping):
+            if self._is_valid_mapping(mapping):
                 result.append(mapping)
 
         return result
@@ -114,7 +109,7 @@ class FuturesSpotMappingService:
 
         for future in futures:
             mapping = self._map_future(future, spots, spot_index)
-            if cls_is_valid_mapping(mapping):
+            if self._is_valid_mapping(mapping):
                 result.append(mapping)
 
         return result
@@ -219,7 +214,7 @@ class FuturesSpotMappingService:
 
         return cls._result(future, matches[0], "SPOT_METADATA")
 
-    @staticmethod
+    @classmethod
     def _explicit_underlying(cls, future):
         """Extract a BCS underlying from scalar or nested metadata objects."""
         ticker = ""
@@ -255,8 +250,6 @@ class FuturesSpotMappingService:
             return "", ""
 
         if isinstance(value, dict):
-            # BCS payloads can identify the underlying as ticker/securityCode/
-            # secCode/code and can carry the board class alongside it.
             ticker = str(
                 value.get("ticker")
                 or value.get("securityCode")
@@ -356,22 +349,22 @@ class FuturesSpotMappingService:
             "mapping_method": method,
         }
 
+    @classmethod
+    def _is_valid_mapping(cls, mapping):
+        """Hard gate for every mapping entering the downstream pipeline."""
+        if not isinstance(mapping, dict):
+            return False
 
-def cls_is_valid_mapping(mapping):
-    """Hard gate: only complete, known mapping results may enter the pipeline."""
-    if not isinstance(mapping, dict):
-        return False
+        futures_ticker = str(mapping.get("futures_ticker") or "").strip()
+        futures_class = str(mapping.get("futures_class_code") or "").strip()
+        spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
+        spot_class = str(mapping.get("spot_class_code") or "").strip()
+        method = str(mapping.get("mapping_method") or "").strip().upper()
 
-    futures_ticker = str(mapping.get("futures_ticker") or "").strip()
-    futures_class = str(mapping.get("futures_class_code") or "").strip()
-    spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
-    spot_class = str(mapping.get("spot_class_code") or "").strip()
-    method = str(mapping.get("mapping_method") or "").strip().upper()
-
-    return bool(
-        futures_ticker
-        and futures_class
-        and spot_ticker
-        and spot_class
-        and method in FuturesSpotMappingService.VALID_MAPPING_METHODS
-    )
+        return bool(
+            futures_ticker
+            and futures_class
+            and spot_ticker
+            and spot_class
+            and method in cls.VALID_MAPPING_METHODS
+        )
