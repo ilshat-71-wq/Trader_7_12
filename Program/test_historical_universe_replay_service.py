@@ -73,8 +73,8 @@ def test_skips_contract_with_two_days_to_expiry():
 def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
     mappings = [
         candidate("ONU6", "2026-08-17"),
-        candidate("ONZ6", "2026-08-18"),
-        candidate("ONF7", "2026-09-18"),
+        candidate("ONZ6", "2026-09-18"),
+        candidate("ONF7", "2026-12-18"),
     ]
     service = HistoricalUniverseReplayService(
         mapping_service=FakeMappingService(mappings),
@@ -85,4 +85,5 @@ def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
     selected = service.load_mappings_for_date("2026-08-14")
 
     tickers = [item["futures_ticker"] for item in selected]
-    assert tickers == ["ONF7"]
+    assert tickers == ["ONZ6", "ONF7"]
+    assert "ONU6" not in tickers
