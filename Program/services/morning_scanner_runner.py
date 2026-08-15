@@ -4,11 +4,13 @@ Runs the existing Morning Trading Pipeline and prints the final shortlist.
 No orders are submitted.
 """
 
+import argparse
+
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
 
 
 class MorningScannerRunner:
-    VERSION = "0.2"
+    VERSION = "0.3"
 
     def __init__(self, pipeline=None):
         self.pipeline = pipeline or MorningTradingPipelineService()
@@ -20,7 +22,7 @@ class MorningScannerRunner:
     @staticmethod
     def print_results(results):
         print("=" * 76)
-        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.2")
+        print("TRADER_7_12 PRO - MORNING SCANNER RUNNER v0.3")
         print("READ ONLY — ORDERS ARE NOT SENT")
         print("=" * 76)
 
@@ -38,20 +40,28 @@ class MorningScannerRunner:
             print(f"  target: {item.get('take_profit', '-')}")
             print(f"  RR: {item.get('rr_ratio', '-')}")
             print(f"  score: {item.get('candidate_score', item.get('final_score', '-'))}")
-            print(f"  radar: {item.get('radar_score', '-')}")
-            print(f"  confirmation: {item.get('confirmation_score', '-')}")
-            print(f"  RS: {item.get('relative_strength', '-')}")
-            print(f"  trades: {item.get('trade_count', '-')}")
-            print(f"  money volume: {item.get('money_volume', '-')}")
-            print(f"  futures change: {item.get('price_change_percent', '-')}%")
             print(f"  setup: {item.get('setup', '-')}")
             print(f"  setup state: {item.get('setup_state', '-')}")
             print("-" * 76)
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Run the read-only Trader_7_12 morning scanner."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="Maximum number of final candidates (default: 3).",
+    )
+    args = parser.parse_args()
+
+    if args.limit < 0:
+        parser.error("--limit must be >= 0")
+
     runner = MorningScannerRunner()
-    results = runner.run(limit=3)
+    results = runner.run(limit=args.limit)
     runner.print_results(results)
 
 
