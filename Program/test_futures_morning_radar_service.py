@@ -145,15 +145,25 @@ def test_pipeline_keeps_radar_errors_without_stopping_scan():
     assert results[1]["futures_ticker"] == "SRU6"
 
 
-def test_pipeline_keeps_nearest_contract_per_spot():
-    future_date = date.today() + timedelta(days=45)
-    later_date = date.today() + timedelta(days=120)
+def test_pipeline_keeps_two_nearest_contracts_per_spot():
+    today = date.today()
+    nearest = today + timedelta(days=30)
+    second = today + timedelta(days=60)
+    third = today + timedelta(days=90)
 
     mappings = [
         {
+            "futures_ticker": "SRZ6",
+            "futures_class_code": "SPBFUT",
+            "futures_expiry": third.isoformat(),
+            "spot_ticker": "SBER",
+            "spot_class_code": "TQBR",
+            "mapping_method": "EXPLICIT",
+        },
+        {
             "futures_ticker": "SRX6",
             "futures_class_code": "SPBFUT",
-            "futures_expiry": later_date.isoformat(),
+            "futures_expiry": second.isoformat(),
             "spot_ticker": "SBER",
             "spot_class_code": "TQBR",
             "mapping_method": "EXPLICIT",
@@ -161,7 +171,7 @@ def test_pipeline_keeps_nearest_contract_per_spot():
         {
             "futures_ticker": "SRU6",
             "futures_class_code": "SPBFUT",
-            "futures_expiry": future_date.isoformat(),
+            "futures_expiry": nearest.isoformat(),
             "spot_ticker": "SBER",
             "spot_class_code": "TQBR",
             "mapping_method": "EXPLICIT",
@@ -169,7 +179,7 @@ def test_pipeline_keeps_nearest_contract_per_spot():
         {
             "futures_ticker": "LKU6",
             "futures_class_code": "SPBFUT",
-            "futures_expiry": future_date.isoformat(),
+            "futures_expiry": nearest.isoformat(),
             "spot_ticker": "LKOH",
             "spot_class_code": "TQBR",
             "mapping_method": "EXPLICIT",
@@ -187,14 +197,15 @@ def test_pipeline_keeps_nearest_contract_per_spot():
 
     results = service.scan()
 
-    sber_results = [
-        item for item in results
-        if item["spot_ticker"] == "SBER"
-    ]
+    sber_results = [item for item in results if item["spot_ticker"] == "SBER"]
 
-    assert len(sber_results) == 1
-    assert sber_results[0]["futures_ticker"] == "SRU6"
-    assert sber_results[0]["futures_expiry"] == future_date.isoformat()
+    assert len(sber_results) == 2
+    assert [item["futures_ticker"] for item in sber_results] == ["SRU6", "SRX6"]
+    assert [item["futures_expiry"] for item in sber_results] == [
+        nearest.isoformat(),
+        second.isoformat(),
+    ]
+    assert all(item["futures_ticker"] != "SRZ6" for item in sber_results)
 
 
 def test_pipeline_skips_expired_contracts():
@@ -242,7 +253,7 @@ if __name__ == "__main__":
         test_pipeline_limit,
         test_pipeline_skips_invalid_mapping,
         test_pipeline_keeps_radar_errors_without_stopping_scan,
-        test_pipeline_keeps_nearest_contract_per_spot,
+        test_pipeline_keeps_two_nearest_contracts_per_spot,
         test_pipeline_skips_expired_contracts,
     ]
 
