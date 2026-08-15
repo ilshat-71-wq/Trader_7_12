@@ -12,7 +12,7 @@ from services.morning_replay_service import MorningReplayService
 class HistoricalUniverseReplayService:
     """Replay SPOT setup, market-relative strength and futures confirmation."""
 
-    VERSION = "0.8"
+    VERSION = "0.9"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
@@ -82,7 +82,8 @@ class HistoricalUniverseReplayService:
         end_utc = end_moscow.astimezone(timezone.utc)
         try:
             data = self.history_service.trade_service.api.get_candles(ticker, class_code, interval="D", start_time=start_utc, end_time=end_utc)
-        except Exception:
+        except Exception as exc:
+            print(f"Historical candles unavailable: {ticker}/{class_code}: {type(exc).__name__}")
             return []
         bars = data.get("bars", []) if isinstance(data, dict) else []
         result = []
@@ -107,30 +108,88 @@ class HistoricalUniverseReplayService:
         result.sort(key=lambda item: item["date"])
         return result
 
+    @staticmethod
+    def _instrument_ticker(item):
+        if not isinstance(item, dict):
+            return ""
+        return str(
+            item.get("ticker")
+            or item.get("secCode")
+            or item.get("securityCode")
+            or ""
+        ).strip().upper()
+
+    @staticmethod
+    def _instrument_class_code(item):
+        if not isinstance(item, dict):
+            return ""
+        for key in ("classCode", "class_code", "boardClassCode"):
+            value = item.get(key)
+            if value:
+                return str(value).strip()
+        for board in item.get("boards") or []:
+            if not isinstance(board, dict):
+                continue
+            for key in ("classCode", "class_code"):
+                value = board.get(key)
+                if value:
+                    return str(value).strip()
+        return ""
+
     def load_market_benchmark(self):
-        """Resolve IMOEX/IMOEX2 dynamically from BCS index metadata."""
+        """Resolve IMOEX/IMOEX2 dynamically from BCS index metadata.
+
+        The historical replay must never guess a benchmark class code.  BCS
+        documents INDICES as a valid instrument type, but some sessions may
+        return an empty by-type result.  In that case retry resolution by the
+        exact benchmark tickers through the API's ticker lookup when available.
+        """
         api = self.history_service.trade_service.api
+        instruments = []
         try:
             instruments = api.get_instruments("INDICES")
-        except Exception:
-            return None
+        except Exception as exc:
+            print(f"Historical RS benchmark metadata error: {type(exc).__name__}")
+
         if not isinstance(instruments, list):
+            instruments = []
+
+        def resolve(records):
+            for preferred in self.RS_TICKERS:
+                for item in records:
+                    if self._instrument_ticker(item) != preferred:
+                        continue
+                    class_code = self._instrument_class_code(item)
+                    if class_code:
+                        return {"ticker": preferred, "class_code": class_code, "source": "by-type"}
             return None
-        for preferred in self.RS_TICKERS:
-            for item in instruments:
-                if not isinstance(item, dict):
-                    continue
-                ticker = str(item.get("ticker") or item.get("secCode") or "").strip().upper()
-                if ticker != preferred:
-                    continue
-                class_code = ""
-                for board in item.get("boards") or []:
-                    if isinstance(board, dict) and board.get("classCode"):
-                        class_code = str(board["classCode"]).strip()
-                        break
-                class_code = class_code or str(item.get("classCode") or "").strip()
-                if class_code:
-                    return {"ticker": ticker, "class_code": class_code}
+
+        resolved = resolve(instruments)
+        if resolved:
+            print(
+                f"Historical RS benchmark: {resolved['ticker']}/{resolved['class_code']} "
+                f"(dynamic INDICES metadata)"
+            )
+            return resolved
+
+        lookup = getattr(api, "get_instruments_by_tickers", None)
+        if callable(lookup):
+            try:
+                records = lookup(list(self.RS_TICKERS))
+            except Exception as exc:
+                print(f"Historical RS benchmark ticker lookup error: {type(exc).__name__}")
+                records = []
+            if isinstance(records, list):
+                resolved = resolve(records)
+                if resolved:
+                    resolved["source"] = "by-tickers"
+                    print(
+                        f"Historical RS benchmark: {resolved['ticker']}/{resolved['class_code']} "
+                        f"(dynamic ticker metadata)"
+                    )
+                    return resolved
+
+        print("Historical RS benchmark: UNAVAILABLE — no IMOEX/IMOEX2 metadata resolved")
         return None
 
     def calculate_relative_strength(self, candles, benchmark_candles, benchmark_name=None):
@@ -248,6 +307,19 @@ class HistoricalUniverseReplayService:
         min_money = self.DEFAULT_MIN_MONEY if min_money is None else float(min_money)
         benchmark_meta = self.load_market_benchmark()
         benchmark_candles = self.load_daily_candles(benchmark_meta["ticker"], benchmark_meta["class_code"], trading_date) if benchmark_meta else []
+        if benchmark_meta and len(benchmark_candles) < 2:
+            print(
+                f"Historical RS benchmark candles: UNAVAILABLE — "
+                f"{benchmark_meta['ticker']}/{benchmark_meta['class_code']} returned "
+                f"{len(benchmark_candles)} completed daily candles"
+            )
+            benchmark_meta = None
+            benchmark_candles = []
+        elif benchmark_meta:
+            print(
+                f"Historical RS benchmark candles: {len(benchmark_candles)} completed daily candles "
+                f"for {benchmark_meta['ticker']}/{benchmark_meta['class_code']}"
+            )
         mappings = self.load_mappings_for_date(trading_date)
         rows = []
         grouped = {}
@@ -303,7 +375,7 @@ class HistoricalUniverseReplayService:
         print("-" * 128)
         for rank, item in enumerate(rows, start=1):
             confirmation = item.get("futures_confirmation") or {}
-            print(f"{rank:>3} {str(item.get('futures_ticker', '-')):<8} {str(item.get('spot_ticker', '-')):<7} {str(item.get('direction', '-')):<6} {float(item.get('candidate_score', 0) or 0):>7.2f} {str(item.get('setup', '-')):<10} {str(item.get('ready_time', '-')):<6} {str(item.get('confirmation_time', '-')):<6} {float(item.get('relative_strength', 0) or 0):>7.2f} {float(item.get('average_daily_money', 0) or 0):>15,.0f} {float(item.get('futures_average_daily_money', 0) or 0):>15,.0f}")
+            print(f"{rank:>3} {str(item.get('futures_ticker', '-')):<8} {str(item.get('spot_ticker', '-')):<7} {str(item.get('direction', '-')):<6} {float(item.get('candidate_score', 0) or 0):>7.2f} {str(item.get('setup', '-')):<10} {str(item.get('ready_time', '-')):<6} {str(item.get('confirmation_time', '-')):<6} {float(item.get('relative_strength', 0) or 0):>7.2f}{float(item.get('average_daily_money', 0) or 0):>15,.0f} {float(item.get('futures_average_daily_money', 0) or 0):>15,.0f}")
         print("=" * 128)
         print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
         print("Historical RS is calculated against the dynamically resolved IMOEX/IMOEX2 benchmark using completed daily candles only.")
