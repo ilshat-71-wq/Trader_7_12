@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Main launcher
 
-Версия 0.6
+Версия 0.7
 
 Запуск:
 - подключение BCS API
@@ -26,12 +26,20 @@ def main():
     print("🚀 Запуск Trader_7_12 Pro")
 
     loader = MarketLoader()
-    connected = loader.connect()
+    try:
+        connected = loader.connect()
+    except Exception as exc:
+        connected = False
+        print(f"⚠️ БКС временно недоступен: {exc}")
 
     if not connected:
-        print("⚠️ БКС временно недоступен — интерфейс запускается в режиме просмотра")
+        print("⚠️ Интерфейс запускается в режиме просмотра")
     else:
-        market_data = loader.load()
+        try:
+            market_data = loader.load()
+        except Exception as exc:
+            market_data = None
+            print(f"⚠️ Не удалось загрузить рынок: {exc}")
 
         if market_data is None:
             print("⚠️ Данные рынка не получены")
