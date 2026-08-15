@@ -65,4 +65,6 @@ def test_replay_calls_setup_engine_with_checkpoint_candles():
     assert results[0]["setup"] == "RETEST"
     assert results[0]["setup_state"] == "READY"
     assert results[0]["entry_trigger"] == 101.0
+    assert results[0]["momentum_signal"] == "NO_SIGNAL"
+    assert results[0]["momentum_score"] == 0
     assert results[1]["candles"] == 6
