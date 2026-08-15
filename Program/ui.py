@@ -3,15 +3,15 @@ Trader_7_12 Pro
 
 Пользовательский интерфейс
 
-Версия: 0.7
+Версия: 0.8
 
 Изменения:
 - русские пользовательские подписи
+- при недоступном БКС интерфейс запускается без создания scanner
 - внутренняя торговая логика и ключи данных не изменяются
 """
 
 from PySide6.QtWidgets import (
-    QApplication,
     QWidget,
     QLabel,
     QPushButton,
@@ -56,13 +56,17 @@ def label_setup_state(value):
 
 class TraderWindow(QWidget):
 
-    def __init__(self):
+    def __init__(self, scanner_enabled=True):
         super().__init__()
 
         self.setWindowTitle("Trader_7_12 Pro — Утренний радар")
         self.resize(900, 600)
 
-        self.scanner = MorningTradingPipelineService()
+        self.scanner = None
+        self.scanner_enabled = scanner_enabled
+        if scanner_enabled:
+            self.scanner = MorningTradingPipelineService()
+
         self.init_ui()
 
     def init_ui(self):
@@ -78,6 +82,14 @@ class TraderWindow(QWidget):
         self.result_box = QTextEdit()
         self.result_box.setReadOnly(True)
 
+        if not self.scanner_enabled:
+            self.scan_button.setEnabled(False)
+            self.result_box.setText(
+                "👁 РЕЖИМ ПРОСМОТРА\n\n"
+                "БКС временно недоступен.\n"
+                "Сканирование рынка будет доступно после восстановления подключения."
+            )
+
         layout = QVBoxLayout()
         layout.addWidget(self.title)
         layout.addWidget(self.subtitle)
@@ -86,6 +98,13 @@ class TraderWindow(QWidget):
         self.setLayout(layout)
 
     def run_market_scan(self):
+        if self.scanner is None:
+            self.result_box.setText(
+                "👁 РЕЖИМ ПРОСМОТРА\n\n"
+                "БКС временно недоступен. Сканирование невозможно."
+            )
+            return
+
         self.result_box.setText(
             "📡 Сканирование рынка БКС...\n\n"
             "Радар СПОТА → подтверждение ФЬЮЧЕРСА → итоговый кандидат"
