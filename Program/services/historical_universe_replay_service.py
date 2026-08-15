@@ -5,7 +5,8 @@ Historical Universe Morning Replay Service.
 
 Purpose:
 - build the dynamic Futures -> SPOT universe for a historical date;
-- choose the two nearest valid futures contracts per SPOT at that date;
+- choose the most liquid of the two nearest valid futures per SPOT;
+- exclude futures with three calendar days or fewer until expiry;
 - calculate historical daily direction from completed D candles;
 - filter by historical average daily money turnover;
 - replay the existing SPOT M5 setup detector at morning checkpoints;
@@ -23,10 +24,11 @@ from services.morning_replay_service import MorningReplayService
 
 
 class HistoricalUniverseReplayService:
-    VERSION = "0.2"
+    VERSION = "0.3"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
+    MIN_DAYS_TO_EXPIRY = 3
 
     def __init__(self, mapping_service=None, history_service=None, replay_service=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
@@ -50,6 +52,13 @@ class HistoricalUniverseReplayService:
             return date.fromisoformat(str(value)[:10])
         except ValueError:
             return None
+
+    @classmethod
+    def _expiry_is_usable(cls, trading_date, expiry):
+        expiry = cls._parse_expiry(expiry)
+        if expiry is None:
+            return False
+        return (expiry - trading_date).days > cls.MIN_DAYS_TO_EXPIRY
 
     def load_mappings_for_date(self, trading_date):
         """Load dynamic mappings and keep the two nearest valid contracts per SPOT."""
@@ -151,13 +160,62 @@ class HistoricalUniverseReplayService:
         turnovers = [value for value in turnovers if value > 0]
         return sum(turnovers) / len(turnovers) if turnovers else 0.0
 
+    def select_futures_for_spot(self, candidates, trading_date):
+        """Select one futures contract per SPOT by liquidity after expiry filtering.
+
+        The two nearest contracts are supplied by load_mappings_for_date().
+        A contract expiring in three calendar days or less is never considered.
+        Among the remaining contracts, the highest completed-day average money
+        turnover wins. This naturally falls through to the next contract when
+        the most liquid one is too close to expiry.
+        """
+        trading_date = self._as_date(trading_date)
+        ranked = []
+
+        for candidate in candidates:
+            if not self._expiry_is_usable(trading_date, candidate.get("futures_expiry")):
+                continue
+
+            ticker = str(candidate.get("futures_ticker") or "").strip().upper()
+            class_code = str(candidate.get("futures_class_code") or "").strip()
+            if not ticker or not class_code:
+                continue
+
+            candles = self.load_daily_candles(ticker, class_code, trading_date)
+            liquidity = self.historical_liquidity(candles)
+            if liquidity <= 0:
+                continue
+
+            selected = dict(candidate)
+            selected["futures_average_daily_money"] = liquidity
+            ranked.append(selected)
+
+        ranked.sort(
+            key=lambda item: (
+                float(item.get("futures_average_daily_money", 0) or 0),
+                str(item.get("futures_ticker") or ""),
+            ),
+            reverse=True,
+        )
+        return ranked[0] if ranked else None
+
     def replay(self, trading_date, min_money=None, checkpoints=None, limit=None):
         trading_date = self._as_date(trading_date)
         min_money = self.DEFAULT_MIN_MONEY if min_money is None else float(min_money)
         mappings = self.load_mappings_for_date(trading_date)
         rows = []
 
+        grouped = {}
         for mapping in mappings:
+            spot = str(mapping.get("spot_ticker") or "").strip().upper()
+            if spot:
+                grouped.setdefault(spot, []).append(mapping)
+
+        for candidates in grouped.values():
+            mapping = self.select_futures_for_spot(candidates, trading_date)
+            if mapping is None:
+                continue
+
             spot = str(mapping.get("spot_ticker") or "").strip().upper()
             spot_class = str(mapping.get("spot_class_code") or "").strip()
             if not spot or not spot_class:
@@ -191,6 +249,7 @@ class HistoricalUniverseReplayService:
                 "futures_ticker": mapping.get("futures_ticker"),
                 "futures_class_code": mapping.get("futures_class_code"),
                 "futures_expiry": mapping.get("futures_expiry"),
+                "futures_average_daily_money": mapping.get("futures_average_daily_money", 0.0),
                 "spot_ticker": spot,
                 "spot_class_code": spot_class,
                 "direction": direction,
@@ -217,25 +276,26 @@ class HistoricalUniverseReplayService:
     @staticmethod
     def print_results(rows, trading_date, min_money):
         print()
-        print("=" * 130)
+        print("=" * 145)
         print("TRADER_7_12 PRO - DYNAMIC HISTORICAL MORNING REPLAY")
         print("READ ONLY — NO ORDERS")
         print(f"DATE: {trading_date}  |  MIN AVG DAILY MONEY: {min_money:,.0f}")
-        print("=" * 130)
-        print(f"{'FUTURES':<12}{'SPOT':<9}{'DIR':<7}{'AVG MONEY':>16}{'SETUP':>10}{'READY':>9}{'TRIGGER':>14}")
-        print("-" * 130)
+        print("=" * 145)
+        print(f"{'FUTURES':<12}{'SPOT':<9}{'DIR':<7}{'FUT AVG MONEY':>18}{'AVG MONEY':>16}{'SETUP':>10}{'READY':>9}{'TRIGGER':>14}")
+        print("-" * 145)
         for row in rows:
             print(
                 f"{str(row['futures_ticker'] or '-'): <12}"
                 f"{row['spot_ticker']:<9}"
                 f"{row['direction']:<7}"
+                f"{float(row['futures_average_daily_money'] or 0):>18,.0f}"
                 f"{row['average_daily_money']:>16,.0f}"
                 f"{str(row['setup_first_seen'] or '-'):>10}"
                 f"{str(row['ready_time'] or '-'):>9}"
                 f"{float(row['entry_trigger'] or 0):>14.4f}"
             )
-        print("-" * 130)
+        print("-" * 145)
         ready_count = sum(1 for row in rows if row["ready_time"] is not None)
         print(f"MAPPED LIQUID FUTURES/SPOTS: {len(rows)}")
         print(f"READY SETUPS: {ready_count}")
-        print("=" * 130)
+        print("=" * 145)
