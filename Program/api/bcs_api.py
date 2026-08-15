@@ -201,6 +201,7 @@ class BCSAPI:
             if isinstance(
                 data,
                 list
+
             ):
 
                 records = data
@@ -251,6 +252,60 @@ class BCSAPI:
 
 
         return result
+
+
+
+    # ---------------------------------------------------------
+
+    def get_instruments_by_tickers(self, tickers):
+        """Resolve exact instrument metadata by ticker via BCS."""
+        if not isinstance(tickers, (list, tuple)):
+            return []
+
+        requested = [
+            str(ticker).strip().upper()
+            for ticker in tickers
+            if str(ticker).strip()
+        ]
+        if not requested:
+            return []
+
+        url = f"{self.info_url}/instruments/by-tickers"
+        payload = {"tickers": requested}
+
+        try:
+            r = RequestHelper.post(
+                url,
+                headers={
+                    **self.headers(),
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+        except Exception as exc:
+            print(
+                "Instrument ticker lookup failed:",
+                type(exc).__name__
+            )
+            return []
+
+        print("Instrument ticker lookup:", r.status_code)
+        if r.status_code != 200:
+            return []
+
+        try:
+            data = r.json()
+        except ValueError:
+            return []
+
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict):
+            records = data.get("instruments", data.get("records", []))
+        else:
+            records = []
+
+        return records if isinstance(records, list) else []
 
 
 
@@ -598,139 +653,52 @@ class BCSAPI:
             f"{self.market_url}/candles-chart"
         )
 
-        # ---------------------------------------------------------
-        # NORMALIZE TIME
-        # ---------------------------------------------------------
-
         def normalize_time(value):
-
             if value is None:
                 return None
-
             if isinstance(value, datetime):
-
                 dt = value
-
             else:
-
                 text = str(value).strip()
-
                 if text.endswith("Z"):
-
-                    text = (
-                        text[:-1]
-                        + "+00:00"
-                    )
-
-                dt = datetime.fromisoformat(
-                    text
-                )
-
+                    text = text[:-1] + "+00:00"
+                dt = datetime.fromisoformat(text)
             if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
 
-                dt = dt.replace(
-                    tzinfo=timezone.utc
-                )
-
-            return dt.astimezone(
-                timezone.utc
-            )
-
-        # ---------------------------------------------------------
-        # TIME RANGE
-        # ---------------------------------------------------------
-
-        now = datetime.now(
-            timezone.utc
-        )
-
+        now = datetime.now(timezone.utc)
         try:
-
             if end_time is not None:
-
-                end_dt = normalize_time(
-                    end_time
-                )
-
+                end_dt = normalize_time(end_time)
             else:
-
                 end_dt = now
-
             if start_time is not None:
-
-                start_dt = normalize_time(
-                    start_time
-                )
-
+                start_dt = normalize_time(start_time)
             else:
-
                 if interval == "D":
-                    start_dt = (
-                        end_dt
-                        - timedelta(
-                            days=30
-                        )
-                    )
+                    start_dt = end_dt - timedelta(days=30)
                 else:
-                    start_dt = (
-                        end_dt
-                        - timedelta(
-                            hours=4
-                        )
-                    )
-
-        except (
-            TypeError,
-            ValueError
-        ) as exc:
-
+                    start_dt = end_dt - timedelta(hours=4)
+        except (TypeError, ValueError) as exc:
             print()
-            print(
-                "❌ Invalid candle time:",
-                exc
-            )
-
+            print("❌ Invalid candle time:", exc)
             return {}
 
-        if (
-            start_dt is None
-            or end_dt is None
-        ):
-
+        if start_dt is None or end_dt is None:
             return {}
-
         if start_dt >= end_dt:
-
             print()
-            print(
-                "❌ Invalid candle period"
-            )
-
-            print(
-                "START:",
-                start_dt
-            )
-
-            print(
-                "END:",
-                end_dt
-            )
-
+            print("❌ Invalid candle period")
+            print("START:", start_dt)
+            print("END:", end_dt)
             return {}
-
-        # ---------------------------------------------------------
-        # REQUEST
-        # ---------------------------------------------------------
 
         params = {
             "ticker": ticker,
             "classCode": class_code,
-            "startDate": start_dt.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            ),
-            "endDate": end_dt.strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            ),
+            "startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             "timeFrame": interval
         }
 
@@ -741,25 +709,17 @@ class BCSAPI:
         )
 
         if r.status_code == 200:
-
             try:
-
                 return r.json()
-
             except ValueError:
-
-                print(
-                    "❌ Candles JSON error"
-                )
-
+                print("❌ Candles JSON error")
                 return {}
-
         return {}
 
 
     # ---------------------------------------------------------
 # HISTORY TRADES
-    # ---------------------------------------------------------
+# ---------------------------------------------------------
 
     def get_trades_history(
             self,
