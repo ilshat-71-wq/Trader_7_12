@@ -66,36 +66,11 @@ def _forward_outcome(service, item, endpoint):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Replay the dynamic liquid Futures -> SPOT universe on a completed trading day."
-    )
-    parser.add_argument("--date", default=DEFAULT_DATE)
-    parser.add_argument("--min-money", type=float, default=DEFAULT_MIN_MONEY)
-    parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--checkpoints", default=DEFAULT_CHECKPOINTS)
-    args = parser.parse_args()
-
-    checkpoints = [item.strip() for item in args.checkpoints.split(",") if item.strip()]
-
-    service = HistoricalUniverseReplayService()
-    rows = service.replay(
-        trading_date=args.date,
-        min_money=args.min_money,
-        checkpoints=checkpoints,
-        limit=None,
-    )
-    rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
-
-    for item in rows:
-        item["_trading_date"] = args.date
-        item["outcome_10_00"] = _forward_outcome(service, item, "10:00")
-        item["outcome_13_00"] = _forward_outcome(service, item, "13:00")
-
+def _print_rows(rows, trading_date):
     print()
     print("=" * 220)
     print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
-    print(f"DATE: {args.date} | READ ONLY")
+    print(f"DATE: {trading_date} | READ ONLY")
     print("=" * 220)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
@@ -106,10 +81,9 @@ def main():
     )
     print("-" * 220)
 
-    for item in rows:
+    for rank, item in enumerate(rows, start=1):
         rs_data = item.get("relative_strength_data") or {}
         rs = float(item.get("relative_strength", 0) or 0)
-
         if not item.get("relative_strength_available"):
             rs_state = "N/A"
         elif rs > 5:
@@ -121,18 +95,12 @@ def main():
 
         out10 = item.get("outcome_10_00") or {}
         out13 = item.get("outcome_13_00") or {}
-
         print(
-            f"{item.get('rank', '-'):>3} "
-            f"{str(item.get('futures_ticker', '-')):<8} "
-            f"{str(item.get('spot_ticker', '-')):<7} "
-            f"{str(item.get('direction', '-')):<6} "
+            f"{rank:>3} {str(item.get('futures_ticker', '-')):<8} "
+            f"{str(item.get('spot_ticker', '-')):<7} {str(item.get('direction', '-')):<6} "
             f"{float(item.get('candidate_score', 0) or 0):>7.2f} "
-            f"{str(item.get('setup', '-')):<10} "
-            f"{str(item.get('ready_time', '-')):<6} "
-            f"{str(item.get('confirmation_time', '-')):<6} "
-            f"{rs:>7.2f} "
-            f"{rs_state:<9} "
+            f"{str(item.get('setup', '-')):<10} {str(item.get('ready_time', '-')):<6} "
+            f"{str(item.get('confirmation_time', '-')):<6} {rs:>7.2f} {rs_state:<9} "
             f"{float(rs_data.get('excess_change_percent', 0) or 0):>10.2f} "
             f"{float(out10.get('raw_return_percent', 0) or 0):>9.2f} "
             f"{float(out10.get('directional_return_percent', 0) or 0):>9.2f} "
@@ -141,13 +109,70 @@ def main():
             f"{float(out13.get('directional_return_percent', 0) or 0):>9.2f} "
             f"{float(out13.get('max_favorable_percent', 0) or 0):>9.2f}"
         )
-
     print("=" * 220)
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
-    print("Historical RS: completed daily candles vs dynamically resolved IMOEX/IMOEX2 benchmark, 3-day lookback.")
-    print("Outcome: RAW % is the actual futures price move; DIR % adjusts it for LONG/SHORT; MFE is the best favorable move.")
-    print("Historical replay is read-only and does not perform portfolio or order operations.")
-    print("=" * 220)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Replay the dynamic liquid Futures -> SPOT universe on completed trading days."
+    )
+    parser.add_argument("--date", default=None)
+    parser.add_argument("--dates", default=None, help="Comma-separated dates; one service instance is reused for the whole batch.")
+    parser.add_argument("--min-money", type=float, default=DEFAULT_MIN_MONEY)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--checkpoints", default=DEFAULT_CHECKPOINTS)
+    args = parser.parse_args()
+
+    if args.date and args.dates:
+        parser.error("use either --date or --dates, not both")
+    dates = [item.strip() for item in (args.dates or args.date or DEFAULT_DATE).split(",") if item.strip()]
+    checkpoints = [item.strip() for item in args.checkpoints.split(",") if item.strip()]
+
+    service = HistoricalUniverseReplayService()
+
+    # Reuse expensive BCS instrument metadata across all dates in one process.
+    # The replay itself remains date-specific; only immutable metadata is cached.
+    mapping_cache = service.mapping_service.load()
+    service.mapping_service.load = lambda: mapping_cache
+    benchmark_cache = {"loaded": False, "value": None}
+    original_benchmark_loader = service.load_market_benchmark
+
+    def cached_benchmark_loader():
+        if not benchmark_cache["loaded"]:
+            benchmark_cache["value"] = original_benchmark_loader()
+            benchmark_cache["loaded"] = True
+        return benchmark_cache["value"]
+
+    service.load_market_benchmark = cached_benchmark_loader
+
+    all_results = []
+    for trading_date in dates:
+        rows = service.replay(
+            trading_date=trading_date,
+            min_money=args.min_money,
+            checkpoints=checkpoints,
+            limit=None,
+        )
+        rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
+        for item in rows:
+            item["_trading_date"] = trading_date
+            item["outcome_10_00"] = _forward_outcome(service, item, "10:00")
+            item["outcome_13_00"] = _forward_outcome(service, item, "13:00")
+        _print_rows(rows, trading_date)
+        all_results.extend((trading_date, item) for item in rows)
+
+    if len(dates) > 1:
+        available = [item for _, item in all_results if (item.get("outcome_13_00") or {}).get("available")]
+        wins = [item for item in available if float((item.get("outcome_13_00") or {}).get("directional_return_percent", 0) or 0) > 0]
+        avg_dir = sum(float((item.get("outcome_13_00") or {}).get("directional_return_percent", 0) or 0) for item in available) / len(available) if available else 0.0
+        avg_mfe = sum(float((item.get("outcome_13_00") or {}).get("max_favorable_percent", 0) or 0) for item in available) / len(available) if available else 0.0
+        print()
+        print("=== MULTI-DATE QUICK SUMMARY ===")
+        print(f"DATES: {len(dates)} | CANDIDATES: {len(all_results)} | OUTCOMES: {len(available)}")
+        print(f"DIR WIN RATE: {len(wins) / len(available) * 100:.1f}%" if available else "DIR WIN RATE: N/A")
+        print(f"AVG DIR %: {avg_dir:.2f} | AVG MFE %: {avg_mfe:.2f}")
+        print("Historical replay is read-only and does not perform portfolio or order operations.")
 
 
 if __name__ == "__main__":
