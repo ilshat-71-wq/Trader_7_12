@@ -64,27 +64,16 @@ class FuturesMorningRadarService:
             if not isinstance(mapping, dict):
                 continue
 
-            futures_ticker = str(
-                mapping.get("futures_ticker") or ""
-            ).strip().upper()
-            futures_class_code = str(
-                mapping.get("futures_class_code") or ""
-            ).strip()
-            spot_ticker = str(
-                mapping.get("spot_ticker") or ""
-            ).strip().upper()
-            spot_class_code = str(
-                mapping.get("spot_class_code") or ""
-            ).strip()
+            futures_ticker = str(mapping.get("futures_ticker") or "").strip().upper()
+            futures_class_code = str(mapping.get("futures_class_code") or "").strip()
+            spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
+            spot_class_code = str(mapping.get("spot_class_code") or "").strip()
 
             if not futures_ticker or not spot_ticker or not spot_class_code:
                 continue
 
             try:
-                radar = self.radar_service.analyze(
-                    spot_ticker,
-                    spot_class_code
-                )
+                radar = self.radar_service.analyze(spot_ticker, spot_class_code)
             except Exception as exc:
                 results.append({
                     "version": self.VERSION,
@@ -142,16 +131,12 @@ class FuturesMorningRadarService:
             if not isinstance(mapping, dict):
                 continue
 
-            spot_ticker = str(
-                mapping.get("spot_ticker") or ""
-            ).strip().upper()
+            spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
             if not spot_ticker:
                 continue
 
             expiry = cls._parse_expiry(mapping.get("futures_expiry"))
             if expiry is None:
-                # Do not guess an expiry. Such a mapping is not suitable
-                # for deterministic contract selection.
                 continue
 
             if expiry < date.today():
@@ -162,8 +147,7 @@ class FuturesMorningRadarService:
             grouped.setdefault(spot_ticker, []).append(candidate)
 
         selected = []
-        for spot_ticker, candidates in grouped.items():
-            # Sort strictly by expiry; ticker is only a deterministic tie-break.
+        for candidates in grouped.values():
             candidates.sort(
                 key=lambda item: (
                     cls._parse_expiry(item.get("futures_expiry")) or date.max,
