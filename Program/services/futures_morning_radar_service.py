@@ -7,9 +7,9 @@ Stage 3 of the Spot-first architecture.
 
 Purpose:
 - connect the dynamic futures universe to Futures -> SPOT mapping;
-- keep one current futures contract per SPOT underlying;
+- keep the two nearest non-expired futures contracts per SPOT underlying;
 - run the existing InstrumentMorningRadarService on each unique SPOT;
-- return one ordered shortlist where every radar result points to its
+- return an ordered shortlist where every radar result points to its
   selected futures contract.
 
 Architecture:
@@ -32,7 +32,8 @@ from services.instrument_morning_radar_service import InstrumentMorningRadarServ
 class FuturesMorningRadarService:
     """Build the current futures shortlist through the SPOT-first radar."""
 
-    VERSION = "0.2"
+    VERSION = "0.3"
+    MAX_CONTRACTS_PER_SPOT = 2
 
     def __init__(self, mapping_service=None, radar_service=None):
         self.mapping_service = (
@@ -44,11 +45,11 @@ class FuturesMorningRadarService:
 
     def scan(self, mappings=None, limit=None):
         """
-        Run Morning Radar for the current futures contracts.
+        Run Morning Radar for the two nearest valid futures contracts per SPOT.
 
-        If several futures contracts point to the same SPOT, only the
-        nearest non-expired contract is analyzed. This prevents the same
-        underlying from appearing several times in the morning shortlist.
+        SPOTs without a valid mapping are already excluded by the mapping
+        service. More distant futures are not analyzed at this stage.
+        Liquidity and futures confirmation are evaluated later by the pipeline.
         """
         if mappings is None:
             mappings = self.mapping_service.load()
@@ -134,8 +135,8 @@ class FuturesMorningRadarService:
 
     @classmethod
     def _select_current_contracts(cls, mappings):
-        """Keep only the nearest valid futures contract for each SPOT."""
-        selected = {}
+        """Keep the two nearest valid futures contracts for each SPOT."""
+        grouped = {}
 
         for mapping in mappings:
             if not isinstance(mapping, dict):
@@ -150,7 +151,7 @@ class FuturesMorningRadarService:
             expiry = cls._parse_expiry(mapping.get("futures_expiry"))
             if expiry is None:
                 # Do not guess an expiry. Such a mapping is not suitable
-                # for deterministic current-contract selection.
+                # for deterministic contract selection.
                 continue
 
             if expiry < date.today():
@@ -158,23 +159,24 @@ class FuturesMorningRadarService:
 
             candidate = dict(mapping)
             candidate["futures_expiry"] = expiry.isoformat()
+            grouped.setdefault(spot_ticker, []).append(candidate)
 
-            current = selected.get(spot_ticker)
-            if current is None:
-                selected[spot_ticker] = candidate
-                continue
-
-            current_expiry = cls._parse_expiry(
-                current.get("futures_expiry")
+        selected = []
+        for spot_ticker, candidates in grouped.items():
+            # Sort strictly by expiry; ticker is only a deterministic tie-break.
+            candidates.sort(
+                key=lambda item: (
+                    cls._parse_expiry(item.get("futures_expiry")) or date.max,
+                    str(item.get("futures_ticker") or ""),
+                )
             )
-
-            if current_expiry is None or expiry < current_expiry:
-                selected[spot_ticker] = candidate
+            selected.extend(candidates[:cls.MAX_CONTRACTS_PER_SPOT])
 
         return sorted(
-            selected.values(),
+            selected,
             key=lambda item: (
                 str(item.get("spot_ticker") or ""),
+                cls._parse_expiry(item.get("futures_expiry")) or date.max,
                 str(item.get("futures_ticker") or ""),
             )
         )
@@ -240,6 +242,6 @@ class FuturesMorningRadarService:
 
         print()
         print("Pipeline: FUTURES -> SPOT -> Morning Radar")
-        print("One current futures contract per SPOT is retained.")
+        print("Two nearest futures contracts per SPOT are retained.")
         print("No trade execution is performed by this service.")
         print("=" * 110)
