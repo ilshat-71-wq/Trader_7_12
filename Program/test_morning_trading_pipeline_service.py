@@ -1,7 +1,7 @@
 """
 Trader_7_12 Pro
 
-Morning Trading Pipeline v0.1 tests.
+Morning Trading Pipeline v0.3 tests.
 """
 
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
@@ -32,13 +32,6 @@ class FakeCandidateService:
             confirmations=confirmations,
             limit=limit,
         )
-
-
-class FakeFinalTradeService:
-    def build_top(self, candidates, lot_sizes=None, limit=3):
-        from services.final_trade_service import FinalTradeService
-        service = FinalTradeService()
-        return service.build_top(candidates, lot_sizes=lot_sizes, limit=limit)
 
 
 class TestMorningTradingPipelineService:
@@ -73,44 +66,46 @@ class TestMorningTradingPipelineService:
             "money_volume": 20_000_000,
             "trade_count": 50,
             "last_price": 100.0,
+            "price_change_percent": 1.0,
             "futures_ticker": ticker,
             "futures_class_code": "SPBFUT",
         }
 
-    def test_pipeline_returns_final_trade(self):
+    def service(self, radars, confirmations):
+        return MorningTradingPipelineService(
+            radar_service=FakeRadarService(radars),
+            confirmation_service=FakeConfirmationService(confirmations),
+            candidate_service=FakeCandidateService(),
+        )
+
+    def test_pipeline_returns_candidate(self):
         radar = self.radar()
         confirmation = self.confirmation()
 
-        service = MorningTradingPipelineService(
-            radar_service=FakeRadarService([radar]),
-            confirmation_service=FakeConfirmationService({"SRU6": confirmation}),
-            candidate_service=FakeCandidateService(),
-            final_trade_service=FakeFinalTradeService(),
-        )
-
-        trades = service.scan(
+        candidates = self.service([radar], {"SRU6": confirmation}).scan(
             mappings=[{"futures_ticker": "SRU6", "spot_ticker": "SBER"}],
             confirmations={"SRU6": confirmation},
             limit=3,
         )
 
-        assert len(trades) == 1
-        assert trades[0]["status"] == "READY"
-        assert trades[0]["direction"] == "LONG"
-        assert trades[0]["futures_ticker"] == "SRU6"
-        assert trades[0]["pipeline_version"] == "0.2"
+        assert len(candidates) == 1
+        assert candidates[0]["status"] == "READY"
+        assert candidates[0]["direction"] == "LONG"
+        assert candidates[0]["futures_ticker"] == "SRU6"
+        assert candidates[0]["pipeline_version"] == "0.3"
+        assert "stop_loss" not in candidates[0]
+        assert "take_profit" not in candidates[0]
+        assert "quantity" not in candidates[0]
+        assert "risk_utilization" not in candidates[0]
 
     def test_pipeline_rejects_blocked_confirmation(self):
         radar = self.radar()
         blocked = self.confirmation()
         blocked["status"] = "BLOCKED"
 
-        service = MorningTradingPipelineService(
-            radar_service=FakeRadarService([radar]),
-            confirmation_service=FakeConfirmationService({"SRU6": blocked}),
-        )
-
-        assert service.scan(confirmations={"SRU6": blocked}) == []
+        assert self.service([radar], {"SRU6": blocked}).scan(
+            confirmations={"SRU6": blocked}
+        ) == []
 
     def test_pipeline_keeps_only_top_two(self):
         radars = [
@@ -124,25 +119,18 @@ class TestMorningTradingPipelineService:
             "C1U6": self.confirmation(ticker="C1U6", score=80),
         }
 
-        service = MorningTradingPipelineService(
-            radar_service=FakeRadarService(radars),
-            confirmation_service=FakeConfirmationService(confirmations),
+        candidates = self.service(radars, confirmations).scan(
+            confirmations=confirmations,
+            limit=2,
         )
 
-        trades = service.scan(confirmations=confirmations, limit=2)
-
-        assert len(trades) == 2
-        assert trades[0]["futures_ticker"] == "B1U6"
-        assert trades[0]["rank"] == 1
-        assert trades[1]["rank"] == 2
+        assert len(candidates) == 2
+        assert candidates[0]["futures_ticker"] == "B1U6"
+        assert candidates[0]["rank"] == 1
+        assert candidates[1]["rank"] == 2
 
     def test_pipeline_does_not_execute_orders(self):
-        service = MorningTradingPipelineService(
-            radar_service=FakeRadarService([]),
-            confirmation_service=FakeConfirmationService({}),
-        )
-
-        result = service.scan(limit=3)
+        result = self.service([], {}).scan(limit=3)
         assert isinstance(result, list)
         assert all("order_id" not in item for item in result)
 
@@ -150,7 +138,7 @@ class TestMorningTradingPipelineService:
 def run_tests():
     test = TestMorningTradingPipelineService()
     tests = [
-        ("test_pipeline_returns_final_trade", test.test_pipeline_returns_final_trade),
+        ("test_pipeline_returns_candidate", test.test_pipeline_returns_candidate),
         ("test_pipeline_rejects_blocked_confirmation", test.test_pipeline_rejects_blocked_confirmation),
         ("test_pipeline_keeps_only_top_two", test.test_pipeline_keeps_only_top_two),
         ("test_pipeline_does_not_execute_orders", test.test_pipeline_does_not_execute_orders),
