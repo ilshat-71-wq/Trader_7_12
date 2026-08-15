@@ -102,21 +102,27 @@ class FuturesUniverseService:
             "shortName": str(item.get("shortName") or "").strip(),
             "expiry": expiry.isoformat(),
             "lotSize": item.get("lotSize", 1),
+            # Preserve BCS underlying metadata exactly enough for Stage 2.
             "underlyingTicker": item.get("underlyingTicker"),
             "underlying_ticker": item.get("underlying_ticker"),
             "underlyingSecurityCode": item.get("underlyingSecurityCode"),
             "underlyingSecurity": item.get("underlyingSecurity"),
+            "underlyingSecurityClassCode": item.get("underlyingSecurityClassCode"),
+            "underlying_security_class_code": item.get("underlying_security_class_code"),
             "baseTicker": item.get("baseTicker"),
             "base_ticker": item.get("base_ticker"),
             "spotTicker": item.get("spotTicker"),
             "spot_ticker": item.get("spot_ticker"),
             "underlyingAsset": item.get("underlyingAsset"),
             "underlyingAssetTicker": item.get("underlyingAssetTicker"),
-            # BCS Trade API canonical futures-underlying fields.
+            # Canonical BCS Trade API futures-underlying fields.
             "baseAsset": item.get("baseAsset"),
             "baseAssetFuture": item.get("baseAssetFuture"),
+            "baseAssetSecurity": item.get("baseAssetSecurity"),
             "baseAssetSecuritySecCode": item.get("baseAssetSecuritySecCode"),
             "baseAssetSecurityClassCode": item.get("baseAssetSecurityClassCode"),
+            # Keep the raw class/board metadata available for future diagnostics.
+            "boards": item.get("boards"),
         }
 
     @staticmethod
