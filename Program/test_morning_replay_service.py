@@ -1,4 +1,5 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from services.morning_replay_service import MorningReplayService
 
@@ -9,7 +10,7 @@ class FakeHistoryService:
 
     def to_moscow(self, value):
         text = str(value).replace("Z", "+00:00")
-        return datetime.fromisoformat(text)
+        return datetime.fromisoformat(text).astimezone(ZoneInfo("Europe/Moscow"))
 
     def load(self, ticker, class_code, start_time=None, end_time=None, timeframe_minutes=5):
         return list(self.candles)
