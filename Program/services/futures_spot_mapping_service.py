@@ -13,6 +13,12 @@ Purpose:
 - reject ambiguous or unmapped contracts instead of guessing.
 
 There is deliberately NO fixed instrument universe here.
+
+Hard universe rule:
+    A futures contract enters the downstream pipeline ONLY when a unique,
+    usable SPOT ticker and SPOT class code are available. Unmapped,
+    ambiguous, or otherwise incomplete contracts are discarded here before
+    any SPOT history, liquidity, radar, or ranking work is performed.
 """
 
 import re
@@ -36,6 +42,11 @@ class FuturesSpotMappingService:
         "METALS",
         "INDICES",
     )
+
+    VALID_MAPPING_METHODS = {
+        "BCS_UNDERLYING",
+        "SPOT_METADATA",
+    }
 
     EXPLICIT_SPOT_KEYS = (
         # Canonical BCS fields.
@@ -76,7 +87,7 @@ class FuturesSpotMappingService:
         )
 
     def load(self):
-        """Return every eligible future for which a unique SPOT is known."""
+        """Return only futures for which a unique usable SPOT is known."""
         if not self.api.authorize():
             return []
 
@@ -91,7 +102,7 @@ class FuturesSpotMappingService:
 
         for future in futures:
             mapping = self._map_future(future, spots, spot_index)
-            if mapping is not None:
+            if cls_is_valid_mapping(mapping):
                 result.append(mapping)
 
         return result
@@ -103,7 +114,7 @@ class FuturesSpotMappingService:
 
         for future in futures:
             mapping = self._map_future(future, spots, spot_index)
-            if mapping is not None:
+            if cls_is_valid_mapping(mapping):
                 result.append(mapping)
 
         return result
@@ -192,11 +203,13 @@ class FuturesSpotMappingService:
                     if cls._class_code(item) == explicit["class_code"]
                 ]
 
-            if len(candidates) == 1:
-                return cls._result(future, candidates[0], "BCS_UNDERLYING")
-
-            if len(candidates) > 1:
+            # An explicit BCS underlying is authoritative. If it cannot be
+            # resolved to exactly one usable SPOT, reject the future rather
+            # than falling back to name matching and accidentally guessing.
+            if len(candidates) != 1:
                 return None
+
+            return cls._result(future, candidates[0], "BCS_UNDERLYING")
 
         text = cls._search_text(future)
         matches = cls._match_spots(text, spots, spot_index)
@@ -206,7 +219,7 @@ class FuturesSpotMappingService:
 
         return cls._result(future, matches[0], "SPOT_METADATA")
 
-    @classmethod
+    @staticmethod
     def _explicit_underlying(cls, future):
         """Extract a BCS underlying from scalar or nested metadata objects."""
         ticker = ""
@@ -342,3 +355,23 @@ class FuturesSpotMappingService:
             ).strip().upper(),
             "mapping_method": method,
         }
+
+
+def cls_is_valid_mapping(mapping):
+    """Hard gate: only complete, known mapping results may enter the pipeline."""
+    if not isinstance(mapping, dict):
+        return False
+
+    futures_ticker = str(mapping.get("futures_ticker") or "").strip()
+    futures_class = str(mapping.get("futures_class_code") or "").strip()
+    spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
+    spot_class = str(mapping.get("spot_class_code") or "").strip()
+    method = str(mapping.get("mapping_method") or "").strip().upper()
+
+    return bool(
+        futures_ticker
+        and futures_class
+        and spot_ticker
+        and spot_class
+        and method in FuturesSpotMappingService.VALID_MAPPING_METHODS
+    )
