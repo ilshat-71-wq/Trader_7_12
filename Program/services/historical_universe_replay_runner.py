@@ -35,7 +35,7 @@ def main():
     print()
     print("=" * 140)
     print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
-    print(f"DATE: {args.date} | READ ONLY — NO ORDERS")
+    print(f"DATE: {args.date} | READ ONLY")
     print("=" * 140)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
@@ -46,11 +46,9 @@ def main():
 
     for item in rows:
         confirmation = item.get("futures_confirmation") or {}
-        rs_data = item.get("relative_strength_data") or {}
-        rs_available = bool(item.get("relative_strength_available"))
         rs = float(item.get("relative_strength", 0) or 0)
 
-        if not rs_available:
+        if not item.get("relative_strength_available"):
             rs_state = "N/A"
         elif rs > 5:
             rs_state = "STRONGER"
@@ -79,7 +77,7 @@ def main():
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
     print("Historical RS: completed daily candles vs dynamically resolved IMOEX/IMOEX2 benchmark, 3-day lookback.")
     print("RS is used in candidate ranking only when benchmark data is available; no fake RS is assigned.")
-    print("Risk sizing, deposit, SL/TP, position sizing and order execution are not used.")
+    print("Historical replay is read-only and does not perform portfolio or order operations.")
     print("=" * 140)
 
 
