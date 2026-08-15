@@ -8,7 +8,8 @@ from services.futures_universe_service import FuturesUniverseService
 from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
 
-SPOT_TYPES = ("STOCK", "CURRENCY", "COMMODITY", "INDEX")
+# BCS information-service instrument type names.
+SPOT_TYPES = ("STOCK", "CURRENCY", "GOODS", "INDICES")
 DEFAULT_DATE = "2026-08-14"
 DEFAULT_MIN_MONEY = 100_000_000.0
 
@@ -115,8 +116,8 @@ def main():
     print(f"ELIGIBLE DATED FUTURES      : {len(futures_normalized)}")
     print(f"SPOT STOCKS                 : {spot_inventory['STOCK']}")
     print(f"SPOT CURRENCIES             : {spot_inventory['CURRENCY']}")
-    print(f"SPOT COMMODITIES            : {spot_inventory['COMMODITY']}")
-    print(f"SPOT INDICES                : {spot_inventory['INDEX']}")
+    print(f"SPOT GOODS                  : {spot_inventory['GOODS']}")
+    print(f"SPOT INDICES                : {spot_inventory['INDICES']}")
     print(f"TOTAL SPOT RECORDS          : {sum(spot_inventory.values())}")
     print()
 
