@@ -6,7 +6,9 @@ import math
 class HistoricalCandidateRankerService:
     """Rank historical candidates without trade execution or risk sizing."""
 
-    VERSION = "0.2"
+    VERSION = "0.3"
+    RS_SCORE_CAP = 15.0
+    RS_EXCESS_CAP_PERCENT = 8.0
 
     @staticmethod
     def _float(value, default=0.0):
@@ -26,6 +28,22 @@ class HistoricalCandidateRankerService:
         return round(max(0.0, min(1.0, ratio)) * weight, 2)
 
     @classmethod
+    def _directional_rs_score(cls, row, direction):
+        """Reward real excess return in the trade direction without early saturation."""
+        if not row.get("relative_strength_available"):
+            return 0.0
+
+        data = row.get("relative_strength_data") or {}
+        excess_percent = cls._float(data.get("excess_change_percent"), default=float("nan"))
+        if math.isnan(excess_percent):
+            raw_score = cls._float(row.get("relative_strength"))
+            excess_percent = raw_score / 10.0
+
+        directional_excess = excess_percent if direction == "LONG" else -excess_percent if direction == "SHORT" else 0.0
+        capped = max(-cls.RS_EXCESS_CAP_PERCENT, min(cls.RS_EXCESS_CAP_PERCENT, directional_excess))
+        return round((capped / cls.RS_EXCESS_CAP_PERCENT) * cls.RS_SCORE_CAP, 2)
+
+    @classmethod
     def score(cls, row):
         confirmation = row.get("futures_confirmation") or {}
         confirmation_score = max(0.0, min(100.0, cls._float(confirmation.get("score"))))
@@ -35,9 +53,7 @@ class HistoricalCandidateRankerService:
         trend_score = {"UPTREND": 12.0, "DOWNTREND": 12.0, "WEAK_UPTREND": 7.0, "WEAK_DOWNTREND": 7.0}.get(trend_state, 0.0)
         move_score = min(abs(cls._float(row.get("trend_change_percent"))) * 4.0, 10.0)
 
-        rs = cls._float(row.get("relative_strength"))
-        directional_rs = rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
-        rs_score = max(-10.0, min(15.0, directional_rs * 0.30)) if row.get("relative_strength_available") else 0.0
+        rs_score = cls._directional_rs_score(row, direction)
 
         setup = str(row.get("setup") or "NONE").upper()
         setup_score = {"BREAKOUT": 13.0, "PULLBACK": 11.0, "REBOUND": 10.0}.get(setup, 4.0 if setup != "NONE" else 0.0)
