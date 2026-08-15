@@ -72,7 +72,7 @@ class HistoricalUniverseReplayService:
             grouped.setdefault(spot, []).append(candidate)
 
         selected = []
-        for spot, candidates in grouped.items():
+        for candidates in grouped.values():
             candidates.sort(
                 key=lambda item: (
                     self._parse_expiry(item.get("futures_expiry")) or date.max,
@@ -97,7 +97,7 @@ class HistoricalUniverseReplayService:
             trading_date,
             datetime.min.time(),
         ).replace(tzinfo=self.history_service.MOSCOW_TZ)
-        start_utc = (end_moscow.astimezone(timezone.utc) - timedelta(days=12))
+        start_utc = end_moscow.astimezone(timezone.utc) - timedelta(days=12)
         end_utc = end_moscow.astimezone(timezone.utc)
 
         try:
