@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 Main launcher
 
-Версия 0.7
+Версия 0.8
 
 Запуск:
 - подключение BCS API
@@ -47,7 +47,7 @@ def main():
             print("✅ Рынок готов")
 
     app = QApplication(sys.argv)
-    window = TraderWindow()
+    window = TraderWindow(scanner_enabled=connected)
     window.show()
 
     sys.exit(app.exec())
