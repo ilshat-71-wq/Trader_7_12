@@ -12,7 +12,7 @@ Purpose:
   stock-only universe;
 - reject ambiguous or unmapped contracts instead of guessing.
 
-There is deliberately NO fixed seven-instrument universe here.
+There is deliberately NO fixed instrument universe here.
 """
 
 import re
@@ -24,18 +24,26 @@ from services.futures_universe_service import FuturesUniverseService
 class FuturesSpotMappingService:
     """Build a dynamic, conservative Futures -> SPOT mapping."""
 
-    # BCS information-service uses these exact instrument type values.
+    # Keep the known BCS information-service names together. Some accounts /
+    # payload generations expose a category as an alias; empty responses are
+    # harmless and are simply skipped.
     SPOT_INSTRUMENT_TYPES = (
         "STOCK",
         "CURRENCY",
         "GOODS",
+        "COMMODITY",
+        "COMMODITIES",
+        "METALS",
         "INDICES",
     )
 
-    # Canonical BCS fields first. The older aliases remain as compatibility
-    # fallbacks because historical payloads can differ.
     EXPLICIT_SPOT_KEYS = (
+        # Canonical BCS fields.
         "baseAssetSecuritySecCode",
+        "baseAssetSecurity",
+        "baseAsset",
+        "baseAssetFuture",
+        # Compatibility aliases.
         "underlyingTicker",
         "underlying_ticker",
         "underlyingSecurityCode",
@@ -200,37 +208,59 @@ class FuturesSpotMappingService:
 
     @classmethod
     def _explicit_underlying(cls, future):
+        """Extract a BCS underlying from scalar or nested metadata objects."""
         ticker = ""
         class_code = ""
 
         for key in cls.EXPLICIT_SPOT_KEYS:
             value = future.get(key)
+            candidate_ticker, candidate_class = cls._extract_underlying_value(value)
 
-            if isinstance(value, dict):
-                ticker = str(
-                    value.get("ticker")
-                    or value.get("securityCode")
-                    or value.get("code")
-                    or ""
-                ).strip().upper()
-                class_code = str(
-                    value.get("classCode")
-                    or value.get("class_code")
-                    or ""
-                ).strip()
-            elif value:
-                ticker = str(value).strip().upper()
-
-            if ticker:
+            if candidate_ticker:
+                ticker = candidate_ticker
+                if candidate_class:
+                    class_code = candidate_class
                 break
 
         for key in cls.EXPLICIT_CLASS_KEYS:
             value = future.get(key)
+            if isinstance(value, dict):
+                value = (
+                    value.get("classCode")
+                    or value.get("class_code")
+                    or value.get("code")
+                )
             if value:
                 class_code = str(value).strip()
                 break
 
         return {"ticker": ticker, "class_code": class_code}
+
+    @staticmethod
+    def _extract_underlying_value(value):
+        if not value:
+            return "", ""
+
+        if isinstance(value, dict):
+            # BCS payloads can identify the underlying as ticker/securityCode/
+            # secCode/code and can carry the board class alongside it.
+            ticker = str(
+                value.get("ticker")
+                or value.get("securityCode")
+                or value.get("secCode")
+                or value.get("code")
+                or value.get("symbol")
+                or ""
+            ).strip().upper()
+            class_code = str(
+                value.get("classCode")
+                or value.get("class_code")
+                or value.get("securityClassCode")
+                or ""
+            ).strip()
+            return ticker, class_code
+
+        return str(value).strip().upper(), ""
 
     @staticmethod
     def _search_text(future):
@@ -240,6 +270,8 @@ class FuturesSpotMappingService:
             future.get("displayName"),
             future.get("shortName"),
             future.get("baseAsset"),
+            future.get("baseAssetFuture"),
+            future.get("baseAssetSecurity"),
         )
         return " ".join(str(value or "").upper() for value in values)
 
