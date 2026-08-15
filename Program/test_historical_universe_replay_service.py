@@ -5,6 +5,14 @@ class FakeHistoryService:
     MOSCOW_TZ = None
 
 
+class FakeMappingService:
+    def __init__(self, mappings):
+        self.mappings = mappings
+
+    def load(self):
+        return list(self.mappings)
+
+
 class TestService(HistoricalUniverseReplayService):
     def __init__(self, liquidity_by_ticker):
         self.liquidity_by_ticker = liquidity_by_ticker
@@ -60,3 +68,21 @@ def test_skips_contract_with_two_days_to_expiry():
     selected = service.select_futures_for_spot(candidates, "2026-08-14")
 
     assert selected["futures_ticker"] == "ONZ6"
+
+
+def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
+    mappings = [
+        candidate("ONU6", "2026-08-17"),
+        candidate("ONZ6", "2026-08-18"),
+        candidate("ONF7", "2026-09-18"),
+    ]
+    service = HistoricalUniverseReplayService(
+        mapping_service=FakeMappingService(mappings),
+        history_service=FakeHistoryService(),
+        replay_service=None,
+    )
+
+    selected = service.load_mappings_for_date("2026-08-14")
+
+    tickers = [item["futures_ticker"] for item in selected]
+    assert tickers == ["ONF7"]
