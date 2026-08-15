@@ -61,7 +61,12 @@ class HistoricalUniverseReplayService:
         return (expiry - trading_date).days > cls.MIN_DAYS_TO_EXPIRY
 
     def load_mappings_for_date(self, trading_date):
-        """Load dynamic mappings and keep the two nearest valid contracts per SPOT."""
+        """Load mappings and keep the two nearest contracts that pass expiry filtering.
+
+        Expiry filtering happens before limiting to two contracts. Therefore, if the
+        current/nearest contract has three calendar days or fewer until expiry, it is
+        removed and the next contract of the same SPOT moves into consideration.
+        """
         trading_date = self._as_date(trading_date)
         mappings = self.mapping_service.load()
         if not isinstance(mappings, list):
@@ -73,7 +78,7 @@ class HistoricalUniverseReplayService:
                 continue
             spot = str(mapping.get("spot_ticker") or "").strip().upper()
             expiry = self._parse_expiry(mapping.get("futures_expiry"))
-            if not spot or expiry is None or expiry < trading_date:
+            if not spot or not self._expiry_is_usable(trading_date, expiry):
                 continue
 
             candidate = dict(mapping)
@@ -163,11 +168,10 @@ class HistoricalUniverseReplayService:
     def select_futures_for_spot(self, candidates, trading_date):
         """Select one futures contract per SPOT by liquidity after expiry filtering.
 
-        The two nearest contracts are supplied by load_mappings_for_date().
+        The two nearest valid contracts are supplied by load_mappings_for_date().
         A contract expiring in three calendar days or less is never considered.
         Among the remaining contracts, the highest completed-day average money
-        turnover wins. This naturally falls through to the next contract when
-        the most liquid one is too close to expiry.
+        turnover wins.
         """
         trading_date = self._as_date(trading_date)
         ranked = []
