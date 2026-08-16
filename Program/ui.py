@@ -3,11 +3,12 @@ Trader_7_12 Pro
 
 Пользовательский интерфейс
 
-Версия: 0.8
+Версия: 0.9
 
 Изменения:
 - русские пользовательские подписи
-- при недоступном БКС интерфейс запускается без создания scanner
+- scanner создаётся лениво только при нажатии «Сканировать рынок»
+- при недоступном БКС интерфейс запускается без scanner
 - внутренняя торговая логика и ключи данных не изменяются
 """
 
@@ -20,8 +21,6 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt
-
-from services.morning_trading_pipeline_service import MorningTradingPipelineService
 
 
 DIRECTION_LABELS = {
@@ -62,10 +61,10 @@ class TraderWindow(QWidget):
         self.setWindowTitle("Trader_7_12 Pro — Утренний радар")
         self.resize(900, 600)
 
+        # ВАЖНО: создание pipeline не выполняется при старте UI.
+        # Оно запускается только после нажатия кнопки сканирования.
         self.scanner = None
         self.scanner_enabled = scanner_enabled
-        if scanner_enabled:
-            self.scanner = MorningTradingPipelineService()
 
         self.init_ui()
 
@@ -89,6 +88,11 @@ class TraderWindow(QWidget):
                 "БКС временно недоступен.\n"
                 "Сканирование рынка будет доступно после восстановления подключения."
             )
+        else:
+            self.result_box.setText(
+                "✅ БКС подключён.\n\n"
+                "Сканер готов. Нажмите «Сканировать рынок», чтобы запустить анализ."
+            )
 
         layout = QVBoxLayout()
         layout.addWidget(self.title)
@@ -98,7 +102,7 @@ class TraderWindow(QWidget):
         self.setLayout(layout)
 
     def run_market_scan(self):
-        if self.scanner is None:
+        if not self.scanner_enabled:
             self.result_box.setText(
                 "👁 РЕЖИМ ПРОСМОТРА\n\n"
                 "БКС временно недоступен. Сканирование невозможно."
@@ -110,14 +114,25 @@ class TraderWindow(QWidget):
             "Радар СПОТА → подтверждение ФЬЮЧЕРСА → итоговый кандидат"
         )
 
+        self.scan_button.setEnabled(False)
+
         try:
+            if self.scanner is None:
+                from services.morning_trading_pipeline_service import (
+                    MorningTradingPipelineService,
+                )
+                self.scanner = MorningTradingPipelineService()
+
             results = self.scanner.scan(limit=3)
         except Exception as exc:
             self.result_box.setText(
                 "❌ Ошибка сканирования:\n\n"
                 f"{exc}"
             )
+            self.scan_button.setEnabled(True)
             return
+
+        self.scan_button.setEnabled(True)
 
         if not results:
             self.result_box.setText(
