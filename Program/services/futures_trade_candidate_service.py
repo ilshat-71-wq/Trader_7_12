@@ -184,6 +184,18 @@ class FuturesTradeCandidateService:
             raise ValueError("limit must be >= 0")
 
         confirmation_map = confirmations or {}
+
+        # Сначала дешёвый SPOT-фильтр.
+        # Futures Confirmation — сетевой и дорогой запрос,
+        # поэтому проверяем только лучшие предварительные Radar-кандидаты.
+        radar_results = sorted(
+            radar_results,
+            key=lambda item: self._float(
+                item.get("radar_score")
+            ),
+            reverse=True,
+        )[:15]
+
         candidates = []
 
         for radar in radar_results:

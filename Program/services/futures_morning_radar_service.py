@@ -47,9 +47,8 @@ class FuturesMorningRadarService:
         """
         Run Morning Radar for the two nearest valid futures contracts per SPOT.
 
-        SPOTs without a valid mapping are already excluded by the mapping
-        service. More distant futures are not analyzed at this stage.
-        Liquidity and futures confirmation are evaluated later by the pipeline.
+        SPOT Radar is calculated once per unique SPOT. The result is then
+        attached to each of the selected futures contracts for that SPOT.
         """
         if mappings is None:
             mappings = self.mapping_service.load()
@@ -60,67 +59,130 @@ class FuturesMorningRadarService:
         mappings = self._select_current_contracts(mappings)
         results = []
 
+        # Calculate SPOT Radar only once per unique SPOT.
+        radar_cache = {}
+
         for mapping in mappings:
             if not isinstance(mapping, dict):
                 continue
 
-            futures_ticker = str(mapping.get("futures_ticker") or "").strip().upper()
-            futures_class_code = str(mapping.get("futures_class_code") or "").strip()
-            spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
-            spot_class_code = str(mapping.get("spot_class_code") or "").strip()
+            futures_ticker = str(
+                mapping.get("futures_ticker") or ""
+            ).strip().upper()
+
+            futures_class_code = str(
+                mapping.get("futures_class_code") or ""
+            ).strip()
+
+            spot_ticker = str(
+                mapping.get("spot_ticker") or ""
+            ).strip().upper()
+
+            spot_class_code = str(
+                mapping.get("spot_class_code") or ""
+            ).strip()
 
             if not futures_ticker or not spot_ticker or not spot_class_code:
                 continue
 
-            try:
-                radar = self.radar_service.analyze(spot_ticker, spot_class_code)
-            except Exception as exc:
-                results.append({
-                    "version": self.VERSION,
-                    "status": "ERROR",
-                    "error": str(exc),
-                    "futures_ticker": futures_ticker,
-                    "futures_class_code": futures_class_code,
-                    "spot_ticker": spot_ticker,
-                    "spot_class_code": spot_class_code,
-                    "mapping_method": mapping.get("mapping_method"),
-                })
-                continue
+            radar_key = (
+                spot_ticker,
+                spot_class_code,
+            )
+
+            if radar_key not in radar_cache:
+                try:
+                    radar_cache[radar_key] = (
+                        self.radar_service.analyze(
+                            spot_ticker,
+                            spot_class_code
+                        )
+                    )
+                except Exception as exc:
+                    radar_cache[radar_key] = {
+                        "version": self.VERSION,
+                        "status": "ERROR",
+                        "error": str(exc),
+                    }
+
+            radar = radar_cache[radar_key]
 
             if not isinstance(radar, dict):
                 continue
 
+            if str(
+                radar.get("status", "")
+            ).upper() == "ERROR":
+                results.append({
+                    "version": self.VERSION,
+                    "status": "ERROR",
+                    "error": radar.get(
+                        "error",
+                        "Radar analysis failed"
+                    ),
+                    "futures_ticker": futures_ticker,
+                    "futures_class_code": futures_class_code,
+                    "spot_ticker": spot_ticker,
+                    "spot_class_code": spot_class_code,
+                    "mapping_method": mapping.get(
+                        "mapping_method"
+                    ),
+                })
+                continue
+
             result = dict(radar)
+
             result.update({
                 "pipeline_version": self.VERSION,
                 "futures_ticker": futures_ticker,
                 "futures_class_code": futures_class_code,
-                "futures_expiry": mapping.get("futures_expiry"),
+                "futures_expiry": mapping.get(
+                    "futures_expiry"
+                ),
                 "spot_ticker": spot_ticker,
                 "spot_class_code": spot_class_code,
-                "spot_name": mapping.get("spot_name", ""),
-                "mapping_method": mapping.get("mapping_method"),
+                "spot_name": mapping.get(
+                    "spot_name",
+                    ""
+                ),
+                "mapping_method": mapping.get(
+                    "mapping_method"
+                ),
             })
 
             results.append(result)
 
-        results.sort(key=self._sort_key, reverse=True)
+        results.sort(
+            key=self._sort_key,
+            reverse=True
+        )
 
-        for rank, result in enumerate(results, start=1):
+        for rank, result in enumerate(
+            results,
+            start=1
+        ):
             result["rank"] = rank
 
         if limit is not None:
             try:
                 limit = int(limit)
-            except (TypeError, ValueError):
-                raise TypeError("limit must be an integer or None")
+            except (
+                TypeError,
+                ValueError
+            ):
+                raise TypeError(
+                    "limit must be an integer or None"
+                )
 
             if limit < 0:
-                raise ValueError("limit must be >= 0")
+                raise ValueError(
+                    "limit must be >= 0"
+                )
 
             return results[:limit]
 
         return results
+
 
     @classmethod
     def _select_current_contracts(cls, mappings):

@@ -35,16 +35,8 @@ def main():
     if not connected:
         print("⚠️ Интерфейс запускается в режиме просмотра")
     else:
-        try:
-            market_data = loader.load()
-        except Exception as exc:
-            market_data = None
-            print(f"⚠️ Не удалось загрузить рынок: {exc}")
-
-        if market_data is None:
-            print("⚠️ Данные рынка не получены")
-        else:
-            print("✅ Рынок готов")
+        print("✅ БКС подключён")
+        print("ℹ️ Загрузка рынка будет выполнена только после запуска сканирования")
 
     app = QApplication(sys.argv)
     window = TraderWindow(scanner_enabled=connected)
