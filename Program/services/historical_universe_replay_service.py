@@ -18,7 +18,7 @@ class HistoricalUniverseReplayService:
     MAX_CONTRACTS_PER_SPOT = 2
     MIN_DAYS_TO_EXPIRY = 3
     RS_LOOKBACK_DAYS = 3
-    RS_TICKERS = ("IMOEX", "IMOEX2")
+    RS_TICKERS = ("IMOEX2", "IRUS2")
 
     def __init__(self, mapping_service=None, history_service=None, replay_service=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
@@ -137,7 +137,7 @@ class HistoricalUniverseReplayService:
         return ""
 
     def load_market_benchmark(self):
-        """Resolve IMOEX/IMOEX2 dynamically from BCS index metadata.
+        """Resolve IMOEX2/IRUS2 dynamically from BCS full-return index metadata.
 
         The historical replay must never guess a benchmark class code.  BCS
         documents INDICES as a valid instrument type, but some sessions may
@@ -189,11 +189,11 @@ class HistoricalUniverseReplayService:
                     )
                     return resolved
 
-        print("Historical RS benchmark: UNAVAILABLE — no IMOEX/IMOEX2 metadata resolved")
+        print("Historical RS benchmark: UNAVAILABLE — no IMOEX2/IRUS2 metadata resolved")
         return None
 
     def calculate_relative_strength(self, candles, benchmark_candles, benchmark_name=None):
-        """Compare the same completed daily window against IMOEX/IMOEX2."""
+        """Compare the same completed daily window against IMOEX2/IRUS2."""
         selected = candles[-self.RS_LOOKBACK_DAYS:]
         benchmark = benchmark_candles[-self.RS_LOOKBACK_DAYS:]
         if len(selected) < 2 or len(benchmark) < 2:
