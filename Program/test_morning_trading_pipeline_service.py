@@ -1,7 +1,7 @@
 """
 Trader_7_12 Pro
 
-Morning Trading Pipeline v0.3 tests.
+Morning Trading Pipeline scanner-only tests.
 """
 
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
@@ -92,11 +92,14 @@ class TestMorningTradingPipelineService:
         assert candidates[0]["status"] == "READY"
         assert candidates[0]["direction"] == "LONG"
         assert candidates[0]["futures_ticker"] == "SRU6"
-        assert candidates[0]["pipeline_version"] == "0.3"
+        assert candidates[0]["pipeline_version"] == MorningTradingPipelineService.VERSION
+        assert candidates[0]["pipeline_version"] == "0.4"
+        assert candidates[0]["rank"] == 1
         assert "stop_loss" not in candidates[0]
         assert "take_profit" not in candidates[0]
         assert "quantity" not in candidates[0]
         assert "risk_utilization" not in candidates[0]
+        assert "order_id" not in candidates[0]
 
     def test_pipeline_rejects_blocked_confirmation(self):
         radar = self.radar()
