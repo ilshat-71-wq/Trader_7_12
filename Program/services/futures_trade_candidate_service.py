@@ -216,11 +216,29 @@ class FuturesTradeCandidateService:
             if candidate is not None:
                 candidates.append(candidate)
 
+        # Детерминированный ranking.
+        #
+        # Основной приоритет:
+        #   1. candidate_score
+        #   2. confirmation_score
+        #   3. radar_score
+        #
+        # При равенстве предпочитаем более ликвидный контракт:
+        #   4. money_volume
+        #   5. relative_strength
+        #   6. trade_count
+        #
+        # Последний ключ гарантирует стабильный порядок даже при
+        # полном совпадении числовых показателей.
         candidates.sort(
             key=lambda item: (
                 item["candidate_score"],
                 item["confirmation_score"],
                 item["radar_score"],
+                item["money_volume"],
+                item["relative_strength"],
+                item["trade_count"],
+                item["futures_ticker"],
             ),
             reverse=True,
         )
