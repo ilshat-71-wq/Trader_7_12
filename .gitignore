@@ -61,3 +61,6 @@ Data/
 *.before_*
 *.backup_*
 *.rs_error
+
+# Historical replay runtime results
+Docs/historical_replay/

@@ -295,12 +295,63 @@ class HistoricalUniverseReplayService:
                 break
         return {"candidate": candidate, "ready_time": first_ready, "confirmation_time": first_confirmed.get("checkpoint") if first_confirmed else None, "futures_confirmation": first_confirmed.get("confirmation") if first_confirmed else None, "setup": first_confirmed.get("setup", "NONE") if first_confirmed else "NONE", "setup_state": first_confirmed.get("setup_state", "WAIT") if first_confirmed else "WAIT", "entry_trigger": first_confirmed.get("entry_trigger", 0.0) if first_confirmed else 0.0, "previous_high": first_confirmed.get("previous_high", 0.0) if first_confirmed else 0.0, "previous_low": first_confirmed.get("previous_low", 0.0) if first_confirmed else 0.0, "futures_price": float((first_confirmed.get("confirmation") or {}).get("last_price", 0) or 0) if first_confirmed else 0.0, "futures_confirmation_timeline": timeline}
 
+    @staticmethod
+    def _time_rank(value):
+        """Return a sortable key where an earlier Moscow checkpoint ranks higher."""
+        if not value:
+            return float("-inf")
+        try:
+            parts = str(value)[:8].split(":")
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
+            return -float(seconds)
+        except (TypeError, ValueError, IndexError):
+            return float("-inf")
+
+    @staticmethod
+    def confirmation_window(value):
+        """Classify confirmation by the project's primary morning trading window."""
+        if not value:
+            return "NONE"
+        try:
+            parts = str(value)[:8].split(":")
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
+        except (TypeError, ValueError, IndexError):
+            return "NONE"
+
+        morning_start = 7 * 3600
+        primary_end = 10 * 3600
+        late_end = 13 * 3600
+
+        if morning_start <= seconds < primary_end:
+            return "EARLY"
+        if primary_end <= seconds <= late_end:
+            return "LATE"
+        return "NONE"
+
     def _candidate_rank(self, evaluation):
         confirmation_time = evaluation.get("confirmation_time")
         ready_time = evaluation.get("ready_time")
         confirmation = evaluation.get("futures_confirmation") or {}
         candidate = evaluation.get("candidate") or {}
-        return (confirmation_time is not None, confirmation_time or "99:99", ready_time is not None, ready_time or "99:99", confirmation.get("score", 0), float(candidate.get("futures_average_daily_money", 0) or 0))
+        window = self.confirmation_window(confirmation_time)
+
+        # EARLY is the primary trading window. LATE is useful only as
+        # secondary monitoring. NONE must never outrank a confirmed signal.
+        window_score = {
+            "EARLY": 2,
+            "LATE": 1,
+            "NONE": 0,
+        }.get(window, 0)
+
+        return (
+            window_score,
+            confirmation_time is not None,
+            self._time_rank(confirmation_time),
+            ready_time is not None,
+            self._time_rank(ready_time),
+            float(confirmation.get("score", 0) or 0),
+            float(candidate.get("futures_average_daily_money", 0) or 0),
+        )
 
     def replay(self, trading_date, min_money=None, checkpoints=None, limit=None):
         trading_date = self._as_date(trading_date)

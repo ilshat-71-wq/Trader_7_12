@@ -87,3 +87,69 @@ def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
     tickers = [item["futures_ticker"] for item in selected]
     assert tickers == ["ONZ6", "ONF7"]
     assert "ONU6" not in tickers
+
+def test_candidate_rank_prefers_earlier_confirmation_time():
+    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
+
+    early = {
+        "confirmation_time": "07:30",
+        "ready_time": "07:15",
+        "futures_confirmation": {"score": 90},
+        "candidate": {"futures_average_daily_money": 100},
+    }
+    late = {
+        "confirmation_time": "13:00",
+        "ready_time": "07:15",
+        "futures_confirmation": {"score": 90},
+        "candidate": {"futures_average_daily_money": 100},
+    }
+
+    assert service._candidate_rank(early) > service._candidate_rank(late)
+
+
+def test_candidate_rank_prefers_earlier_ready_time_when_confirmation_matches():
+    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
+
+    early = {
+        "confirmation_time": "08:00",
+        "ready_time": "07:15",
+        "futures_confirmation": {"score": 90},
+        "candidate": {"futures_average_daily_money": 100},
+    }
+    late = {
+        "confirmation_time": "08:00",
+        "ready_time": "09:00",
+        "futures_confirmation": {"score": 90},
+        "candidate": {"futures_average_daily_money": 100},
+    }
+
+    assert service._candidate_rank(early) > service._candidate_rank(late)
+
+def test_confirmation_window_classification():
+    assert HistoricalUniverseReplayService.confirmation_window("07:15") == "EARLY"
+    assert HistoricalUniverseReplayService.confirmation_window("09:59") == "EARLY"
+    assert HistoricalUniverseReplayService.confirmation_window("10:00") == "LATE"
+    assert HistoricalUniverseReplayService.confirmation_window("12:59") == "LATE"
+    assert HistoricalUniverseReplayService.confirmation_window("13:00") == "LATE"
+    assert HistoricalUniverseReplayService.confirmation_window("13:01") == "NONE"
+    assert HistoricalUniverseReplayService.confirmation_window(None) == "NONE"
+
+
+def test_candidate_rank_prefers_early_confirmation_over_late():
+    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
+
+    early = {
+        "confirmation_time": "07:30",
+        "ready_time": "07:15",
+        "futures_confirmation": {"score": 80},
+        "candidate": {"futures_average_daily_money": 100},
+    }
+    late = {
+        "confirmation_time": "12:00",
+        "ready_time": "08:00",
+        "futures_confirmation": {"score": 100},
+        "candidate": {"futures_average_daily_money": 500},
+    }
+
+    assert service._candidate_rank(early) > service._candidate_rank(late)
+

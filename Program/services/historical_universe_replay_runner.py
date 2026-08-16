@@ -1,6 +1,8 @@
 """CLI runner for dynamic historical morning replay."""
 
 import argparse
+import json
+from pathlib import Path
 
 from services.historical_candidate_ranker_service import HistoricalCandidateRankerService
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
@@ -113,6 +115,33 @@ def _print_rows(rows, trading_date):
     print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
 
 
+def _save_replay_results(all_results, dates, min_money):
+    """Persist completed replay results for instant offline reporting."""
+    output_dir = Path("Docs/historical_replay")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "version": 1,
+        "dates": list(dates),
+        "min_money": float(min_money),
+        "results": [
+            {
+                "trading_date": trading_date,
+                "item": item,
+            }
+            for trading_date, item in all_results
+        ],
+    }
+
+    output_path = output_dir / "latest_results.json"
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(f"Saved replay results: {output_path}")
+    print(f"Saved records: {len(all_results)}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Replay the dynamic liquid Futures -> SPOT universe on completed trading days."
@@ -157,10 +186,15 @@ def main():
         rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
         for item in rows:
             item["_trading_date"] = trading_date
+            item["confirmation_window"] = service.confirmation_window(
+                item.get("confirmation_time")
+            )
             item["outcome_10_00"] = _forward_outcome(service, item, "10:00")
             item["outcome_13_00"] = _forward_outcome(service, item, "13:00")
         _print_rows(rows, trading_date)
         all_results.extend((trading_date, item) for item in rows)
+
+    _save_replay_results(all_results, dates, args.min_money)
 
     if len(dates) > 1:
         available = [item for _, item in all_results if (item.get("outcome_13_00") or {}).get("available")]
@@ -172,6 +206,65 @@ def main():
         print(f"DATES: {len(dates)} | CANDIDATES: {len(all_results)} | OUTCOMES: {len(available)}")
         print(f"DIR WIN RATE: {len(wins) / len(available) * 100:.1f}%" if available else "DIR WIN RATE: N/A")
         print(f"AVG DIR %: {avg_dir:.2f} | AVG MFE %: {avg_mfe:.2f}")
+
+        for window in ("EARLY", "LATE", "NONE"):
+            window_items = [
+                item for _, item in all_results
+                if item.get("confirmation_window") == window
+            ]
+
+            window_outcomes = [
+                item for item in window_items
+                if (item.get("outcome_13_00") or {}).get("available")
+            ]
+
+            window_wins = [
+                item for item in window_outcomes
+                if float(
+                    (item.get("outcome_13_00") or {}).get(
+                        "directional_return_percent", 0
+                    ) or 0
+                ) > 0
+            ]
+
+            window_avg_dir = (
+                sum(
+                    float(
+                        (item.get("outcome_13_00") or {}).get(
+                            "directional_return_percent", 0
+                        ) or 0
+                    )
+                    for item in window_outcomes
+                ) / len(window_outcomes)
+                if window_outcomes else 0.0
+            )
+
+            window_avg_mfe = (
+                sum(
+                    float(
+                        (item.get("outcome_13_00") or {}).get(
+                            "max_favorable_percent", 0
+                        ) or 0
+                    )
+                    for item in window_outcomes
+                ) / len(window_outcomes)
+                if window_outcomes else 0.0
+            )
+
+            if window_outcomes:
+                print(
+                    f"{window}: CANDIDATES {len(window_items)} | "
+                    f"OUTCOMES {len(window_outcomes)} | "
+                    f"WIN RATE {len(window_wins) / len(window_outcomes) * 100:.1f}% | "
+                    f"AVG DIR {window_avg_dir:.2f}% | "
+                    f"AVG MFE {window_avg_mfe:.2f}%"
+                )
+            else:
+                print(
+                    f"{window}: CANDIDATES {len(window_items)} | "
+                    f"OUTCOMES 0 | WIN RATE N/A"
+                )
+
         print("Historical replay is read-only and does not perform portfolio or order operations.")
 
 
