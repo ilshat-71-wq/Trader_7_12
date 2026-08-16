@@ -1,29 +1,41 @@
 # TRADER_7_12 PRO — PROJECT STATE
 
-## Purpose
-Technical state checkpoint for continuing Trader_7_12 Pro safely across chats. This file describes **where the repository is now**, not the full product idea. The product idea and non-negotiable architecture live in `Docs/PROJECT_PASSPORT_v2.md`.
+## CANONICAL CURRENT STATE — READ THIS FIRST
+
+This file is the single source of truth for the **current technical state** of Trader_7_12 Pro.
+
+- Product architecture and goals: `Docs/PROJECT_PASSPORT_v2.md`
+- Current technical state and next action: this file
+- Obsolete handoff/cleanup documents are intentionally not used.
 
 ## Checkpoint
 Date: 2026-08-16
 Branch: `agent/futures-expiry-liquidity`
-Known HEAD at checkpoint: `90a0219`
 Repository: `ilshat-71-wq/Trader_7_12`
+Latest published commit: `1584327` — `Use IMOEX2 and IRUS2 for historical relative strength`
 
 ## Product contract
 Trader_7_12 Pro is a scanner/trading assistant for intraday MOEX futures.
 
-The user trades futures, using the underlying SPOT asset as the primary analytical source because futures are the execution instrument with lower commissions. The assistant does not execute trades and does not decide position size, SL, TP, or risk.
+The user trades futures as the execution instrument and analyzes the underlying SPOT asset first. The assistant evaluates the market, finds where money/activity is concentrated, identifies strong and weak liquid instruments, considers benchmark-relative strength, trend, levels and setup, confirms the idea with the corresponding futures, and presents only the best 2–3 candidates.
 
-Primary market benchmark: full-return IMOEX2 / IRUS2 when actually available from BCS. Never fabricate RS and never silently replace the benchmark with ordinary IMOEX or IMOEXF.
+The user makes the final decision on entry, position size, risk, SL/TP and execution.
 
-Main user workflow:
-1. Evaluate the market and identify the current market direction.
-2. Find the most active/liquid instruments where the money is concentrated today.
-3. Evaluate SPOT strength/weakness versus the benchmark.
-4. Consider daily trend, intraday movement, local levels/highs/lows and setup.
-5. Use the futures as confirmation.
-6. Rank and highlight only the best 2–3 futures candidates.
-7. User opens the chart and makes the final entry decision.
+## Target benchmark
+Primary benchmark: **IMOEX2 / IRUS2 full-return market benchmark** when genuinely available from BCS.
+
+Current BCS verification on 2026-08-16:
+- `IMOEX2` — found, MOEX index, class `INDX`.
+- `IMOEX` — found, MOEX index, class `INDX`.
+- `IMOEXF` — found, futures, class `SPBFUT`.
+- `IRUS2` — not returned by ticker lookup.
+
+Current hard rule:
+- prefer `IMOEX2 / IRUS2`;
+- never silently substitute ordinary `IMOEX` or `IMOEXF`;
+- if the correct benchmark cannot be resolved, RS must be reported as unavailable rather than fabricated.
+
+The historical service now uses `RS_TICKERS = ("IMOEX2", "IRUS2")` and this change is committed in `1584327`.
 
 ## Target architecture
 `DYNAMIC FUTURES UNIVERSE`
@@ -62,67 +74,90 @@ Historical replay is READ ONLY and must never place orders.
 - `Program/services/historical_universe_replay_service.py`
 - `Program/services/historical_universe_replay_runner.py`
 - `Program/services/historical_replay_report.py`
-- supporting market-data services required by the above, including `candle_service.py`, `history_candle_service.py`, and `trade_service.py`.
+- supporting market-data services required by the above.
 
-## Cleanup completed
-Obsolete legacy scanner/signal/rating/volume/portfolio/risk/manual diagnostic layers have been removed from the active architecture where they were no longer required. Cleanup must remain conservative: before deleting a service, check imports and historical/runtime dependencies.
+## Cleanup status
+The repository has been reduced toward a scanner-only architecture. Obsolete legacy scanner/signal/rating/volume/portfolio/risk/manual diagnostic layers have been removed where they were no longer required.
 
-## Current benchmark verification
-BCS lookup on 2026-08-16:
-- `IMOEX2` found as MOEX index, class `INDX`.
-- `IMOEX` found as MOEX index, class `INDX`.
-- `IMOEXF` found as futures, class `SPBFUT`.
-- `IRUS2` was not returned by the ticker lookup.
+Cleanup is dependency-aware: before deleting any additional service, inspect imports and runtime/history dependencies first.
 
-Current rule: target benchmark is `IMOEX2 / IRUS2`; ordinary `IMOEX` / `IMOEXF` must not be used as silent substitutes.
+Temporary cleanup documentation is not part of the canonical project context and has been removed. Only the passport and this state file remain as project-context documents.
 
-## Current local change
-`Program/services/historical_universe_replay_service.py` has an uncommitted local edit changing the historical benchmark priority from `IMOEX/IMOEX2` to `IMOEX2/IRUS2`.
-
-This edit has passed `py_compile` and the historical replay service test, but has not yet been committed at this checkpoint.
-
-## Verification already completed
+## Verification completed today
 - Core compile: PASS.
 - `test_futures_confirmation_service.py`: ALL TESTS PASSED.
+- `test_morning_trading_pipeline_service.py`: ALL TESTS PASSED after updating the stale test contract.
 - `test_historical_universe_replay_service.py`: PASS.
 - `test_momentum_service.py`: PASS.
+- BCS authorization: PASS.
+- BCS benchmark metadata check completed.
 
-## Known issue to fix next
-`Program/test_morning_trading_pipeline_service.py` currently fails because it still expects obsolete `pipeline_version == "0.3"`.
+## Historical replay
+Persistent replay results and offline reporting were added and published in `2c2e763`.
 
-Failure observed:
-`AssertionError` in `test_pipeline_returns_candidate`.
+Runtime results are stored under `Docs/historical_replay/` and ignored by Git.
 
-This is an outdated test contract and must be reviewed against the current scanner-only pipeline. Do NOT blindly restore old version semantics merely to make the test green.
+Recent 4-day diagnostic replay (2026-08-11 through 2026-08-14):
+- 12 candidates;
+- 8 available outcomes;
+- directional win rate 37.5%;
+- average directional return -0.81%;
+- average MFE 0.04%.
 
-Next action:
-1. inspect current `morning_trading_pipeline_service.py` output contract;
-2. update the test to validate current behavior rather than obsolete version text;
-3. rerun the pipeline test and the full core verification set;
-4. only then commit/push the benchmark edit and state checkpoint.
-
-## Historical replay checkpoint
-Recent 4-day replay (2026-08-11 through 2026-08-14) produced 12 candidates and 8 available outcomes in the saved replay.
-Observed quick summary:
-- DIR WIN RATE: 37.5%
-- AVG DIR: -0.81%
-- AVG MFE: 0.04%
-
-This is diagnostic evidence only, not a production profitability claim. The result also contains network `SSLError` retries during historical data access. Do not change trading logic solely because of transient network errors.
-
-Saved replay results are runtime artifacts under `Docs/historical_replay/` and are ignored by Git.
+These are diagnostic historical results, not a profitability guarantee.
 
 ## UI direction
-The UI should be scanner-first, Russian-language, visually clear, with large numbers and strong highlighting of the 2–3 best active instruments. The user wants to see where the money is (`price × volume`), market direction, strong/weak instruments, levels, and the futures to inspect. Avoid dense legacy trading-terminal presentation.
+The UI is scanner-first, Russian-language, visually clear and designed around large numbers and strong highlighting of the 2–3 best active instruments.
+
+The main screen should make the following visible within seconds:
+- market direction;
+- strongest/weakest instruments;
+- where the money is;
+- `PRICE × VOLUME`;
+- SPOT direction/strength;
+- important levels;
+- setup;
+- futures confirmation;
+- final TOP 2–3.
+
+## Live-market validation
+Sunday 2026-08-16 has no regular trading session. Do not invent live results.
+
+Next live validation: the next trading morning from **07:00 Moscow time**.
+
+Validation sequence:
+1. confirm BCS authorization/data;
+2. confirm market benchmark;
+3. observe dynamic universe;
+4. verify current-day liquidity and `price × volume`;
+5. verify strong/weak ranking versus the market;
+6. inspect levels and setups;
+7. verify futures confirmation;
+8. check that TOP 2–3 are genuinely active and liquid;
+9. record any false positives/false negatives before changing filters.
+
+## NEXT ACTION
+**Next trading morning: run the live scanner from 07:00 Moscow time and evaluate the real candidate output before making further algorithmic changes.**
+
+Do not loosen filters merely to force candidates. If no candidate appears, identify the exact blocking condition first.
 
 ## Git rule
-GitHub branch `origin/agent/futures-expiry-liquidity` is the source of truth. Make minimal changes, compile, run the relevant test/replay, then commit and push.
+`origin/agent/futures-expiry-liquidity` is the source of truth.
 
-## Handoff rule
-When starting a new chat:
-1. read `Docs/PROJECT_PASSPORT_v2.md`;
-2. read this file;
-3. read `Docs/PROJECT_HANDOFF.md`;
-4. inspect Git HEAD/status before changing code;
-5. continue from `Next action` above;
-6. do not reintroduce removed architecture without explicit justification.
+Workflow:
+1. inspect HEAD/status;
+2. make the smallest justified change;
+3. compile;
+4. run the relevant test/replay;
+5. commit;
+6. push;
+7. verify the remote branch.
+
+## New-chat transfer rule
+Start every continuation by reading:
+1. `Docs/PROJECT_PASSPORT_v2.md`
+2. `Docs/PROJECT_STATE.md`
+
+Then inspect Git HEAD/status and continue from `NEXT ACTION` in this file.
+
+Do not redesign the project from memory and do not restore removed architecture without explicit justification.
