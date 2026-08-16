@@ -18,9 +18,9 @@ futures.
 
 
 class FuturesTradeCandidateService:
-    """Build and rank final morning trade candidates."""
+    """Build and rank final morning scanner candidates."""
 
-    VERSION = "0.2"
+    VERSION = "0.3"
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -60,7 +60,6 @@ class FuturesTradeCandidateService:
         # Directional relative-strength adjustment:
         # LONG  -> positive RS is favorable
         # SHORT -> negative RS is favorable
-        # Opposite RS is penalized.
         directional_rs = rs if direction == "LONG" else -rs
 
         if directional_rs > 0:
@@ -70,21 +69,14 @@ class FuturesTradeCandidateService:
         else:
             rs_bonus = 0.0
 
-        # Directional futures price-change adjustment:
-        # LONG  -> rising futures are favorable
-        # SHORT -> falling futures are favorable
-        # The adjustment is intentionally capped so it cannot dominate
-        # SPOT radar and futures confirmation.
-        futures_change = cls._float(
-            confirmation.get("price_change_percent")
+        futures_change = cls._float(confirmation.get("price_change_percent"))
+        directional_change = (
+            futures_change
+            if direction == "LONG"
+            else -futures_change
+            if direction == "SHORT"
+            else 0.0
         )
-
-        if direction == "LONG":
-            directional_change = futures_change
-        elif direction == "SHORT":
-            directional_change = -futures_change
-        else:
-            directional_change = 0.0
 
         if directional_change > 0:
             futures_change_bonus = min(directional_change * 5.0, 5.0)
@@ -141,20 +133,25 @@ class FuturesTradeCandidateService:
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
-            "futures_price": cls._float(
-                confirmation.get("last_price")
-            ),
+            "futures_price": cls._float(confirmation.get("last_price")),
             "spot_ticker": radar.get("spot_ticker"),
             "spot_class_code": radar.get("spot_class_code"),
-            "spot_price": cls._float(radar.get("spot_price")),
+            "spot_price": cls._float(radar.get("spot_price", radar.get("last_close"))),
+            "spot_money_volume": cls._float(radar.get("spot_money_volume", radar.get("average_daily_money"))),
+            "spot_average_daily_money": cls._float(radar.get("average_daily_money")),
+            "spot_change_percent": cls._float(radar.get("change_percent")),
+            "trend_state": radar.get("trend_state", "UNKNOWN"),
+            "trend_days": int(cls._float(radar.get("trend_days"))),
             "radar_score": round(cls._float(radar.get("radar_score")), 2),
             "relative_strength": cls._float(radar.get("relative_strength")),
+            "relative_strength_score": cls._float(radar.get("relative_strength_score")),
+            "relative_strength_signal": radar.get("relative_strength_signal", "UNAVAILABLE"),
+            "relative_strength_status": radar.get("relative_strength_status", "NO_DATA"),
+            "relative_strength_benchmark": radar.get("relative_strength_benchmark", "UNAVAILABLE"),
             "confirmation_score": cls._float(confirmation.get("score")),
             "money_volume": cls._float(confirmation.get("money_volume")),
             "trade_count": int(cls._float(confirmation.get("trade_count"))),
-            "price_change_percent": cls._float(
-                confirmation.get("price_change_percent")
-            ),
+            "price_change_percent": cls._float(confirmation.get("price_change_percent")),
             "setup": radar.get("setup", "NONE"),
             "setup_direction": radar.get("setup_direction", direction),
             "setup_state": radar.get("setup_state", "WAIT"),
@@ -165,12 +162,7 @@ class FuturesTradeCandidateService:
         }
 
     def rank(self, radar_results, confirmations=None, limit=3):
-        """Build candidates and return the strongest ones first.
-
-        ``confirmations`` is a mapping keyed by futures ticker. If omitted,
-        the service can use an injected confirmation service and fetch each
-        confirmation from it.
-        """
+        """Build candidates and return the strongest ones first."""
         if not isinstance(radar_results, list):
             return []
 
@@ -185,19 +177,14 @@ class FuturesTradeCandidateService:
 
         confirmation_map = confirmations or {}
 
-        # Сначала дешёвый SPOT-фильтр.
-        # Futures Confirmation — сетевой и дорогой запрос,
-        # поэтому проверяем только лучшие предварительные Radar-кандидаты.
+        # Cheap SPOT-first prefilter before expensive futures confirmation.
         radar_results = sorted(
             radar_results,
-            key=lambda item: self._float(
-                item.get("radar_score")
-            ),
+            key=lambda item: self._float(item.get("radar_score")),
             reverse=True,
         )[:15]
 
         candidates = []
-
         for radar in radar_results:
             if not isinstance(radar, dict):
                 continue
@@ -209,33 +196,21 @@ class FuturesTradeCandidateService:
                 confirmation = self.confirmation_service.analyze(
                     ticker,
                     radar.get("futures_class_code"),
-                    self._direction(radar)
+                    self._direction(radar),
                 )
 
             candidate = self.build_candidate(radar, confirmation)
             if candidate is not None:
                 candidates.append(candidate)
 
-        # Детерминированный ranking.
-        #
-        # Основной приоритет:
-        #   1. candidate_score
-        #   2. confirmation_score
-        #   3. radar_score
-        #
-        # При равенстве предпочитаем более ликвидный контракт:
-        #   4. money_volume
-        #   5. relative_strength
-        #   6. trade_count
-        #
-        # Последний ключ гарантирует стабильный порядок даже при
-        # полном совпадении числовых показателей.
+        # Deterministic ranking: quality first, then liquidity and stability.
         candidates.sort(
             key=lambda item: (
                 item["candidate_score"],
                 item["confirmation_score"],
                 item["radar_score"],
                 item["money_volume"],
+                item["spot_average_daily_money"],
                 item["relative_strength"],
                 item["trade_count"],
                 item["futures_ticker"],
