@@ -14,20 +14,8 @@ class MarketSessionService:
     EVENING_START = time(19, 0)
     MARKET_CLOSE = time(23, 50)
 
-    LABELS = {
-        "PRE_OPEN": "ПРЕ-ОТКРЫТИЕ",
-        "MORNING": "УТРЕННЯЯ СЕССИЯ",
-        "MAIN": "ОСНОВНАЯ СЕССИЯ",
-        "EVENING": "ВЕЧЕРНЯЯ СЕССИЯ",
-        "CLOSED": "РЫНОК ЗАКРЫТ",
-    }
-
-    WINDOWS = {
-        "PRE_OPEN": (PRE_OPEN_START, MORNING_START),
-        "MORNING": (MORNING_START, MAIN_START),
-        "MAIN": (MAIN_START, EVENING_START),
-        "EVENING": (EVENING_START, MARKET_CLOSE),
-    }
+    LABELS = {"PRE_OPEN": "ПРЕ-ОТКРЫТИЕ", "MORNING": "УТРЕННЯЯ СЕССИЯ", "MAIN": "ОСНОВНАЯ СЕССИЯ", "EVENING": "ВЕЧЕРНЯЯ СЕССИЯ", "CLOSED": "РЫНОК ЗАКРЫТ"}
+    WINDOWS = {"PRE_OPEN": (PRE_OPEN_START, MORNING_START), "MORNING": (MORNING_START, MAIN_START), "MAIN": (MAIN_START, EVENING_START), "EVENING": (EVENING_START, MARKET_CLOSE)}
 
     def now(self):
         return datetime.now(self.TIMEZONE)
@@ -57,21 +45,18 @@ class MarketSessionService:
     def get_session_label(self, value=None):
         return self.LABELS.get(self.get_session(value), "РЫНОК ЗАКРЫТ")
 
+    def get_trading_day(self, value=None):
+        """Return the Moscow-local calendar date used by the trading session."""
+        value = self.now() if value is None else self.to_moscow(value)
+        return value.date() if value is not None else None
+
     def is_market_open(self, value=None):
         return self.get_session(value) in {"MORNING", "MAIN", "EVENING"}
 
     def get_session_info(self, value=None):
         value = self.now() if value is None else self.to_moscow(value)
         session = self.get_session(value)
-        return {
-            "timezone": "Europe/Moscow",
-            "datetime": value.isoformat() if value else None,
-            "date": value.date().isoformat() if value else None,
-            "time": value.strftime("%H:%M:%S") if value else None,
-            "session": session,
-            "label": self.LABELS.get(session, session),
-            "market_open": session in {"MORNING", "MAIN", "EVENING"},
-        }
+        return {"timezone": "Europe/Moscow", "datetime": value.isoformat() if value else None, "date": value.date().isoformat() if value else None, "time": value.strftime("%H:%M:%S") if value else None, "session": session, "label": self.LABELS.get(session, session), "market_open": session in {"MORNING", "MAIN", "EVENING"}}
 
     def get_window(self, value=None):
         return self.WINDOWS.get(self.get_session(value))
