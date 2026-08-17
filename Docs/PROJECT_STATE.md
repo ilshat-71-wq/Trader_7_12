@@ -20,21 +20,15 @@ The scanner never places orders. The user makes the final decision on entry, siz
 
 ## CORE ARCHITECTURE — SPOT IDEA → FUTURES IMPLEMENTATION
 
-This distinction is mandatory and must not be lost:
-
 **SPOT creates the trade idea → FUTURES provides the tradable implementation.**
 
-The scanner analyzes the SPOT asset first. The user trades the corresponding futures contract.
-
-For example, if Sber SPOT makes an upward impulse and then forms a first pullback/consolidation, the scanner should recognize the SPOT structure and then present the corresponding liquid Sber futures contract as the trading instrument. The pullback/structure is NOT measured on the futures chart.
+The scanner analyzes the SPOT asset first. The user trades the corresponding futures contract. Pullback/structure is measured on SPOT, never on the futures chart.
 
 The scanner is an analytical filter, not an automatic entry engine. The user personally watches the chart and controls the actual entry point.
 
 ## CANONICAL SELECTION RULE
 
-The scanner must NOT start by ranking futures turnover.
-
-It must start from these target SPOT groups:
+The scanner must NOT start by ranking futures turnover. It starts from target SPOT groups:
 
 1. `MOEX_STOCK` — Moscow Exchange stock / stock metadata;
 2. `GAS` — natural gas SPOT;
@@ -57,21 +51,19 @@ Current SPOT money/activity and structure have priority over historical futures 
 
 ## SPOT STRUCTURE — CONTEXT, NOT AUTOMATIC ENTRY
 
-The next scanner evolution should recognize the user's preferred early setups on SPOT:
+The next scanner evolution should recognize the user's preferred early setups on SPOT.
 
 ### LONG context
 
 `SPOT impulse up → first pullback down → consolidation / stabilization → strength remains → corresponding FUTURES candidate`
 
-A pullback can be meaningful when it approaches a percentage retracement zone (for example around 50%) or a nearby structural level. The exact entry is deliberately left to the user.
+A pullback can be meaningful when it approaches a retracement zone, for example around 50%, or a nearby structural level. The exact entry is deliberately left to the user.
 
 ### SHORT context
 
 `SPOT impulse down → first rebound up → consolidation / stabilization → weakness remains → corresponding FUTURES candidate`
 
-An early rebound/return toward a structural level can be meaningful in the same way. Again, the scanner must not turn this into an automatic entry instruction.
-
-The concepts `FIRST_PULLBACK` and `FIRST_REBOUND` are therefore **SPOT structure labels**. They describe where the target asset is in its movement, not where the futures contract must be bought/sold.
+The concepts `FIRST_PULLBACK` and `FIRST_REBOUND` are SPOT structure labels. They describe where the target asset is in its movement, not where the futures contract must be bought/sold.
 
 ## MONEY DEFINITION
 
@@ -79,7 +71,7 @@ Canonical money metric:
 
 `money_volume = price × volume`
 
-Current SPOT money in the scanner is the current-session M5 candle activity; historical completed-day average money remains context for the current/average ratio.
+Current SPOT money in the scanner is current-session M5 candle activity; historical completed-day average money remains context for the current/average ratio.
 
 ## FUTURES RULE
 
@@ -91,11 +83,9 @@ After a SPOT leader is identified:
 - futures turnover/confirmation is used to select the practical execution contract and validate the SPOT idea;
 - a futures contract with high turnover must not replace a stronger target-SPOT money/structure leader.
 
-## MARKET SESSIONS — CURRENT CHECKPOINT
+## MARKET SESSIONS
 
 All application time is `Europe/Moscow` / MSK. UTC is used only as the technical BCS transport format.
-
-`Program/services/market_session_service.py` is the single session clock:
 
 - `06:50–07:00` — `PRE_OPEN`;
 - `07:00–10:00` — `MORNING`;
@@ -103,27 +93,23 @@ All application time is `Europe/Moscow` / MSK. UTC is used only as the technical
 - `19:00–23:50` — `EVENING`;
 - `23:50–06:50` — `CLOSED`.
 
-The UI displays the live Moscow date, time with seconds, current session and market-open state.
-
-The scanner pipeline is session-aware: it refuses to run in `PRE_OPEN`/`CLOSED` and attaches session metadata to candidates.
+The UI displays live Moscow date, time with seconds, current session and market-open state. The scanner pipeline is session-aware and attaches session metadata to candidates.
 
 ## UI / SCAN FEEDBACK — APPROVED DESIGN
-
-The current professional UI direction is approved:
 
 - compact dark neutral professional palette;
 - live Moscow session header and clock;
 - one compact scan button;
-- during scanning the button itself changes/animates with a pleasant muted green/lime tone;
-- the large result area is replaced during scanning by an animated surreal **melting-clock visual inspired by Dali's "The Persistence of Memory"**, implemented as an original drawing rather than using a copied artwork;
-- when scanning finishes, the animation disappears and the analytical result returns to the large field;
-- LONG candidate text uses a pleasant soft green;
-- SHORT candidate text uses a pleasant soft red;
-- no duplicate "scanning" status lines;
-- no session countdown is required — the live MSK clock is sufficient;
+- during scanning the button changes/animates with a pleasant muted green/lime tone;
+- the large result area is replaced during scanning by an original animated surreal melting-clock visual inspired by Dali's "The Persistence of Memory";
+- when scanning finishes, the animation disappears and the analytical result returns;
+- LONG candidate text uses pleasant soft green;
+- SHORT candidate text uses pleasant soft red;
+- no duplicate scanning status lines;
+- no session countdown — the live MSK clock is sufficient;
 - results remain analytical/read-only.
 
-The animation is deliberately only a scan-state visual. It does not change scanner logic.
+The animation is only a scan-state visual and does not change scanner logic.
 
 ## IMPLEMENTED BACKEND CHECKPOINT
 
@@ -139,11 +125,11 @@ The animation is deliberately only a scan-state visual. It does not change scann
 - canonical target groups: MOEX stock, gas, oil, USD, gold;
 - rejects non-target SPOTs;
 - selects exactly one current-money leader per target group;
-- current SPOT money is the primary ranking dimension;
-- current/average money ratio is the first tie-breaker;
+- current SPOT money is primary ranking dimension;
+- current/average money ratio is first tie-breaker;
 - radar/RS/setup/confirmation and futures liquidity provide quality ordering;
 - keeps one most-liquid eligible futures contract per SPOT;
-- returns the final requested TOP 2–3 futures candidates.
+- returns final TOP 2–3 futures candidates.
 
 ### `Program/services/session_money_volume_service.py`
 
@@ -167,31 +153,22 @@ The animation is deliberately only a scan-state visual. It does not change scann
 
 ## TEST CHECKPOINT
 
-The following regression suites have recently passed:
+Recently passed regression suites:
 
 - `Program/test_session_money_volume_service.py`
 - `Program/test_market_session_service.py`
 - `Program/test_morning_trading_pipeline_service.py`
 - `Program/test_futures_trade_candidate_service.py`
 
-The tests cover session boundaries, UTC→MSK conversion, evening activity, target-SPOT selection, futures confirmation, liquidity, expiry filtering, ranking and scanner-only behavior.
-
 ## IMPORTANT BOUNDARIES
 
-Do not reintroduce:
-- automatic orders;
-- automatic entry commands;
-- position sizing;
-- risk management engine;
-- automatic SL/TP;
-- portfolio management;
-- automatic trade management.
+Do not reintroduce automatic orders, automatic entry commands, position sizing, risk management, automatic SL/TP, portfolio management or automatic trade management.
 
 Historical replay is read-only.
 
 ## NEXT SCANNER IMPROVEMENT
 
-The next meaningful backend improvement is **SPOT-first structure recognition** without automatic entries:
+Implement **SPOT-first structure recognition** without automatic entries:
 
 1. detect a meaningful SPOT impulse;
 2. measure the first pullback / first rebound on SPOT;
@@ -199,38 +176,20 @@ The next meaningful backend improvement is **SPOT-first structure recognition** 
 4. preserve SPOT relative strength versus the market benchmark;
 5. combine the SPOT setup with current-session money/activity;
 6. map the result to the most liquid valid futures contract;
-7. present the candidate as `READY`, `WATCH` or an equivalent analytical state;
+7. present the candidate as an analytical state such as `READY` or `WATCH`;
 8. leave the exact entry decision to the user.
 
-Do not measure the first pullback/rebound on the futures chart.
+Do not measure the first pullback/rebound on the futures chart. Do not turn `FIRST_PULLBACK` / `FIRST_REBOUND` into automatic trade signals. Do not revert to futures-first ranking.
 
-Do not turn `FIRST_PULLBACK` / `FIRST_REBOUND` into automatic trade signals.
+## UI / COMPATIBILITY NOTE
 
-Do not revert to futures-first ranking.
-
-## RECENT UI / SESSION CHECKPOINTS
-
-Recent branch work includes:
-
-- Moscow market-session metadata and live session clock;
-- session-aware radar UI;
-- animated scan-state visual;
-- compact professional UI;
-- session-aware scanner pipeline;
-- session money/volume analysis;
-- futures expiry/liquidity filtering;
-- target-SPOT money leadership.
-
-The UI also required a PySide6 compatibility fix: `QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`.
+`QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`. This compatibility issue was identified during the latest launch test and is recorded here so it is not reintroduced.
 
 ## HANDOFF / VERIFICATION
-
-Local checkout:
 
 ```bash
 cd ~/Documents/Trader_7_12
 git pull
-
 python3 -m py_compile \
 Program/services/market_session_service.py \
 Program/services/session_money_volume_service.py \
@@ -250,8 +209,6 @@ python3 Program/test_futures_trade_candidate_service.py
 
 PYTHONPATH="$PWD/Program" python3 Program/main.py
 ```
-
-During a live scan the large field must show the animated clock visual. When the scan ends, the visual disappears and the analytical result returns. LONG/SHORT result text should use the approved soft green/soft red colors.
 
 ## CANONICAL PRINCIPLE TO PRESERVE
 
