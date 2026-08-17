@@ -3,92 +3,43 @@ Trader_7_12 Pro
 
 Main launcher
 
-Версия 0.5
+Версия 0.8
 
 Запуск:
 - подключение BCS API
-- загрузка рынка
 - запуск интерфейса
+- BCS не блокирует запуск UI при временной недоступности
 """
-
 
 import sys
 
-
 from PySide6.QtWidgets import QApplication
 
-
 from market.market_loader import MarketLoader
-
 from ui import TraderWindow
 
 
-
-
-
 def main():
-
-
-    print(
-        "🚀 Запуск Trader_7_12 Pro"
-    )
-
+    print("🚀 Запуск Trader_7_12 Pro")
 
     loader = MarketLoader()
+    try:
+        connected = loader.connect()
+    except Exception as exc:
+        connected = False
+        print(f"⚠️ БКС временно недоступен: {exc}")
 
-
-
-    if not loader.connect():
-
-        print(
-            "❌ Не удалось подключиться к API БКС"
-        )
-
-        return
-
-
-
-    market_data = loader.load()
-
-
-
-    if market_data is None:
-
-        print(
-            "⚠️ Данные рынка не получены"
-        )
-
+    if not connected:
+        print("⚠️ Интерфейс запускается в режиме просмотра")
     else:
+        print("✅ БКС подключён")
+        print("ℹ️ Загрузка рынка будет выполнена только после запуска сканирования")
 
-        print(
-            "✅ Рынок готов"
-        )
-
-
-
-    app = QApplication(
-        sys.argv
-    )
-
-
-
-    window = TraderWindow()
-
-
-
+    app = QApplication(sys.argv)
+    window = TraderWindow(scanner_enabled=connected)
     window.show()
-
-
-
-    sys.exit(
-        app.exec()
-    )
-
-
-
-
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-
     main()
