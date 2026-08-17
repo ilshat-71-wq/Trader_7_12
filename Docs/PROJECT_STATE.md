@@ -42,6 +42,7 @@ For each target group:
 
 `CURRENT SPOT PRICE × VOLUME`
 → `CURRENT SPOT MONEY LEADER`
+→ `SPOT H1 STRUCTURE / SUPPORT / RESISTANCE`
 → `SPOT IMPULSE / FIRST PULLBACK OR REBOUND`
 → `SPOT CONSOLIDATION / STABILIZATION`
 → `SPOT STRENGTH / WEAKNESS`
@@ -53,17 +54,31 @@ Current SPOT money/activity and structure have priority over historical futures 
 
 ## SPOT STRUCTURE — CURRENT IMPLEMENTATION
 
-The scanner now has a dedicated `SpotFirstPullbackService`.
+The scanner has a dedicated `SpotFirstPullbackService`.
+
+### H1 SPOT STRUCTURE
+
+The user's primary structural timeframe is **H1 on SPOT**. The application therefore treats H1 as the higher-timeframe context and M5 as the session-level formation detector.
+
+For the current SPOT price the service derives:
+
+- nearest H1 support;
+- nearest H1 resistance;
+- nearest H1 level and its type;
+- distance from SPOT price to that level;
+- H1 context: `NEAR_H1_SUPPORT`, `NEAR_H1_RESISTANCE` or `BETWEEN_H1_LEVELS`.
+
+A LONG setup receives a controlled quality bonus when the SPOT is near H1 support. A SHORT setup receives a controlled quality bonus when the SPOT is near H1 resistance. This is contextual ranking only — it never creates an automatic entry.
 
 ### LONG context
 
-`SPOT impulse up → first pullback down → 35–75% retracement zone → consolidation → strength remains → corresponding FUTURES candidate`
+`SPOT H1 structure → impulse up → first pullback down → 35–75% retracement zone → consolidation → strength remains → corresponding FUTURES candidate`
 
 The ideal reference is approximately **50% retracement of the impulse range**, while nearby structural levels are also accepted by the broader 35–75% zone. This is a scanner context filter, not an automatic entry.
 
 ### SHORT context
 
-`SPOT impulse down → first rebound up → 35–75% retracement zone → consolidation → weakness remains → corresponding FUTURES candidate`
+`SPOT H1 structure → impulse down → first rebound up → 35–75% retracement zone → consolidation → weakness remains → corresponding FUTURES candidate`
 
 The detector uses M5 SPOT candles from the **current Moscow trading session** (`MORNING`, `MAIN` or `EVENING`). It does not reuse the morning window after 10:00.
 
@@ -125,21 +140,24 @@ The animation is only a scan-state visual and does not change scanner logic.
 
 ### `Program/services/spot_first_pullback_service.py`
 
-- new SPOT-first structure detector;
+- SPOT-first structure detector;
+- H1 SPOT support/resistance context added as the higher-timeframe structural filter;
+- M5 remains the session-level impulse/pullback/rebound detector;
 - uses current `MORNING`, `MAIN` or `EVENING` session window;
 - detects directional M5 impulse;
 - detects first pullback for LONG and first rebound for SHORT;
 - accepts 35–75% retracement, with 50% as the quality center;
 - detects short consolidation/stabilization;
 - exposes `WATCH` / `CONFIRMED` state;
+- H1 support/resistance proximity contributes a controlled setup-quality bonus in the matching direction;
 - never produces orders or automatic entry commands.
 
 ### `Program/services/futures_morning_radar_service.py`
 
-- integrates the new SPOT setup detector;
+- integrates the SPOT setup detector;
 - setup is calculated once per unique SPOT mapping and reused across mapped futures;
 - final radar record carries setup phase, quality, impulse, retracement and consolidation metadata;
-- ranking now gives meaningful weight to SPOT setup quality while preserving current-session SPOT money/activity priority.
+- ranking gives meaningful weight to SPOT setup quality while preserving current-session SPOT money/activity priority.
 
 ### `Program/services/futures_trade_candidate_service.py`
 
@@ -165,12 +183,18 @@ Regression suites previously passed:
 - `Program/test_morning_trading_pipeline_service.py`
 - `Program/test_futures_trade_candidate_service.py`
 
-New structure tests:
+Structure tests:
 
 - `Program/test_spot_first_pullback_service.py`
   - LONG pullback near the 50% reference zone;
   - SHORT rebound structure;
   - MAIN-session candle window selection.
+
+H1 structure tests:
+
+- `Program/test_spot_h1_levels_service.py`
+  - nearest H1 support context for LONG;
+  - nearest H1 resistance context for SHORT.
 
 ## IMPORTANT BOUNDARIES
 
@@ -199,11 +223,13 @@ Program/services/futures_trade_candidate_service.py \
 Program/ui.py \
 Program/main.py \
 Program/test_spot_first_pullback_service.py \
+Program/test_spot_h1_levels_service.py \
 Program/test_session_money_volume_service.py \
 Program/test_market_session_service.py \
 Program/test_morning_trading_pipeline_service.py
 
 python3 Program/test_spot_first_pullback_service.py
+python3 Program/test_spot_h1_levels_service.py
 python3 Program/test_session_money_volume_service.py
 python3 Program/test_market_session_service.py
 python3 Program/test_morning_trading_pipeline_service.py
@@ -217,3 +243,5 @@ PYTHONPATH="$PWD/Program" python3 Program/main.py
 **The scanner finds where to look. The user decides where to enter.**
 
 **SPOT determines the idea and structure. FUTURES is what the user trades.**
+
+**H1 is the primary SPOT structural context; M5 is the session formation layer.**
