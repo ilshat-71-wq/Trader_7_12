@@ -1,8 +1,5 @@
 """Trader_7_12 Pro — session-aware scanner pipeline tests."""
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
 
 
@@ -46,7 +43,14 @@ class FakeCandidateService:
 
 class TestMorningTradingPipelineService:
     @staticmethod
-    def radar(ticker="SRU6", spot="MOEX", score=90.0, direction="LONG"):
+    def radar(
+        ticker="SRU6",
+        spot="MOEX",
+        score=90.0,
+        direction="LONG",
+        spot_group="MOEX_STOCK",
+        spot_money_volume=200_000_000,
+    ):
         return {
             "status": "OK",
             "direction": direction,
@@ -64,9 +68,9 @@ class TestMorningTradingPipelineService:
             "entry_trigger": 299.0,
             "previous_high": 305.0,
             "previous_low": 95.0,
-            "spot_money_volume": 200_000_000,
+            "spot_money_volume": spot_money_volume,
             "spot_money_ratio": 2.0,
-            "spot_group": "MOEX_STOCK",
+            "spot_group": spot_group,
         }
 
     @staticmethod
@@ -121,10 +125,13 @@ class TestMorningTradingPipelineService:
         assert self.service([radar], {"SRU6": blocked}).scan(confirmations={"SRU6": blocked}) == []
 
     def test_pipeline_keeps_only_top_two(self):
+        # The candidate service intentionally keeps one money leader per SPOT
+        # group. Use three different target groups so the pipeline can produce
+        # three valid candidates and then verify the final limit=2 ranking.
         radars = [
-            self.radar("A1U6", "MOEX", 70),
-            self.radar("B1U6", "MOEX", 95),
-            self.radar("C1U6", "MOEX", 80),
+            self.radar("A1U6", "MOEX", 70, spot_group="MOEX_STOCK", spot_money_volume=100_000_000),
+            self.radar("B1U6", "BR", 95, spot_group="OIL", spot_money_volume=300_000_000),
+            self.radar("C1U6", "NG", 80, spot_group="GAS", spot_money_volume=200_000_000),
         ]
         confirmations = {
             "A1U6": self.confirmation(ticker="A1U6", score=70),
@@ -135,6 +142,7 @@ class TestMorningTradingPipelineService:
         assert len(candidates) == 2
         assert candidates[0]["futures_ticker"] == "B1U6"
         assert candidates[0]["rank"] == 1
+        assert candidates[1]["futures_ticker"] == "C1U6"
         assert candidates[1]["rank"] == 2
 
     def test_pipeline_does_not_execute_orders(self):
