@@ -6,17 +6,17 @@ Futures Trade Candidate Service.
 Stage 5 of the Spot-first architecture.
 
 Purpose:
-- combine SPOT Morning Radar with futures confirmation;
+- identify the most active/current-money SPOT leaders first;
+- confirm the corresponding futures contract for those SPOT leaders;
 - reject blocked futures confirmations;
 - reject contracts with 3 or fewer calendar days to expiry;
-- keep exactly one, most-liquid futures contract per SPOT from the
-  nearest-contract shortlist;
-- calculate one comparable trade-candidate score;
-- return only the best 2-3 candidates when requested.
+- keep exactly one, most-liquid futures contract per SPOT;
+- rank the surviving candidates without allowing futures turnover to replace
+  the SPOT-first selection principle.
 
-The service does not place orders and does not invent a direction.
-The direction always comes from the SPOT radar and must be confirmed by
-futures.
+The trading instrument is always the futures contract. The SPOT is the
+source of market-interest/liquidity selection. The service does not place
+orders and does not invent a direction.
 """
 
 from datetime import date
@@ -25,8 +25,9 @@ from datetime import date
 class FuturesTradeCandidateService:
     """Build and rank final morning scanner candidates."""
 
-    VERSION = "0.4"
+    VERSION = "0.5"
     MAX_DAYS_TO_EXPIRY = 3
+    MONEY_LEADER_SHORTLIST = 10
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -66,7 +67,7 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def calculate_score(cls, radar, confirmation):
-        """Calculate a deterministic 0-100 candidate score."""
+        """Calculate a deterministic 0-100 quality score after SPOT selection."""
         radar_score = max(0.0, min(100.0, cls._float(radar.get("radar_score"))))
         confirmation_score = max(
             0.0,
@@ -180,6 +181,60 @@ class FuturesTradeCandidateService:
             "candidate_score": score,
         }
 
+    @staticmethod
+    def _spot_money(candidate):
+        return FuturesTradeCandidateService._float(
+            candidate.get("spot_money_volume")
+        )
+
+    @classmethod
+    def _select_money_leader_radars(cls, radar_results, limit):
+        """Select current-money SPOT leaders before futures confirmation.
+
+        One SPOT is represented once. Current SPOT money is the primary
+        discovery signal; radar score is only a deterministic tie-breaker.
+        This prevents several futures expiries of the same SPOT from
+        consuming the money-leader shortlist.
+        """
+        grouped = {}
+
+        for radar in radar_results:
+            if not isinstance(radar, dict):
+                continue
+
+            spot_ticker = str(
+                radar.get("spot_ticker") or ""
+            ).strip().upper()
+            if not spot_ticker:
+                continue
+
+            grouped.setdefault(spot_ticker, []).append(radar)
+
+        leaders = []
+        for spot_radars in grouped.values():
+            spot_radars.sort(
+                key=lambda item: (
+                    cls._float(item.get("spot_money_volume")),
+                    cls._float(item.get("radar_score")),
+                    cls._float(item.get("relative_strength")),
+                    str(item.get("futures_expiry") or "9999-12-31"),
+                ),
+                reverse=True,
+            )
+            leaders.append(spot_radars[0])
+
+        leaders.sort(
+            key=lambda item: (
+                cls._float(item.get("spot_money_volume")),
+                cls._float(item.get("radar_score")),
+                cls._float(item.get("relative_strength")),
+                str(item.get("spot_ticker") or ""),
+            ),
+            reverse=True,
+        )
+
+        return leaders[:limit]
+
     @classmethod
     def _select_most_liquid_per_spot(cls, candidates):
         """Keep one futures contract per SPOT: the most liquid eligible one."""
@@ -209,7 +264,7 @@ class FuturesTradeCandidateService:
         return selected
 
     def rank(self, radar_results, confirmations=None, limit=3):
-        """Build candidates, keep one liquid futures contract per SPOT, then rank."""
+        """Select money-leading SPOTs, confirm futures, then rank quality."""
         if not isinstance(radar_results, list):
             return []
 
@@ -224,11 +279,13 @@ class FuturesTradeCandidateService:
 
         confirmation_map = confirmations or {}
 
-        radar_results = sorted(
+        # Do not start from the highest radar score. The user's trading
+        # workflow is SPOT-first: today's money/activity identifies where the
+        # market is concentrated, and only then do we inspect its futures.
+        radar_results = self._select_money_leader_radars(
             radar_results,
-            key=lambda item: self._float(item.get("radar_score")),
-            reverse=True,
-        )[:15]
+            max(self.MONEY_LEADER_SHORTLIST, limit),
+        )
 
         candidates = []
         for radar in radar_results:
@@ -251,14 +308,16 @@ class FuturesTradeCandidateService:
 
         candidates = self._select_most_liquid_per_spot(candidates)
 
+        # Current SPOT money is the primary ordering dimension. Quality,
+        # confirmation and radar metrics break ties among the money leaders.
         candidates.sort(
             key=lambda item: (
+                item["spot_money_volume"],
                 item["candidate_score"],
                 item["confirmation_score"],
                 item["radar_score"],
-                item["money_volume"],
-                item["spot_average_daily_money"],
                 item["relative_strength"],
+                item["money_volume"],
                 item["trade_count"],
                 item["futures_ticker"],
             ),
