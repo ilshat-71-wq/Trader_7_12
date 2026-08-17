@@ -35,6 +35,31 @@ def test_confirmed_short():
     assert result["direction"] == "SHORT"
 
 
+def test_money_volume_uses_bcs_trade_volume_directly():
+    trades = [
+        {"price": 100.0, "volume": 1_000_000, "quantity": 10_000},
+        {"price": 110.0, "volume": 2_000_000, "quantity": 20_000},
+    ]
+
+    result = FuturesConfirmationService.analyze_trades(trades, "LONG")
+
+    assert result["money_volume"] == 3_000_000
+    # A price * volume implementation would incorrectly return 320,000,000.
+
+
+def test_historical_candle_money_volume_uses_bcs_volume_directly():
+    candles = [
+        {"open": 100.0, "close": 101.0, "volume": 1_000_000},
+        {"open": 101.0, "close": 102.0, "volume": 2_000_000},
+        {"open": 102.0, "close": 103.0, "volume": 3_000_000},
+    ]
+
+    result = FuturesConfirmationService.analyze_candles(candles, "LONG")
+
+    assert result["money_volume"] == 6_000_000
+    # A close * volume implementation would incorrectly inflate turnover.
+
+
 def test_conflicting_direction_is_blocked():
     result = FuturesConfirmationService.analyze_trades(
         make_trades(),
@@ -88,6 +113,8 @@ def run_all_tests():
     tests = [
         test_confirmed_long,
         test_confirmed_short,
+        test_money_volume_uses_bcs_trade_volume_directly,
+        test_historical_candle_money_volume_uses_bcs_volume_directly,
         test_conflicting_direction_is_blocked,
         test_insufficient_trades_are_blocked,
         test_insufficient_money_volume_is_blocked,
