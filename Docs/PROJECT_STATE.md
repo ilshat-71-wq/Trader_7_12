@@ -12,9 +12,7 @@ This file is the single source of truth for the current technical state.
 
 Trader_7_12 Pro is a scanner/trading assistant for intraday MOEX futures.
 
-**The user trades ONLY futures.** SPOT is analyzed first to answer:
-
-> Which target SPOT asset has the most meaningful money/activity and structure, and which corresponding FUTURES contract is the practical instrument to watch/trade?
+**The user trades ONLY futures.** SPOT is analyzed first to answer which target SPOT asset has the most meaningful money/activity and structure, and which corresponding FUTURES contract is the practical instrument to watch/trade.
 
 The scanner never places orders. The user makes the final decision on entry, size, risk, SL/TP and execution.
 
@@ -25,6 +23,31 @@ The scanner never places orders. The user makes the final decision on entry, siz
 The scanner analyzes the SPOT asset first. The user trades the corresponding futures contract. Pullback/structure is measured on SPOT, never on the futures chart.
 
 The scanner is an analytical filter, not an automatic entry engine. The user personally watches the chart and controls the actual entry point.
+
+## CANONICAL FUTURES → SPOT MAPPING
+
+The mapping is explicitly locked to exchange-provided underlying metadata whenever BCS exposes it.
+
+Priority:
+
+1. `baseAssetSecuritySecCode` / equivalent explicit underlying security code;
+2. explicit underlying ticker/security object with class code;
+3. unique SPOT metadata match only when no explicit underlying metadata exists;
+4. ambiguous or unresolved mapping is rejected — the scanner never guesses.
+
+The dynamic futures universe preserves the BCS underlying fields needed by the mapping stage. This keeps the mapping independent of a hand-maintained ticker list.
+
+### Canonical regression
+
+`BMU6` → `BRENT1026` (`Brent Crude Oil 1026`)
+
+Therefore:
+
+**BMU6 / BRENT1026 → SPOT analysis on BRENT1026 → futures BMU6 is the tradable instrument.**
+
+MOEX public derivatives documentation confirms that Brent futures are based on Brent crude oil and documents the exchange's underlying-asset contract coding.
+
+For the application itself, BCS underlying metadata remains the machine-readable mapping source; MOEX documentation is the exchange-level reference used to validate the relationship.
 
 ## CANONICAL SELECTION RULE
 
@@ -58,17 +81,11 @@ The scanner has a dedicated `SpotFirstPullbackService`.
 
 ### H1 SPOT STRUCTURE
 
-The user's primary structural timeframe is **H1 on SPOT**. The application therefore treats H1 as the higher-timeframe context and M5 as the session-level formation detector.
+The user's primary structural timeframe is **H1 on SPOT**. H1 is the higher-timeframe context and M5 is the session-level formation detector.
 
-For the current SPOT price the service derives:
+For the current SPOT price the service derives nearest H1 support, nearest H1 resistance, nearest H1 level/type, distance to that level, and H1 context (`NEAR_H1_SUPPORT`, `NEAR_H1_RESISTANCE` or `BETWEEN_H1_LEVELS`).
 
-- nearest H1 support;
-- nearest H1 resistance;
-- nearest H1 level and its type;
-- distance from SPOT price to that level;
-- H1 context: `NEAR_H1_SUPPORT`, `NEAR_H1_RESISTANCE` or `BETWEEN_H1_LEVELS`.
-
-A LONG setup receives a controlled quality bonus when the SPOT is near H1 support. A SHORT setup receives a controlled quality bonus when the SPOT is near H1 resistance. This is contextual ranking only — it never creates an automatic entry.
+A LONG setup receives a controlled quality bonus when SPOT is near H1 support. A SHORT setup receives a controlled quality bonus when SPOT is near H1 resistance. This is contextual ranking only — it never creates an automatic entry.
 
 ### LONG context
 
@@ -80,7 +97,7 @@ The ideal reference is approximately **50% retracement of the impulse range**, w
 
 `SPOT H1 structure → impulse down → first rebound up → 35–75% retracement zone → consolidation → weakness remains → corresponding FUTURES candidate`
 
-The detector uses M5 SPOT candles from the **current Moscow trading session** (`MORNING`, `MAIN` or `EVENING`). It does not reuse the morning window after 10:00.
+The detector uses M5 SPOT candles from the **current Moscow trading session** (`MORNING`, `MAIN` or `EVENING`).
 
 ### Setup states
 
@@ -92,11 +109,9 @@ The scanner exposes setup quality, impulse size, retracement percentage, consoli
 
 ## MONEY DEFINITION
 
-Canonical money metric:
+Canonical money metric: `money_volume = price × volume`.
 
-`money_volume = price × volume`
-
-Current SPOT money in the scanner is current-session M5 candle activity; historical completed-day average money remains context for the current/average ratio.
+Current SPOT money is current-session M5 candle activity; historical completed-day average money remains context for the current/average ratio.
 
 ## FUTURES RULE
 
@@ -118,7 +133,7 @@ All application time is `Europe/Moscow` / MSK. UTC is used only as the technical
 - `19:00–23:50` — `EVENING`;
 - `23:50–06:50` — `CLOSED`.
 
-The UI displays live Moscow date, time with seconds, current session and market-open state. The scanner pipeline is session-aware and attaches session metadata to candidates.
+The UI displays live Moscow date, time with seconds and current session. No session countdown is required.
 
 ## UI / SCAN FEEDBACK — APPROVED DESIGN
 
@@ -131,39 +146,43 @@ The UI displays live Moscow date, time with seconds, current session and market-
 - LONG candidate text uses pleasant soft green;
 - SHORT candidate text uses pleasant soft red;
 - no duplicate scanning status lines;
-- no session countdown — the live MSK clock is sufficient;
+- no session countdown;
 - results remain analytical/read-only.
 
-The animation is only a scan-state visual and does not change scanner logic.
-
 ## IMPLEMENTED BACKEND CHECKPOINT
+
+### `Program/services/futures_spot_mapping_service.py`
+
+- dynamic Futures → SPOT mapping;
+- explicit BCS underlying metadata has priority;
+- nested underlying security metadata is supported;
+- ambiguous mappings are rejected rather than guessed;
+- no permanent manual futures/SPOT ticker universe is required;
+- canonical regression is locked: `BMU6 → BRENT1026`.
 
 ### `Program/services/spot_first_pullback_service.py`
 
 - SPOT-first structure detector;
-- H1 SPOT support/resistance context added as the higher-timeframe structural filter;
-- M5 remains the session-level impulse/pullback/rebound detector;
-- uses current `MORNING`, `MAIN` or `EVENING` session window;
-- detects directional M5 impulse;
-- detects first pullback for LONG and first rebound for SHORT;
-- accepts 35–75% retracement, with 50% as the quality center;
-- detects short consolidation/stabilization;
-- exposes `WATCH` / `CONFIRMED` state;
-- H1 support/resistance proximity contributes a controlled setup-quality bonus in the matching direction;
+- H1 SPOT support/resistance context;
+- M5 session impulse/pullback/rebound detector;
+- current `MORNING`, `MAIN` or `EVENING` session window;
+- 35–75% retracement, with 50% as the quality center;
+- consolidation/stabilization;
+- `WATCH` / `CONFIRMED` state;
+- H1 support/resistance proximity contributes a controlled setup-quality bonus;
 - never produces orders or automatic entry commands.
 
 ### `Program/services/futures_morning_radar_service.py`
 
 - integrates the SPOT setup detector;
 - setup is calculated once per unique SPOT mapping and reused across mapped futures;
-- final radar record carries setup phase, quality, impulse, retracement and consolidation metadata;
-- ranking gives meaningful weight to SPOT setup quality while preserving current-session SPOT money/activity priority.
+- carries setup phase, quality, impulse, retracement and consolidation metadata;
+- ranking preserves current-session SPOT money/activity priority.
 
 ### `Program/services/futures_trade_candidate_service.py`
 
 - target groups remain MOEX stock, gas, oil, USD and gold;
-- setup quality participates in candidate scoring and final ordering;
-- `WATCH` and `CONFIRMED` setup states receive a controlled quality bonus;
+- setup quality participates in candidate scoring;
 - SPOT remains the source of direction/structure;
 - FUTURES remains the tradable instrument.
 
@@ -176,25 +195,16 @@ The animation is only a scan-state visual and does not change scanner logic.
 
 ## TEST CHECKPOINT
 
-Regression suites previously passed:
+Mapping regression now explicitly covers:
 
-- `Program/test_session_money_volume_service.py`
-- `Program/test_market_session_service.py`
-- `Program/test_morning_trading_pipeline_service.py`
-- `Program/test_futures_trade_candidate_service.py`
+- explicit BCS underlying mapping;
+- canonical `BMU6 → BRENT1026` mapping;
+- nested underlying metadata;
+- unique metadata fallback;
+- ambiguous mapping rejection;
+- explicit metadata taking priority over a name guess.
 
-Structure tests:
-
-- `Program/test_spot_first_pullback_service.py`
-  - LONG pullback near the 50% reference zone;
-  - SHORT rebound structure;
-  - MAIN-session candle window selection.
-
-H1 structure tests:
-
-- `Program/test_spot_h1_levels_service.py`
-  - nearest H1 support context for LONG;
-  - nearest H1 resistance context for SHORT.
+Existing regression suites cover session, money-volume, morning pipeline, futures candidate, SPOT pullback and H1 levels.
 
 ## IMPORTANT BOUNDARIES
 
@@ -206,37 +216,7 @@ Do not measure the first pullback/rebound on the futures chart. Do not turn `FIR
 
 ## UI / COMPATIBILITY NOTE
 
-`QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`. This compatibility issue was identified during the latest launch test and is recorded here so it is not reintroduced.
-
-## HANDOFF / VERIFICATION
-
-```bash
-cd ~/Documents/Trader_7_12
-git pull
-python3 -m py_compile \
-Program/services/spot_first_pullback_service.py \
-Program/services/market_session_service.py \
-Program/services/session_money_volume_service.py \
-Program/services/morning_trading_pipeline_service.py \
-Program/services/futures_morning_radar_service.py \
-Program/services/futures_trade_candidate_service.py \
-Program/ui.py \
-Program/main.py \
-Program/test_spot_first_pullback_service.py \
-Program/test_spot_h1_levels_service.py \
-Program/test_session_money_volume_service.py \
-Program/test_market_session_service.py \
-Program/test_morning_trading_pipeline_service.py
-
-python3 Program/test_spot_first_pullback_service.py
-python3 Program/test_spot_h1_levels_service.py
-python3 Program/test_session_money_volume_service.py
-python3 Program/test_market_session_service.py
-python3 Program/test_morning_trading_pipeline_service.py
-python3 Program/test_futures_trade_candidate_service.py
-
-PYTHONPATH="$PWD/Program" python3 Program/main.py
-```
+`QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`.
 
 ## CANONICAL PRINCIPLE TO PRESERVE
 
@@ -245,3 +225,5 @@ PYTHONPATH="$PWD/Program" python3 Program/main.py
 **SPOT determines the idea and structure. FUTURES is what the user trades.**
 
 **H1 is the primary SPOT structural context; M5 is the session formation layer.**
+
+**Futures → SPOT correspondence comes from explicit exchange/BCS underlying metadata whenever available; never guess an ambiguous mapping.**
