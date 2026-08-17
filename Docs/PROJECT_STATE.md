@@ -2,8 +2,8 @@
 
 ## CANONICAL CURRENT STATE
 
-Date: 2026-08-17
-Branch: `agent/futures-expiry-liquidity`
+Date: 2026-08-18
+Branch: `agent/scan-speed-optimization`
 Repository: `ilshat-71-wq/Trader_7_12`
 
 This file is the single source of truth for the current technical state.
@@ -44,8 +44,6 @@ The dynamic futures universe preserves the BCS underlying fields needed by the m
 Therefore:
 
 **BMU6 / BRENT1026 → SPOT analysis on BRENT1026 → futures BMU6 is the tradable instrument.**
-
-MOEX public derivatives documentation confirms that Brent futures are based on Brent crude oil and documents the exchange's underlying-asset contract coding.
 
 For the application itself, BCS underlying metadata remains the machine-readable mapping source; MOEX documentation is the exchange-level reference used to validate the relationship.
 
@@ -193,9 +191,21 @@ The UI displays live Moscow date, time with seconds and current session. No sess
 - `morning_trading_pipeline_service.py` — session-aware pipeline;
 - `futures_trade_candidate_service.py` — futures confirmation/liquidity selection.
 
+## SCAN PERFORMANCE — CURRENT DEVELOPMENT TARGET
+
+Observed live scans can take roughly four minutes. The next engineering target is **20–30 seconds for a normal scan**, with 15–25 seconds preferred.
+
+Today, without relying on a live BCS session, the repository now contains:
+
+- `Program/services/scan_performance_service.py` — dependency-free stage/total timing utility;
+- `Program/test_scan_performance_service.py` — offline regression coverage for the timing utility;
+- `Docs/SCAN_PERFORMANCE_PLAN.md` — canonical optimization plan and live-validation checklist.
+
+The optimization plan explicitly targets duplicate historical requests, bounded parallel evaluation of independent SPOT groups, stable-data caching and bounded retry/timeout behavior. Actual network-latency tuning must be validated against BCS during the next open-market run.
+
 ## TEST CHECKPOINT
 
-Mapping regression now explicitly covers:
+Mapping regression explicitly covers:
 
 - explicit BCS underlying mapping;
 - canonical `BMU6 → BRENT1026` mapping;
@@ -205,6 +215,8 @@ Mapping regression now explicitly covers:
 - explicit metadata taking priority over a name guess.
 
 Existing regression suites cover session, money-volume, morning pipeline, futures candidate, SPOT pullback and H1 levels.
+
+The new offline scan-performance regression covers stage timing, total timing, target classification and invalid target handling.
 
 ## IMPORTANT BOUNDARIES
 
@@ -227,3 +239,5 @@ Do not measure the first pullback/rebound on the futures chart. Do not turn `FIR
 **H1 is the primary SPOT structural context; M5 is the session formation layer.**
 
 **Futures → SPOT correspondence comes from explicit exchange/BCS underlying metadata whenever available; never guess an ambiguous mapping.**
+
+**Performance target: a normal scan should complete in 20–30 seconds, without weakening the SPOT-first logic.**
