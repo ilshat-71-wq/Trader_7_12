@@ -14,13 +14,6 @@ Purpose:
 - rank the surviving candidates without allowing futures turnover to replace
   the SPOT-first selection principle.
 
-Target SPOT groups:
-- Moscow Exchange stock;
-- gas;
-- oil;
-- USD/RUB;
-- gold.
-
 The trading instrument is always the futures contract. The SPOT is the
 source of market-interest/liquidity selection. The service does not place
 orders and does not invent a direction.
@@ -30,19 +23,13 @@ from datetime import date
 
 
 class FuturesTradeCandidateService:
-    """Build and rank final morning scanner candidates."""
+    """Build and rank final scanner candidates."""
 
-    VERSION = "0.6"
+    VERSION = "0.7"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
 
-    TARGET_SPOT_GROUPS = (
-        "MOEX_STOCK",
-        "GAS",
-        "OIL",
-        "USD",
-        "GOLD",
-    )
+    TARGET_SPOT_GROUPS = ("MOEX_STOCK", "GAS", "OIL", "USD", "GOLD")
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -62,8 +49,7 @@ class FuturesTradeCandidateService:
             expiry_date = date.fromisoformat(str(expiry)[:10])
         except ValueError:
             return False
-        days_to_expiry = (expiry_date - date.today()).days
-        return days_to_expiry > cls.MAX_DAYS_TO_EXPIRY
+        return (expiry_date - date.today()).days > cls.MAX_DAYS_TO_EXPIRY
 
     @staticmethod
     def _direction(radar):
@@ -79,140 +65,57 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _spot_group(cls, item):
-        """Classify only the five canonical SPOT target groups."""
         explicit = str(item.get("spot_group") or "").strip().upper()
         if explicit in cls.TARGET_SPOT_GROUPS:
             return explicit
-
         ticker = str(item.get("spot_ticker") or "").strip().upper()
         name = str(item.get("spot_name") or "").strip().upper()
         spot_type = str(item.get("spot_type") or "").strip().upper()
         text = f"{ticker} {name}"
-
-        if (
-            ticker == "MOEX"
-            or "MOSCOW EXCHANGE" in text
-            or "МОСКОВСКАЯ БИРЖА" in text
-        ):
+        if ticker == "MOEX" or "MOSCOW EXCHANGE" in text or "МОСКОВСКАЯ БИРЖА" in text:
             return "MOEX_STOCK"
-
-        commodity_types = {
-            "GOODS",
-            "COMMODITY",
-            "COMMODITIES",
-            "METALS",
-        }
+        commodity_types = {"GOODS", "COMMODITY", "COMMODITIES", "METALS"}
         is_commodity = spot_type in commodity_types or not spot_type
         is_currency = spot_type in {"CURRENCY", "FX", "CURRENCIES"} or not spot_type
-
-        if is_commodity and (
-            ticker in {"NG", "NGM"}
-            or "NATURAL GAS" in text
-            or "NATURALGAS" in text
-            or "ПРИРОДНЫЙ ГАЗ" in text
-        ):
+        if is_commodity and (ticker in {"NG", "NGM"} or "NATURAL GAS" in text or "NATURALGAS" in text or "ПРИРОДНЫЙ ГАЗ" in text):
             return "GAS"
-
-        if is_commodity and (
-            ticker in {"BR", "BRM", "CL", "WTI"}
-            or "BRENT" in text
-            or "CRUDE OIL" in text
-            or "LIGHT SWEET CRUDE" in text
-            or "НЕФТЬ" in text
-        ):
+        if is_commodity and (ticker in {"BR", "BRM", "CL", "WTI"} or "BRENT" in text or "CRUDE OIL" in text or "LIGHT SWEET CRUDE" in text or "НЕФТЬ" in text):
             return "OIL"
-
-        if is_currency and (
-            ticker in {"SI", "USDRUB", "USD"}
-            or "USD/RUB" in text
-            or "USDRUB" in text
-            or "USD RUB" in text
-            or "ДОЛЛАР" in text
-        ):
+        if is_currency and (ticker in {"SI", "USDRUB", "USD"} or "USD/RUB" in text or "USDRUB" in text or "USD RUB" in text or "ДОЛЛАР" in text):
             return "USD"
-
-        if is_commodity and (
-            ticker in {"GOLD", "GLD", "GD"}
-            or "GOLD" in text
-            or "GOLD/RUB" in text
-            or "ЗОЛОТ" in text
-        ):
+        if is_commodity and (ticker in {"GOLD", "GLD", "GD"} or "GOLD" in text or "GOLD/RUB" in text or "ЗОЛОТ" in text):
             return "GOLD"
-
         return None
 
     @classmethod
     def calculate_score(cls, radar, confirmation):
-        """Calculate a deterministic 0-100 quality score after SPOT selection."""
         radar_score = max(0.0, min(100.0, cls._float(radar.get("radar_score"))))
-        confirmation_score = max(
-            0.0,
-            min(100.0, cls._float(confirmation.get("score")))
-        )
-
+        confirmation_score = max(0.0, min(100.0, cls._float(confirmation.get("score"))))
         direction = cls._direction(radar)
         rs = cls._float(radar.get("relative_strength"))
         directional_rs = rs if direction == "LONG" else -rs
-
-        if directional_rs > 0:
-            rs_bonus = min(directional_rs * 20.0, 10.0)
-        elif directional_rs < 0:
-            rs_bonus = max(directional_rs * 20.0, -10.0)
-        else:
-            rs_bonus = 0.0
-
+        rs_bonus = min(directional_rs * 20.0, 10.0) if directional_rs > 0 else max(directional_rs * 20.0, -10.0) if directional_rs < 0 else 0.0
         futures_change = cls._float(confirmation.get("price_change_percent"))
-        directional_change = (
-            futures_change
-            if direction == "LONG"
-            else -futures_change
-            if direction == "SHORT"
-            else 0.0
-        )
-
-        if directional_change > 0:
-            futures_change_bonus = min(directional_change * 5.0, 5.0)
-        elif directional_change < 0:
-            futures_change_bonus = max(directional_change * 5.0, -5.0)
-        else:
-            futures_change_bonus = 0.0
-
-        score = (
-            radar_score * 0.60
-            + confirmation_score * 0.30
-            + rs_bonus
-            + futures_change_bonus
-        )
-        return round(min(score, 100.0), 2)
+        directional_change = futures_change if direction == "LONG" else -futures_change if direction == "SHORT" else 0.0
+        futures_change_bonus = min(directional_change * 5.0, 5.0) if directional_change > 0 else max(directional_change * 5.0, -5.0) if directional_change < 0 else 0.0
+        return round(min(radar_score * 0.60 + confirmation_score * 0.30 + rs_bonus + futures_change_bonus, 100.0), 2)
 
     @classmethod
     def build_candidate(cls, radar, confirmation):
-        """Return a candidate or None when the confirmation blocks it."""
         if not isinstance(radar, dict) or not isinstance(confirmation, dict):
             return None
-
         if not cls._expiry_is_eligible(radar.get("futures_expiry")):
             return None
-
         if str(confirmation.get("status", "")).upper() != "OK":
             return None
-
         direction = cls._direction(radar)
-        confirmed_direction = str(
-            confirmation.get("direction") or "NONE"
-        ).upper()
-
-        if direction not in {"LONG", "SHORT"}:
+        confirmed_direction = str(confirmation.get("direction") or "NONE").upper()
+        if direction not in {"LONG", "SHORT"} or confirmed_direction != direction:
             return None
-        if confirmed_direction != direction:
-            return None
-
         spot_group = cls._spot_group(radar)
         if spot_group is None:
             return None
-
         score = cls.calculate_score(radar, confirmation)
-
         return {
             "version": cls.VERSION,
             "status": "READY",
@@ -230,6 +133,10 @@ class FuturesTradeCandidateService:
             "spot_money_volume": cls._float(radar.get("spot_money_volume")),
             "spot_average_daily_money": cls._float(radar.get("average_daily_money")),
             "spot_money_ratio": cls._float(radar.get("spot_money_ratio")),
+            "spot_session_activity_ratio": cls._float(radar.get("spot_session_activity_ratio")),
+            "spot_money_per_minute": cls._float(radar.get("spot_money_per_minute")),
+            "session_elapsed_minutes": int(cls._float(radar.get("session_elapsed_minutes"))),
+            "session_expected_minutes": int(cls._float(radar.get("session_expected_minutes"))),
             "spot_change_percent": cls._float(radar.get("change_percent")),
             "trend_state": radar.get("trend_state", "UNKNOWN"),
             "trend_days": int(cls._float(radar.get("trend_days"))),
@@ -254,82 +161,56 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _select_money_leader_radars(cls, radar_results):
-        """Select one current-money SPOT leader inside each target group."""
         grouped = {group: [] for group in cls.TARGET_SPOT_GROUPS}
-
         for radar in radar_results:
             if not isinstance(radar, dict):
                 continue
             group = cls._spot_group(radar)
-            if group is None:
-                continue
-            grouped[group].append(radar)
-
+            if group is not None:
+                grouped[group].append(radar)
         leaders = []
         for group in cls.TARGET_SPOT_GROUPS:
             candidates = grouped[group]
             if not candidates:
                 continue
-
-            candidates.sort(
-                key=lambda item: (
-                    cls._float(item.get("spot_money_volume")),
-                    cls._float(item.get("spot_money_ratio")),
-                    cls._float(item.get("radar_score")),
-                    cls._float(item.get("relative_strength")),
-                    str(item.get("spot_ticker") or ""),
-                ),
-                reverse=True,
-            )
+            candidates.sort(key=lambda item: (
+                cls._float(item.get("spot_money_volume")),
+                cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
+                cls._float(item.get("spot_money_ratio")),
+                cls._float(item.get("radar_score")),
+                cls._float(item.get("relative_strength")),
+                str(item.get("spot_ticker") or ""),
+            ), reverse=True)
             leader = dict(candidates[0])
             leader["spot_group"] = group
             leaders.append(leader)
-
-        leaders.sort(
-            key=lambda item: (
-                cls._float(item.get("spot_money_volume")),
-                cls._float(item.get("spot_money_ratio")),
-                cls._float(item.get("radar_score")),
-                str(item.get("spot_group") or ""),
-            ),
-            reverse=True,
-        )
-
+        leaders.sort(key=lambda item: (
+            cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
+            cls._float(item.get("spot_money_volume")),
+            cls._float(item.get("radar_score")),
+            str(item.get("spot_group") or ""),
+        ), reverse=True)
         return leaders
 
     @classmethod
     def _select_most_liquid_per_spot(cls, candidates):
-        """Keep one futures contract per SPOT: the most liquid eligible one."""
         grouped = {}
-
         for candidate in candidates:
             spot_ticker = str(candidate.get("spot_ticker") or "").strip().upper()
-            if not spot_ticker:
-                continue
-            grouped.setdefault(spot_ticker, []).append(candidate)
-
+            if spot_ticker:
+                grouped.setdefault(spot_ticker, []).append(candidate)
         selected = []
         for spot_candidates in grouped.values():
-            spot_candidates.sort(
-                key=lambda item: (
-                    item["money_volume"],
-                    item["trade_count"],
-                    item["confirmation_score"],
-                    item["candidate_score"],
-                    str(item.get("futures_expiry") or "9999-12-31"),
-                    str(item.get("futures_ticker") or ""),
-                ),
-                reverse=True,
-            )
+            spot_candidates.sort(key=lambda item: (
+                item["money_volume"], item["trade_count"], item["confirmation_score"], item["candidate_score"],
+                str(item.get("futures_expiry") or "9999-12-31"), str(item.get("futures_ticker") or ""),
+            ), reverse=True)
             selected.append(spot_candidates[0])
-
         return selected
 
     def rank(self, radar_results, confirmations=None, limit=3):
-        """Select target SPOT money leaders, confirm futures, then rank."""
         if not isinstance(radar_results, list):
             return []
-
         if limit is None:
             limit = 3
         try:
@@ -338,43 +219,23 @@ class FuturesTradeCandidateService:
             raise TypeError("limit must be an integer")
         if limit < 0:
             raise ValueError("limit must be >= 0")
-
         confirmation_map = confirmations or {}
         radar_results = self._select_money_leader_radars(radar_results)
-
         candidates = []
         for radar in radar_results:
             ticker = str(radar.get("futures_ticker") or "").strip().upper()
             confirmation = confirmation_map.get(ticker)
-
             if confirmation is None and self.confirmation_service is not None:
-                confirmation = self.confirmation_service.analyze(
-                    ticker,
-                    radar.get("futures_class_code"),
-                    self._direction(radar),
-                )
-
+                confirmation = self.confirmation_service.analyze(ticker, radar.get("futures_class_code"), self._direction(radar))
             candidate = self.build_candidate(radar, confirmation)
             if candidate is not None:
                 candidates.append(candidate)
-
         candidates = self._select_most_liquid_per_spot(candidates)
-        candidates.sort(
-            key=lambda item: (
-                item["spot_money_volume"],
-                item["spot_money_ratio"],
-                item["candidate_score"],
-                item["confirmation_score"],
-                item["radar_score"],
-                item["relative_strength"],
-                item["money_volume"],
-                item["trade_count"],
-                item["futures_ticker"],
-            ),
-            reverse=True,
-        )
-
+        candidates.sort(key=lambda item: (
+            item["spot_session_activity_ratio"], item["spot_money_volume"], item["candidate_score"],
+            item["confirmation_score"], item["radar_score"], item["relative_strength"], item["money_volume"],
+            item["trade_count"], item["futures_ticker"],
+        ), reverse=True)
         for rank, candidate in enumerate(candidates, start=1):
             candidate["rank"] = rank
-
         return candidates[:limit]
