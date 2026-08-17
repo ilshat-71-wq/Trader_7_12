@@ -8,6 +8,9 @@ Stage 5 of the Spot-first architecture.
 Purpose:
 - combine SPOT Morning Radar with futures confirmation;
 - reject blocked futures confirmations;
+- reject contracts with 3 or fewer calendar days to expiry;
+- keep exactly one, most-liquid futures contract per SPOT from the
+  nearest-contract shortlist;
 - calculate one comparable trade-candidate score;
 - return only the best 2-3 candidates when requested.
 
@@ -16,11 +19,14 @@ The direction always comes from the SPOT radar and must be confirmed by
 futures.
 """
 
+from datetime import date
+
 
 class FuturesTradeCandidateService:
     """Build and rank final morning scanner candidates."""
 
-    VERSION = "0.3"
+    VERSION = "0.4"
+    MAX_DAYS_TO_EXPIRY = 3
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -31,6 +37,19 @@ class FuturesTradeCandidateService:
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @classmethod
+    def _expiry_is_eligible(cls, expiry):
+        if not expiry:
+            return True
+
+        try:
+            expiry_date = date.fromisoformat(str(expiry)[:10])
+        except ValueError:
+            return False
+
+        days_to_expiry = (expiry_date - date.today()).days
+        return days_to_expiry > cls.MAX_DAYS_TO_EXPIRY
 
     @staticmethod
     def _direction(radar):
@@ -57,9 +76,6 @@ class FuturesTradeCandidateService:
         direction = cls._direction(radar)
         rs = cls._float(radar.get("relative_strength"))
 
-        # Directional relative-strength adjustment:
-        # LONG  -> positive RS is favorable
-        # SHORT -> negative RS is favorable
         directional_rs = rs if direction == "LONG" else -rs
 
         if directional_rs > 0:
@@ -109,6 +125,9 @@ class FuturesTradeCandidateService:
     def build_candidate(cls, radar, confirmation):
         """Return a candidate or None when the confirmation blocks it."""
         if not isinstance(radar, dict) or not isinstance(confirmation, dict):
+            return None
+
+        if not cls._expiry_is_eligible(radar.get("futures_expiry")):
             return None
 
         if str(confirmation.get("status", "")).upper() != "OK":
@@ -161,8 +180,36 @@ class FuturesTradeCandidateService:
             "candidate_score": score,
         }
 
+    @classmethod
+    def _select_most_liquid_per_spot(cls, candidates):
+        """Keep one futures contract per SPOT: the most liquid eligible one."""
+        grouped = {}
+
+        for candidate in candidates:
+            spot_ticker = str(candidate.get("spot_ticker") or "").strip().upper()
+            if not spot_ticker:
+                continue
+            grouped.setdefault(spot_ticker, []).append(candidate)
+
+        selected = []
+        for spot_candidates in grouped.values():
+            spot_candidates.sort(
+                key=lambda item: (
+                    item["money_volume"],
+                    item["trade_count"],
+                    item["confirmation_score"],
+                    item["candidate_score"],
+                    str(item.get("futures_expiry") or "9999-12-31"),
+                    str(item.get("futures_ticker") or ""),
+                ),
+                reverse=True,
+            )
+            selected.append(spot_candidates[0])
+
+        return selected
+
     def rank(self, radar_results, confirmations=None, limit=3):
-        """Build candidates and return the strongest ones first."""
+        """Build candidates, keep one liquid futures contract per SPOT, then rank."""
         if not isinstance(radar_results, list):
             return []
 
@@ -177,7 +224,6 @@ class FuturesTradeCandidateService:
 
         confirmation_map = confirmations or {}
 
-        # Cheap SPOT-first prefilter before expensive futures confirmation.
         radar_results = sorted(
             radar_results,
             key=lambda item: self._float(item.get("radar_score")),
@@ -203,7 +249,8 @@ class FuturesTradeCandidateService:
             if candidate is not None:
                 candidates.append(candidate)
 
-        # Deterministic ranking: quality first, then liquidity and stability.
+        candidates = self._select_most_liquid_per_spot(candidates)
+
         candidates.sort(
             key=lambda item: (
                 item["candidate_score"],
