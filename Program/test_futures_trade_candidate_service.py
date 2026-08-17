@@ -4,12 +4,19 @@ from services.futures_trade_candidate_service import FuturesTradeCandidateServic
 class TestFuturesTradeCandidateService:
 
     @staticmethod
-    def radar(ticker, direction="LONG", radar_score=70, rs=0.20):
+    def radar(
+        ticker,
+        direction="LONG",
+        radar_score=70,
+        rs=0.20,
+        spot_ticker=None,
+        expiry="2026-09-15",
+    ):
         return {
             "futures_ticker": ticker,
             "futures_class_code": "SPBFUT",
-            "futures_expiry": "2026-09-15",
-            "spot_ticker": ticker[:2],
+            "futures_expiry": expiry,
+            "spot_ticker": spot_ticker or ticker[:2],
             "spot_class_code": "SPBRU",
             "direction": direction,
             "radar_score": radar_score,
@@ -71,6 +78,33 @@ class TestFuturesTradeCandidateService:
         assert result[0]["futures_ticker"] == "LKU6"
         assert [item["rank"] for item in result] == [1, 2, 3]
 
+    def test_one_most_liquid_futures_per_spot(self):
+        service = FuturesTradeCandidateService()
+        radars = [
+            self.radar("ALU6", spot_ticker="ALRS", radar_score=95),
+            self.radar("ALZ6", spot_ticker="ALRS", radar_score=95),
+            self.radar("ASU6", spot_ticker="ASTR", radar_score=90),
+        ]
+        confirmations = {
+            "ALU6": self.confirmation(score=90, money=120_000_000, trades=300),
+            "ALZ6": self.confirmation(score=95, money=80_000_000, trades=200),
+            "ASU6": self.confirmation(score=85, money=20_000_000, trades=50),
+        }
+
+        result = service.rank(radars, confirmations, limit=3)
+
+        assert len(result) == 2
+        assert [item["spot_ticker"] for item in result].count("ALRS") == 1
+        assert next(item for item in result if item["spot_ticker"] == "ALRS")["futures_ticker"] == "ALU6"
+
+    def test_contract_with_three_or_fewer_days_to_expiry_is_rejected(self):
+        service = FuturesTradeCandidateService()
+        result = service.build_candidate(
+            self.radar("ALU6", expiry="2026-08-19"),
+            self.confirmation(),
+        )
+        assert result is None
+
     def test_limit_returns_top_two(self):
         service = FuturesTradeCandidateService()
         radars = [
@@ -105,6 +139,8 @@ if __name__ == "__main__":
         test.test_conflicting_confirmation_is_rejected,
         test.test_blocked_confirmation_is_rejected,
         test.test_rank_orders_by_candidate_score,
+        test.test_one_most_liquid_futures_per_spot,
+        test.test_contract_with_three_or_fewer_days_to_expiry_is_rejected,
         test.test_limit_returns_top_two,
         test.test_invalid_limit,
     ]
