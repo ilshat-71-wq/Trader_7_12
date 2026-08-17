@@ -31,7 +31,7 @@ def test_session_info_contains_live_clock_fields():
 
 def test_utc_datetime_is_converted_to_moscow():
     value = datetime(2026, 8, 17, 16, 15, tzinfo=ZoneInfo("UTC"))
-    assert SERVICE.get_session(value) == "MAIN"
+    assert SERVICE.get_session(value) == "EVENING"
 
 
 if __name__ == "__main__":
