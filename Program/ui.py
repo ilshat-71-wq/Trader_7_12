@@ -1,6 +1,6 @@
 """Trader_7_12 Pro — professional morning radar UI."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 DIRECTION_LABELS = {"LONG": "ЛОНГ", "SHORT": "ШОРТ"}
@@ -36,6 +36,24 @@ def _rs_label(item):
     return RS_LABELS.get(signal, signal)
 
 
+class MarketScanWorker(QObject):
+    """Run the blocking BCS scan outside the Qt GUI thread."""
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, scanner, limit=3):
+        super().__init__()
+        self.scanner = scanner
+        self.limit = limit
+
+    def run(self):
+        try:
+            self.finished.emit(self.scanner.scan(limit=self.limit))
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
 class TraderWindow(QWidget):
     """Large scanner-only morning dashboard. No risk or execution controls."""
 
@@ -45,6 +63,8 @@ class TraderWindow(QWidget):
         self.resize(1120, 760)
         self.scanner = None
         self.scanner_enabled = scanner_enabled
+        self.scan_thread = None
+        self.scan_worker = None
         self.init_ui()
 
     def init_ui(self):
@@ -84,20 +104,38 @@ class TraderWindow(QWidget):
             self.result_box.setText("👁  РЕЖИМ ПРОСМОТРА\n\nБКС временно недоступен. Сканирование невозможно.")
             return
 
-        self.result_box.setText("📡  СКАНИРУЮ РЫНОК...\n\nСПОТ → ЛИКВИДНОСТЬ → СИЛА/СЛАБОСТЬ → УРОВНИ/СЕТАП → ФЬЮЧЕРС → TOP 2–3")
+        if self.scan_thread is not None and self.scan_thread.isRunning():
+            return
+
+        self.result_box.setText(
+            "📡  СКАНИРУЮ РЫНОК...\n\n"
+            "BCS → SPOT → ЛИКВИДНОСТЬ → СИЛА/СЛАБОСТЬ → УРОВНИ/СЕТАП → ФЬЮЧЕРС\n\n"
+            "⏳ Анализ выполняется в фоне. Окно остаётся доступным."
+        )
         self.scan_button.setEnabled(False)
+        self.scan_button.setText("⏳  СКАНИРОВАНИЕ...")
 
         try:
             if self.scanner is None:
                 from services.morning_trading_pipeline_service import MorningTradingPipelineService
                 self.scanner = MorningTradingPipelineService()
-            results = self.scanner.scan(limit=3)
-        except Exception as exc:
-            self.result_box.setText(f"❌  ОШИБКА СКАНИРОВАНИЯ\n\n{exc}")
-            self.scan_button.setEnabled(True)
-            return
 
+            self.scan_thread = QThread(self)
+            self.scan_worker = MarketScanWorker(self.scanner, limit=3)
+            self.scan_worker.moveToThread(self.scan_thread)
+            self.scan_thread.started.connect(self.scan_worker.run)
+            self.scan_worker.finished.connect(self._scan_finished)
+            self.scan_worker.failed.connect(self._scan_failed)
+            self.scan_worker.finished.connect(self.scan_thread.quit)
+            self.scan_worker.failed.connect(self.scan_thread.quit)
+            self.scan_thread.finished.connect(self._scan_thread_finished)
+            self.scan_thread.start()
+        except Exception as exc:
+            self._scan_failed(f"{type(exc).__name__}: {exc}")
+
+    def _scan_finished(self, results):
         self.scan_button.setEnabled(True)
+        self.scan_button.setText("🔎  СКАНИРОВАТЬ РЫНОК")
 
         if not results:
             self.result_box.setText("🌙  ГОТОВЫХ КАНДИДАТОВ НЕТ\n\nНи один инструмент не прошёл все обязательные проверки.")
@@ -146,3 +184,26 @@ class TraderWindow(QWidget):
         ])
 
         self.result_box.setText("\n".join(output))
+
+    def _scan_failed(self, error):
+        self.scan_button.setEnabled(True)
+        self.scan_button.setText("🔎  СКАНИРОВАТЬ РЫНОК")
+        self.result_box.setText(
+            "❌  ОШИБКА СКАНИРОВАНИЯ\n\n"
+            f"{error}\n\n"
+            "БКС мог временно не ответить. Повторите сканирование."
+        )
+
+    def _scan_thread_finished(self):
+        if self.scan_worker is not None:
+            self.scan_worker.deleteLater()
+        if self.scan_thread is not None:
+            self.scan_thread.deleteLater()
+        self.scan_worker = None
+        self.scan_thread = None
+
+    def closeEvent(self, event):
+        if self.scan_thread is not None and self.scan_thread.isRunning():
+            self.scan_thread.quit()
+            self.scan_thread.wait(3000)
+        event.accept()
