@@ -1,15 +1,10 @@
-"""SPOT-first pullback/rebound detector for the Trader_7_12 radar.
+"""SPOT-first impulse -> first pullback/rebound -> consolidation detector."""
 
-The service never produces an order. It answers a narrower question:
-"Is the SPOT currently showing the kind of first pullback/rebound that is
-worth watching, and which futures contract should inherit that idea?"
-"""
-
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timezone
 
 
 class SpotFirstPullbackService:
-    VERSION = "0.1"
+    VERSION = "0.2"
     TIMEFRAME_MINUTES = 5
     MIN_IMPULSE_CANDLES = 2
     MIN_IMPULSE_PERCENT = 0.30
@@ -35,10 +30,6 @@ class SpotFirstPullbackService:
         except (TypeError, ValueError):
             return default
 
-    @staticmethod
-    def _to_moscow(history_service, value):
-        return history_service.to_moscow(value)
-
     def _window(self, session, trading_date):
         start, end = self.SESSION_WINDOWS.get(session, (None, None))
         if start is None:
@@ -56,15 +47,14 @@ class SpotFirstPullbackService:
         if start_moscow is None:
             return []
         candles = self.history_service.load(
-            ticker,
-            class_code,
+            ticker, class_code,
             start_time=start_moscow.astimezone(timezone.utc),
             end_time=end_moscow.astimezone(timezone.utc),
             timeframe_minutes=self.TIMEFRAME_MINUTES,
         )
         result = []
         for candle in candles or []:
-            dt = self._to_moscow(self.history_service, candle.get("time"))
+            dt = self.history_service.to_moscow(candle.get("time"))
             if dt is None or not (start_moscow.time() <= dt.time() < end_moscow.time()):
                 continue
             if self._float(candle.get("close")) <= 0:
@@ -72,51 +62,45 @@ class SpotFirstPullbackService:
             if self._float(candle.get("high")) < self._float(candle.get("low")):
                 continue
             result.append(candle)
-        result.sort(key=lambda item: self._to_moscow(self.history_service, item.get("time")) or datetime.min.replace(tzinfo=self.history_service.MOSCOW_TZ))
+        result.sort(key=lambda item: self.history_service.to_moscow(item.get("time")) or datetime.min.replace(tzinfo=self.history_service.MOSCOW_TZ))
         return result
 
-    def _empty(self, direction="NONE", reason="NO_SETUP"):
+    @staticmethod
+    def _empty(direction="NONE", reason="NO_SETUP"):
         return {
-            "setup": "NONE",
-            "setup_direction": direction,
-            "setup_state": "WAIT",
-            "setup_phase": reason,
-            "setup_quality_score": 0.0,
-            "impulse_percent": 0.0,
-            "retracement_percent": 0.0,
-            "retracement_ratio": 0.0,
-            "consolidation_candles": 0,
-            "entry_trigger": 0.0,
-            "previous_high": 0.0,
-            "previous_low": 0.0,
-            "impulse_high": 0.0,
-            "impulse_low": 0.0,
+            "setup": "NONE", "setup_direction": direction, "setup_state": "WAIT",
+            "setup_phase": reason, "setup_quality_score": 0.0,
+            "impulse_percent": 0.0, "retracement_percent": 0.0, "retracement_ratio": 0.0,
+            "consolidation_candles": 0, "entry_trigger": 0.0,
+            "previous_high": 0.0, "previous_low": 0.0,
+            "impulse_high": 0.0, "impulse_low": 0.0,
         }
 
-    def _result(self, direction, setup, state, phase, quality, impulse_percent,
-                retracement_percent, consolidation_candles, trigger, high, low,
-                impulse_high, impulse_low):
+    def _result(self, direction, state, phase, quality, impulse_percent, retracement_percent,
+                consolidation, trigger, high, low, impulse_high, impulse_low):
         return {
-            "setup": setup,
-            "setup_direction": direction,
-            "setup_state": state,
-            "setup_phase": phase,
+            "setup": "FIRST_PULLBACK" if direction == "LONG" else "FIRST_REBOUND",
+            "setup_direction": direction, "setup_state": state, "setup_phase": phase,
             "setup_quality_score": round(max(0.0, min(100.0, quality)), 1),
             "impulse_percent": round(impulse_percent, 3),
             "retracement_percent": round(retracement_percent, 3),
             "retracement_ratio": round(retracement_percent / 100.0, 3),
-            "consolidation_candles": consolidation_candles,
+            "consolidation_candles": consolidation,
             "entry_trigger": round(trigger, 8),
-            "previous_high": round(high, 8),
-            "previous_low": round(low, 8),
-            "impulse_high": round(impulse_high, 8),
-            "impulse_low": round(impulse_low, 8),
+            "previous_high": round(high, 8), "previous_low": round(low, 8),
+            "impulse_high": round(impulse_high, 8), "impulse_low": round(impulse_low, 8),
         }
+
+    def _quality(self, impulse_percent, retracement, consolidation):
+        score = 55.0
+        score += max(0.0, 20.0 - abs(retracement - 50.0) * 0.7)
+        score += min(15.0, abs(impulse_percent) * 8.0)
+        score += min(10.0, consolidation * 2.0)
+        return score
 
     def _detect_long(self, candles):
         if len(candles) < self.MIN_IMPULSE_CANDLES + 2:
             return self._empty("LONG", "NOT_ENOUGH_CANDLES")
-
         for end in range(self.MIN_IMPULSE_CANDLES, len(candles)):
             start = end - self.MIN_IMPULSE_CANDLES
             impulse_open = self._float(candles[start].get("open"))
@@ -129,39 +113,32 @@ class SpotFirstPullbackService:
             if impulse_percent < self.MIN_IMPULSE_PERCENT:
                 continue
 
-            pullback_start = end
             pullback_low = self._float(candles[end].get("low"))
             pullback_high = self._float(candles[end].get("high"))
-            for p in range(pullback_start, min(len(candles), pullback_start + self.CONSOLIDATION_MAX_CANDLES + 2)):
+            consolidation = 0
+            for p in range(end, min(len(candles), end + self.CONSOLIDATION_MAX_CANDLES + 2)):
                 candle = candles[p]
-                close = self._float(candle.get("close"))
+                prior_high = pullback_high
                 pullback_low = min(pullback_low, self._float(candle.get("low")))
-                pullback_high = max(pullback_high, self._float(candle.get("high")))
                 retracement = (impulse_high - pullback_low) / max(impulse_high - impulse_low, 1e-12) * 100.0
-                if retracement < self.RETRACEMENT_MIN * 100:
-                    continue
                 if retracement > self.RETRACEMENT_MAX * 100:
                     break
-
-                consolidation = p - pullback_start + 1
-                quality = 55.0
-                quality += max(0.0, 20.0 - abs(retracement - self.RETRACEMENT_IDEAL * 100.0) * 0.7)
-                quality += min(15.0, impulse_percent * 8.0)
-                quality += min(10.0, consolidation * 2.0)
-
-                if close > pullback_high and p > pullback_start:
-                    return self._result("LONG", "FIRST_PULLBACK", "CONFIRMED", "BREAKOUT_AFTER_PULLBACK", quality + 8, impulse_percent, retracement, consolidation, pullback_high, pullback_high, pullback_low, impulse_high, impulse_low)
-
+                if retracement < self.RETRACEMENT_MIN * 100:
+                    pullback_high = max(pullback_high, self._float(candle.get("high")))
+                    continue
+                consolidation += 1
+                quality = self._quality(impulse_percent, retracement, consolidation)
+                close = self._float(candle.get("close"))
+                if p > end and close > prior_high:
+                    return self._result("LONG", "CONFIRMED", "BREAKOUT_AFTER_PULLBACK", quality + 8, impulse_percent, retracement, consolidation, prior_high, prior_high, pullback_low, impulse_high, impulse_low)
                 if consolidation >= 2:
-                    return self._result("LONG", "FIRST_PULLBACK", "WATCH", "PULLBACK_CONSOLIDATION", quality, impulse_percent, retracement, consolidation, pullback_high, pullback_high, pullback_low, impulse_high, impulse_low)
-
-                return self._result("LONG", "FIRST_PULLBACK", "WATCH", "FIRST_PULLBACK", quality, impulse_percent, retracement, consolidation, pullback_high, pullback_high, pullback_low, impulse_high, impulse_low)
+                    return self._result("LONG", "WATCH", "PULLBACK_CONSOLIDATION", quality, impulse_percent, retracement, consolidation, prior_high, prior_high, pullback_low, impulse_high, impulse_low)
+                pullback_high = max(pullback_high, self._float(candle.get("high")))
         return self._empty("LONG")
 
     def _detect_short(self, candles):
         if len(candles) < self.MIN_IMPULSE_CANDLES + 2:
             return self._empty("SHORT", "NOT_ENOUGH_CANDLES")
-
         for end in range(self.MIN_IMPULSE_CANDLES, len(candles)):
             start = end - self.MIN_IMPULSE_CANDLES
             impulse_open = self._float(candles[start].get("open"))
@@ -174,33 +151,27 @@ class SpotFirstPullbackService:
             if impulse_percent > -self.MIN_IMPULSE_PERCENT:
                 continue
 
-            rebound_start = end
             rebound_high = self._float(candles[end].get("high"))
             rebound_low = self._float(candles[end].get("low"))
-            for p in range(rebound_start, min(len(candles), rebound_start + self.CONSOLIDATION_MAX_CANDLES + 2)):
+            consolidation = 0
+            for p in range(end, min(len(candles), end + self.CONSOLIDATION_MAX_CANDLES + 2)):
                 candle = candles[p]
-                close = self._float(candle.get("close"))
+                prior_low = rebound_low
                 rebound_high = max(rebound_high, self._float(candle.get("high")))
-                rebound_low = min(rebound_low, self._float(candle.get("low")))
                 retracement = (rebound_high - impulse_low) / max(impulse_high - impulse_low, 1e-12) * 100.0
-                if retracement < self.RETRACEMENT_MIN * 100:
-                    continue
                 if retracement > self.RETRACEMENT_MAX * 100:
                     break
-
-                consolidation = p - rebound_start + 1
-                quality = 55.0
-                quality += max(0.0, 20.0 - abs(retracement - self.RETRACEMENT_IDEAL * 100.0) * 0.7)
-                quality += min(15.0, abs(impulse_percent) * 8.0)
-                quality += min(10.0, consolidation * 2.0)
-
-                if close < rebound_low and p > rebound_start:
-                    return self._result("SHORT", "FIRST_REBOUND", "CONFIRMED", "BREAKDOWN_AFTER_REBOUND", quality + 8, impulse_percent, retracement, consolidation, rebound_low, rebound_high, rebound_low, impulse_high, impulse_low)
-
+                if retracement < self.RETRACEMENT_MIN * 100:
+                    rebound_low = min(rebound_low, self._float(candle.get("low")))
+                    continue
+                consolidation += 1
+                quality = self._quality(impulse_percent, retracement, consolidation)
+                close = self._float(candle.get("close"))
+                if p > end and close < prior_low:
+                    return self._result("SHORT", "CONFIRMED", "BREAKDOWN_AFTER_REBOUND", quality + 8, impulse_percent, retracement, consolidation, prior_low, rebound_high, prior_low, impulse_high, impulse_low)
                 if consolidation >= 2:
-                    return self._result("SHORT", "FIRST_REBOUND", "WATCH", "REBOUND_CONSOLIDATION", quality, impulse_percent, retracement, consolidation, rebound_low, rebound_high, rebound_low, impulse_high, impulse_low)
-
-                return self._result("SHORT", "FIRST_REBOUND", "WATCH", "FIRST_REBOUND", quality, impulse_percent, retracement, consolidation, rebound_low, rebound_high, rebound_low, impulse_high, impulse_low)
+                    return self._result("SHORT", "WATCH", "REBOUND_CONSOLIDATION", quality, impulse_percent, retracement, consolidation, prior_low, rebound_high, prior_low, impulse_high, impulse_low)
+                rebound_low = min(rebound_low, self._float(candle.get("low")))
         return self._empty("SHORT")
 
     def analyze(self, ticker, class_code, direction=None, session=None, trading_date=None):
