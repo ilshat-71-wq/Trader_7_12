@@ -19,13 +19,6 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from market.market_loader import MarketLoader
-
-# Compatibility bridge: QPainter belongs to QtGui, while the current UI
-# imports it from QtCore. Keep the UI launchable without changing its design.
-from PySide6 import QtCore
-from PySide6.QtGui import QPainter
-QtCore.QPainter = QPainter
-
 from ui import TraderWindow
 
 
