@@ -14,9 +14,21 @@ Trader_7_12 Pro is a scanner/trading assistant for intraday MOEX futures.
 
 **The user trades ONLY futures.** SPOT is analyzed first to answer:
 
-> Which target SPOT asset has the most meaningful money/activity today, and which corresponding FUTURES contract should be traded/confirmed?
+> Which target SPOT asset has the most meaningful money/activity and structure, and which corresponding FUTURES contract is the practical instrument to watch/trade?
 
 The scanner never places orders. The user makes the final decision on entry, size, risk, SL/TP and execution.
+
+## CORE ARCHITECTURE — SPOT IDEA → FUTURES IMPLEMENTATION
+
+This distinction is mandatory and must not be lost:
+
+**SPOT creates the trade idea → FUTURES provides the tradable implementation.**
+
+The scanner analyzes the SPOT asset first. The user trades the corresponding futures contract.
+
+For example, if Sber SPOT makes an upward impulse and then forms a first pullback/consolidation, the scanner should recognize the SPOT structure and then present the corresponding liquid Sber futures contract as the trading instrument. The pullback/structure is NOT measured on the futures chart.
+
+The scanner is an analytical filter, not an automatic entry engine. The user personally watches the chart and controls the actual entry point.
 
 ## CANONICAL SELECTION RULE
 
@@ -24,7 +36,7 @@ The scanner must NOT start by ranking futures turnover.
 
 It must start from these target SPOT groups:
 
-1. `MOEX_STOCK` — Moscow Exchange stock `MOEX` / Moscow Exchange metadata;
+1. `MOEX_STOCK` — Moscow Exchange stock / stock metadata;
 2. `GAS` — natural gas SPOT;
 3. `OIL` — oil SPOT (Brent / crude oil metadata);
 4. `USD` — USD/RUB SPOT;
@@ -36,11 +48,30 @@ For each target group:
 
 `CURRENT SPOT PRICE × VOLUME`
 → `CURRENT SPOT MONEY LEADER`
+→ `SPOT STRUCTURE / STRENGTH`
 → `CORRESPONDING FUTURES`
 → `FUTURES LIQUIDITY / CONFIRMATION`
 → `TOP 2–3 FUTURES`
 
-Current SPOT money/activity has priority over historical futures turnover and radar score.
+Current SPOT money/activity and structure have priority over historical futures turnover and radar score.
+
+## SPOT STRUCTURE — CONTEXT, NOT AUTOMATIC ENTRY
+
+The next scanner evolution should recognize the user's preferred early setups on SPOT:
+
+### LONG context
+
+`SPOT impulse up → first pullback down → consolidation / stabilization → strength remains → corresponding FUTURES candidate`
+
+A pullback can be meaningful when it approaches a percentage retracement zone (for example around 50%) or a nearby structural level. The exact entry is deliberately left to the user.
+
+### SHORT context
+
+`SPOT impulse down → first rebound up → consolidation / stabilization → weakness remains → corresponding FUTURES candidate`
+
+An early rebound/return toward a structural level can be meaningful in the same way. Again, the scanner must not turn this into an automatic entry instruction.
+
+The concepts `FIRST_PULLBACK` and `FIRST_REBOUND` are therefore **SPOT structure labels**. They describe where the target asset is in its movement, not where the futures contract must be bought/sold.
 
 ## MONEY DEFINITION
 
@@ -58,13 +89,13 @@ After a SPOT leader is identified:
 - contracts with 3 or fewer calendar days to expiry are rejected;
 - if multiple expiries map to one SPOT, exactly one liquid futures contract survives;
 - futures turnover/confirmation is used to select the practical execution contract and validate the SPOT idea;
-- a futures contract with high turnover must not replace a stronger target-SPOT money leader.
+- a futures contract with high turnover must not replace a stronger target-SPOT money/structure leader.
 
 ## MARKET SESSIONS — CURRENT CHECKPOINT
 
 All application time is `Europe/Moscow` / MSK. UTC is used only as the technical BCS transport format.
 
-`Program/services/market_session_service.py` is now the single session clock:
+`Program/services/market_session_service.py` is the single session clock:
 
 - `06:50–07:00` — `PRE_OPEN`;
 - `07:00–10:00` — `MORNING`;
@@ -72,36 +103,33 @@ All application time is `Europe/Moscow` / MSK. UTC is used only as the technical
 - `19:00–23:50` — `EVENING`;
 - `23:50–06:50` — `CLOSED`.
 
-The UI now continuously displays:
+The UI displays the live Moscow date, time with seconds, current session and market-open state.
 
-- Moscow date;
-- Moscow time with seconds;
-- current session;
-- whether the market is open;
-- session-specific subtitle.
+The scanner pipeline is session-aware: it refuses to run in `PRE_OPEN`/`CLOSED` and attaches session metadata to candidates.
 
-The scanner pipeline is session-aware: it refuses to run in `PRE_OPEN`/`CLOSED` and attaches `market_session`, `market_session_label`, `market_date`, `market_time` and `market_timezone` to candidates.
+## UI / SCAN FEEDBACK — APPROVED DESIGN
 
-The evening/main scan is therefore no longer presented as a generic "morning" result. The next backend refinement is to make the SPOT setup/money window itself session-specific rather than only session-labelled.
+The current professional UI direction is approved:
 
-## UI / SCAN FEEDBACK
+- compact dark neutral professional palette;
+- live Moscow session header and clock;
+- one compact scan button;
+- during scanning the button itself changes/animates with a pleasant muted green/lime tone;
+- the large result area is replaced during scanning by an animated surreal **melting-clock visual inspired by Dali's "The Persistence of Memory"**, implemented as an original drawing rather than using a copied artwork;
+- when scanning finishes, the animation disappears and the analytical result returns to the large field;
+- LONG candidate text uses a pleasant soft green;
+- SHORT candidate text uses a pleasant soft red;
+- no duplicate "scanning" status lines;
+- no session countdown is required — the live MSK clock is sufficient;
+- results remain analytical/read-only.
 
-`Program/ui.py` now provides:
+The animation is deliberately only a scan-state visual. It does not change scanner logic.
 
-- live session header;
-- dynamic session subtitle;
-- background scan in a Qt worker thread;
-- animated purple scan-status line while BCS analysis is running;
-- explicit completion/error state;
-- current-session timestamp in the result;
-- fallback display for a zero `entry_trigger` using the relevant previous level;
-- read-only scanner presentation with no risk sizing or order execution.
-
-## IMPLEMENTED CHANGES — CURRENT CHECKPOINT
+## IMPLEMENTED BACKEND CHECKPOINT
 
 ### `Program/services/futures_morning_radar_service.py`
 
-- keeps the two nearest valid futures per mapped SPOT;
+- keeps valid futures mapped to each SPOT;
 - calculates SPOT current-session money once per unique SPOT;
 - stores `spot_money_volume`, `spot_average_daily_money`, `spot_money_ratio`;
 - sorts radar output with current SPOT money before radar score.
@@ -113,43 +141,46 @@ The evening/main scan is therefore no longer presented as a generic "morning" re
 - selects exactly one current-money leader per target group;
 - current SPOT money is the primary ranking dimension;
 - current/average money ratio is the first tie-breaker;
-- then radar/RS/setup/confirmation and futures liquidity provide quality ordering;
+- radar/RS/setup/confirmation and futures liquidity provide quality ordering;
 - keeps one most-liquid eligible futures contract per SPOT;
 - returns the final requested TOP 2–3 futures candidates.
+
+### `Program/services/session_money_volume_service.py`
+
+- calculates active-session SPOT money/volume metrics;
+- supports session-aware evening windows;
+- returns zero for closed sessions.
 
 ### `Program/services/market_session_service.py`
 
 - centralizes Moscow session boundaries;
 - converts timezone-aware UTC values to Moscow time;
-- exposes live `date`, `time`, `session`, `label`, `market_open` and session window metadata.
+- exposes live date/time/session/label/market-open metadata.
 
 ### `Program/services/morning_trading_pipeline_service.py`
 
-- version `0.5`;
+- session-aware scanner pipeline;
 - blocks scanning outside open futures sessions;
-- attaches live session metadata to every candidate;
-- keeps scanner-only architecture with no orders/risk/position sizing.
+- attaches live session metadata to candidates;
+- has an evening profile using confirmation and activity;
+- remains scanner-only with no orders/risk/position sizing.
 
-### Tests
+## TEST CHECKPOINT
 
-- `Program/test_futures_trade_candidate_service.py` — target-group/liquidity/expiry/confirmation regression coverage;
-- `Program/test_morning_trading_pipeline_service.py` — session metadata and scanner-only regression coverage;
-- `Program/test_market_session_service.py` — exact session boundary and UTC→MSK conversion tests.
+The following regression suites have recently passed:
 
-## IMPORTANT ARCHITECTURAL DISTINCTION
+- `Program/test_session_money_volume_service.py`
+- `Program/test_market_session_service.py`
+- `Program/test_morning_trading_pipeline_service.py`
+- `Program/test_futures_trade_candidate_service.py`
 
-`SPOT creates the trade idea → FUTURES provides the tradable implementation.`
+The tests cover session boundaries, UTC→MSK conversion, evening activity, target-SPOT selection, futures confirmation, liquidity, expiry filtering, ranking and scanner-only behavior.
 
-The user trades the futures contract, never the SPOT instrument.
-
-## RELATIVE STRENGTH
-
-RS is a context/ranking factor only. The canonical benchmark is `IMOEX2 / IRUS2` when genuinely available. Do not fabricate RS when the correct benchmark is unavailable.
-
-## BOUNDARIES
+## IMPORTANT BOUNDARIES
 
 Do not reintroduce:
 - automatic orders;
+- automatic entry commands;
 - position sizing;
 - risk management engine;
 - automatic SL/TP;
@@ -158,41 +189,72 @@ Do not reintroduce:
 
 Historical replay is read-only.
 
-## VERIFICATION / HANDOFF
+## NEXT SCANNER IMPROVEMENT
 
-The GitHub branch is synchronized with the user's local branch `agent/futures-expiry-liquidity` after the user's successful push.
+The next meaningful backend improvement is **SPOT-first structure recognition** without automatic entries:
 
-Recent session/UI commits on the same branch:
-- `46f3783a` — improve Moscow market session metadata;
-- `3751db15` — make radar UI session-aware and show animated scan state;
-- `0a486bbb` — make scanner pipeline session-aware;
-- `584177b3` — test session-aware scanner metadata;
-- `66b9f377` — add market-session boundary tests.
+1. detect a meaningful SPOT impulse;
+2. measure the first pullback / first rebound on SPOT;
+3. detect consolidation/stabilization near a retracement zone or nearby structural level;
+4. preserve SPOT relative strength versus the market benchmark;
+5. combine the SPOT setup with current-session money/activity;
+6. map the result to the most liquid valid futures contract;
+7. present the candidate as `READY`, `WATCH` or an equivalent analytical state;
+8. leave the exact entry decision to the user.
 
-Required local verification in the user's checkout:
+Do not measure the first pullback/rebound on the futures chart.
+
+Do not turn `FIRST_PULLBACK` / `FIRST_REBOUND` into automatic trade signals.
+
+Do not revert to futures-first ranking.
+
+## RECENT UI / SESSION CHECKPOINTS
+
+Recent branch work includes:
+
+- Moscow market-session metadata and live session clock;
+- session-aware radar UI;
+- animated scan-state visual;
+- compact professional UI;
+- session-aware scanner pipeline;
+- session money/volume analysis;
+- futures expiry/liquidity filtering;
+- target-SPOT money leadership.
+
+The UI also required a PySide6 compatibility fix: `QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`.
+
+## HANDOFF / VERIFICATION
+
+Local checkout:
 
 ```bash
 cd ~/Documents/Trader_7_12
-python3 -m py_compile Program/services/market_session_service.py Program/services/morning_trading_pipeline_service.py Program/services/futures_morning_radar_service.py Program/services/futures_trade_candidate_service.py Program/ui.py Program/main.py Program/test_market_session_service.py Program/test_morning_trading_pipeline_service.py
+git pull
+
+python3 -m py_compile \
+Program/services/market_session_service.py \
+Program/services/session_money_volume_service.py \
+Program/services/morning_trading_pipeline_service.py \
+Program/services/futures_morning_radar_service.py \
+Program/services/futures_trade_candidate_service.py \
+Program/ui.py \
+Program/main.py \
+Program/test_session_money_volume_service.py \
+Program/test_market_session_service.py \
+Program/test_morning_trading_pipeline_service.py
+
+python3 Program/test_session_money_volume_service.py
 python3 Program/test_market_session_service.py
 python3 Program/test_morning_trading_pipeline_service.py
 python3 Program/test_futures_trade_candidate_service.py
-git status -sb
-git log -6 --oneline
+
+PYTHONPATH="$PWD/Program" python3 Program/main.py
 ```
 
-Then run the live scanner. The UI must show the actual Moscow session and time. During a scan the purple status line must visibly animate. A scan during `MAIN` or `EVENING` must not be labelled as a morning scan.
+During a live scan the large field must show the animated clock visual. When the scan ends, the visual disappears and the analytical result returns. LONG/SHORT result text should use the approved soft green/soft red colors.
 
-## NEXT ACTION
+## CANONICAL PRINCIPLE TO PRESERVE
 
-After local verification, the next scanner improvement is **true session-specific market analysis**:
+**The scanner finds where to look. The user decides where to enter.**
 
-1. use `07:00–10:00` data for `MORNING`;
-2. use `10:00–19:00` data for `MAIN`;
-3. use `19:00–23:50` data for `EVENING`;
-4. keep daily trend/RS based only on completed daily candles;
-5. calculate current-session SPOT money and setup from the active session window;
-6. keep futures confirmation aligned with the same active session;
-7. compare session-aware replay results before changing ranking weights.
-
-Do not revert to futures-first ranking and do not reintroduce risk/order layers.
+**SPOT determines the idea and structure. FUTURES is what the user trades.**
