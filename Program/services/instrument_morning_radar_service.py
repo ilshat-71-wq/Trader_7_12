@@ -9,14 +9,14 @@ Instrument Morning Radar Service
 - единый spot-first Morning Radar для выбранных ликвидных акций;
 - дневной тренд по завершённым D-свечам;
 - средний дневной денежный оборот;
-- Relative Strength относительно IMOEXF/SPBFUT;
+- Relative Strength относительно IMOEX2/IRUS2;
 - единый предварительный radar score;
 - определение первого утреннего setup;
 - подготовка результата для следующего этапа scanner.
 
 Архитектурные правила:
 
-1. Главный benchmark: IMOEXF / SPBFUT.
+1. Главный benchmark: IMOEX2 / IRUS2, class code определяется динамически через BCS.
 2. RS не смешивается с Radar Score на этом этапе.
 3. Текущий незавершённый торговый день не участвует
    в дневном тренде и Relative Strength.
@@ -49,8 +49,7 @@ class InstrumentMorningRadarService:
         "YDEX": "SPBRU",
     }
 
-    BENCHMARK_TICKER = "IMOEXF"
-    BENCHMARK_CLASS_CODE = "SPBFUT"
+    BENCHMARK_TICKERS = ("IMOEX2", "IRUS2")
 
     MORNING_TIMEFRAME_MINUTES = 5
     MIN_IMPULSE_CANDLES = 2
@@ -72,19 +71,95 @@ class InstrumentMorningRadarService:
         if self._benchmark_candles is not None:
             return self._benchmark_candles
 
+        api = self.history_service.trade_service.api
+        records = []
+
+        try:
+            records = api.get_instruments("INDICES")
+        except Exception:
+            records = []
+
+        def resolve(items):
+            for ticker in self.BENCHMARK_TICKERS:
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    item_ticker = str(
+                        item.get("ticker") or ""
+                    ).strip().upper()
+
+                    if item_ticker != ticker:
+                        continue
+
+                    class_code = str(
+                        item.get("classCode") or ""
+                    ).strip()
+
+                    if not class_code:
+                        for board in item.get("boards") or []:
+                            if not isinstance(board, dict):
+                                continue
+                            class_code = str(
+                                board.get("classCode") or ""
+                            ).strip()
+                            if class_code:
+                                break
+
+                    if class_code:
+                        return ticker, class_code
+
+            return None
+
+        resolved = resolve(records)
+
+        if resolved is None:
+            lookup = getattr(
+                api,
+                "get_instruments_by_tickers",
+                None
+            )
+
+            if callable(lookup):
+                try:
+                    records = lookup(
+                        list(self.BENCHMARK_TICKERS)
+                    )
+                except Exception:
+                    records = []
+
+                if isinstance(records, list):
+                    resolved = resolve(records)
+
+        if resolved is None:
+            print(
+                "❌ IMOEX2/IRUS2 benchmark unavailable"
+            )
+            self._benchmark_candles = []
+            return self._benchmark_candles
+
+        ticker, class_code = resolved
+
         try:
             candles = self.history_service.load_daily(
-                self.BENCHMARK_TICKER,
-                self.BENCHMARK_CLASS_CODE
+                ticker,
+                class_code
             )
         except Exception as exc:
-            print("❌ IMOEXF benchmark error:", exc)
+            print(
+                "❌ benchmark error:",
+                ticker,
+                class_code,
+                exc
+            )
             candles = []
 
         if not isinstance(candles, list):
             candles = []
 
         self._benchmark_candles = candles
+        self._benchmark_name = f"{ticker}/{class_code}"
+
         return candles
 
     # ---------------------------------------------------------
@@ -170,15 +245,14 @@ class InstrumentMorningRadarService:
         )
 
         benchmark_name = (
-            f"{self.BENCHMARK_TICKER}/"
-            f"{self.BENCHMARK_CLASS_CODE}"
+            getattr(self, "_benchmark_name", "IMOEX2/IRUS2")
         )
 
         if len(common_dates) < 2:
             return {
                 "status": "NO_DATA",
                 "error": (
-                    "Not enough common daily candles with IMOEXF"
+                    "Not enough common daily candles with IMOEX2/IRUS2"
                 ),
                 "relative_strength": 0.0,
                 "relative_strength_score": 50.0,
@@ -1143,7 +1217,7 @@ class InstrumentMorningRadarService:
 
             "relative_strength_benchmark": relative_strength.get(
                 "benchmark",
-                "IMOEXF/SPBFUT"
+                "IMOEX2/IRUS2"
             ),
         }
 
@@ -1251,8 +1325,7 @@ class InstrumentMorningRadarService:
         print()
         print(
             "RS benchmark:",
-            f"{self.BENCHMARK_TICKER}/"
-            f"{self.BENCHMARK_CLASS_CODE}"
+            getattr(self, "_benchmark_name", "IMOEX2/IRUS2")
         )
         print(
             "M5 money volume: "

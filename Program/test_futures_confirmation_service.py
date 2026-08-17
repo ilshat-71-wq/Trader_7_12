@@ -3,7 +3,7 @@
 from services.futures_confirmation_service import FuturesConfirmationService
 
 
-def make_trades(count=20, start=100.0, step=0.5, volume=1000):
+def make_trades(count=20, start=100.0, step=0.5, volume=100_000):
     return [
         {
             "price": start + index * step,

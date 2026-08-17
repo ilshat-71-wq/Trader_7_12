@@ -20,11 +20,19 @@ class HistoricalUniverseReplayService:
     RS_LOOKBACK_DAYS = 3
     RS_TICKERS = ("IMOEX2", "IRUS2")
 
-    def __init__(self, mapping_service=None, history_service=None, replay_service=None):
+    def __init__(
+        self,
+        mapping_service=None,
+        history_service=None,
+        replay_service=None,
+        radar_helper=None,
+    ):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
         self.history_service = history_service or HistoryCandleService()
-        self.replay_service = replay_service or MorningReplayService(history_service=self.history_service)
-        self.radar_helper = MorningRadarService()
+        self.replay_service = replay_service or MorningReplayService(
+            history_service=self.history_service
+        )
+        self.radar_helper = radar_helper or MorningRadarService()
 
     @staticmethod
     def _as_date(value):

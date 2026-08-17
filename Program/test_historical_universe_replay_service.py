@@ -5,6 +5,18 @@ class FakeHistoryService:
     MOSCOW_TZ = None
 
 
+class FakeReplayService:
+    MOSCOW_TZ = None
+
+
+class FakeRadarHelper:
+    def calculate_daily_trend(self, daily):
+        return {
+            "direction": "LONG",
+            "trend_days": 3,
+        }
+
+
 class FakeMappingService:
     def __init__(self, mappings):
         self.mappings = mappings
@@ -79,7 +91,8 @@ def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
     service = HistoricalUniverseReplayService(
         mapping_service=FakeMappingService(mappings),
         history_service=FakeHistoryService(),
-        replay_service=None,
+        replay_service=FakeReplayService(),
+        radar_helper=FakeRadarHelper(),
     )
 
     selected = service.load_mappings_for_date("2026-08-14")
@@ -153,3 +166,28 @@ def test_candidate_rank_prefers_early_confirmation_over_late():
 
     assert service._candidate_rank(early) > service._candidate_rank(late)
 
+
+
+if __name__ == "__main__":
+    tests = [
+        test_selects_most_liquid_remaining_contract,
+        test_skips_contract_with_three_days_to_expiry_and_uses_next,
+        test_skips_contract_with_two_days_to_expiry,
+        test_expired_nearest_contract_is_removed_before_taking_two_nearest,
+        test_candidate_rank_prefers_earlier_confirmation_time,
+        test_candidate_rank_prefers_earlier_ready_time_when_confirmation_matches,
+        test_confirmation_window_classification,
+        test_candidate_rank_prefers_early_confirmation_over_late,
+    ]
+
+    print("=" * 76)
+    print("TRADER_7_12 PRO - HISTORICAL UNIVERSE REPLAY TEST")
+    print("=" * 76)
+
+    for test in tests:
+        test()
+        print("PASS", test.__name__)
+
+    print()
+    print("ALL TESTS PASSED")
+    print("=" * 76)

@@ -98,7 +98,7 @@ def test_relative_strength():
     assert_equal(result["current_date"], "2026-08-12", "RS current date")
     assert_equal(
         result["benchmark"],
-        "IMOEXF/SPBFUT",
+        "IMOEX2/IRUS2",
         "RS benchmark"
     )
 

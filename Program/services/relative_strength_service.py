@@ -6,7 +6,7 @@ Relative Strength Service v0.1
 Назначение:
 
 - сравнение доходности инструмента с benchmark
-- benchmark: IMOEXF — ближайший фьючерс на индекс Мосбиржи
+- benchmark: IMOEX2 / IRUS2 — динамически определяемый рыночный индекс
 - подготовка Relative Strength для VolumeScanner
 
 Формула:

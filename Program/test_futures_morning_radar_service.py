@@ -6,7 +6,7 @@ Tests for FuturesMorningRadarService.
 The tests are offline and do not require BCS authorization.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
 
@@ -44,6 +44,7 @@ class FakeRadarService:
                 "direction": "LONG",
                 "radar_score": 78.0,
                 "relative_strength": 0.031,
+                "average_daily_money": 10_000_000_000,
                 "signal": "LONG_WATCH",
             },
             "LKOH": {
@@ -52,16 +53,38 @@ class FakeRadarService:
                 "direction": "SHORT",
                 "radar_score": 61.0,
                 "relative_strength": -0.012,
+                "average_daily_money": 10_000_000_000,
                 "signal": "SHORT_WATCH",
             },
         }
         return data[ticker]
 
 
+
+class FakeHistoryService:
+    """Offline history stub for FuturesMorningRadarService tests."""
+
+    def now(self):
+        return datetime(2026, 8, 17, 10, 0, 0)
+
+    def calculate_morning_money_volume(
+        self,
+        ticker,
+        class_code,
+        trading_date=None,
+        timeframe_minutes=5,
+    ):
+        return {
+            "SBER": 2_000_000_000,
+            "LKOH": 1_000_000_000,
+        }.get(ticker, 0.0)
+
+
 def test_pipeline_maps_futures_to_spot_and_radar():
     service = FuturesMorningRadarService(
         mapping_service=FakeMappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
@@ -78,6 +101,7 @@ def test_pipeline_sorts_by_radar_score():
     service = FuturesMorningRadarService(
         mapping_service=FakeMappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
@@ -90,6 +114,7 @@ def test_pipeline_limit():
     service = FuturesMorningRadarService(
         mapping_service=FakeMappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan(limit=1)
@@ -116,6 +141,7 @@ def test_pipeline_skips_invalid_mapping():
     service = FuturesMorningRadarService(
         mapping_service=InvalidMappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
@@ -134,6 +160,7 @@ def test_pipeline_keeps_radar_errors_without_stopping_scan():
     service = FuturesMorningRadarService(
         mapping_service=FakeMappingService(),
         radar_service=ErrorRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
@@ -193,6 +220,7 @@ def test_pipeline_keeps_two_nearest_contracts_per_spot():
     service = FuturesMorningRadarService(
         mapping_service=MappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
@@ -238,6 +266,7 @@ def test_pipeline_skips_expired_contracts():
     service = FuturesMorningRadarService(
         mapping_service=MappingService(),
         radar_service=FakeRadarService(),
+        history_service=FakeHistoryService(),
     )
 
     results = service.scan()
