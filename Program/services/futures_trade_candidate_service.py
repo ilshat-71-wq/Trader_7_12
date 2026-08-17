@@ -6,13 +6,20 @@ Futures Trade Candidate Service.
 Stage 5 of the Spot-first architecture.
 
 Purpose:
-- identify the most active/current-money SPOT leaders first;
-- confirm the corresponding futures contract for those SPOT leaders;
+- identify today's money leaders inside the five target SPOT groups;
+- confirm the corresponding futures contract;
 - reject blocked futures confirmations;
 - reject contracts with 3 or fewer calendar days to expiry;
 - keep exactly one, most-liquid futures contract per SPOT;
 - rank the surviving candidates without allowing futures turnover to replace
   the SPOT-first selection principle.
+
+Target SPOT groups:
+- Moscow Exchange stock;
+- gas;
+- oil;
+- USD/RUB;
+- gold.
 
 The trading instrument is always the futures contract. The SPOT is the
 source of market-interest/liquidity selection. The service does not place
@@ -25,9 +32,17 @@ from datetime import date
 class FuturesTradeCandidateService:
     """Build and rank final morning scanner candidates."""
 
-    VERSION = "0.5"
+    VERSION = "0.6"
     MAX_DAYS_TO_EXPIRY = 3
-    MONEY_LEADER_SHORTLIST = 10
+    MONEY_LEADER_SHORTLIST = 5
+
+    TARGET_SPOT_GROUPS = (
+        "MOEX_STOCK",
+        "GAS",
+        "OIL",
+        "USD",
+        "GOLD",
+    )
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -43,12 +58,10 @@ class FuturesTradeCandidateService:
     def _expiry_is_eligible(cls, expiry):
         if not expiry:
             return True
-
         try:
             expiry_date = date.fromisoformat(str(expiry)[:10])
         except ValueError:
             return False
-
         days_to_expiry = (expiry_date - date.today()).days
         return days_to_expiry > cls.MAX_DAYS_TO_EXPIRY
 
@@ -57,13 +70,76 @@ class FuturesTradeCandidateService:
         direction = str(radar.get("direction") or "").upper()
         if direction in {"LONG", "SHORT"}:
             return direction
-
         signal = str(radar.get("signal") or "").upper()
         if "LONG" in signal:
             return "LONG"
         if "SHORT" in signal:
             return "SHORT"
         return "NONE"
+
+    @classmethod
+    def _spot_group(cls, item):
+        """Classify only the five canonical SPOT target groups."""
+        explicit = str(item.get("spot_group") or "").strip().upper()
+        if explicit in cls.TARGET_SPOT_GROUPS:
+            return explicit
+
+        ticker = str(item.get("spot_ticker") or "").strip().upper()
+        name = str(item.get("spot_name") or "").strip().upper()
+        spot_type = str(item.get("spot_type") or "").strip().upper()
+        text = f"{ticker} {name}"
+
+        if (
+            ticker == "MOEX"
+            or "MOSCOW EXCHANGE" in text
+            or "МОСКОВСКАЯ БИРЖА" in text
+        ):
+            return "MOEX_STOCK"
+
+        commodity_types = {
+            "GOODS",
+            "COMMODITY",
+            "COMMODITIES",
+            "METALS",
+        }
+        is_commodity = spot_type in commodity_types or not spot_type
+        is_currency = spot_type in {"CURRENCY", "FX", "CURRENCIES"} or not spot_type
+
+        if is_commodity and (
+            ticker in {"NG", "NGM"}
+            or "NATURAL GAS" in text
+            or "NATURALGAS" in text
+            or "ПРИРОДНЫЙ ГАЗ" in text
+        ):
+            return "GAS"
+
+        if is_commodity and (
+            ticker in {"BR", "BRM", "CL", "WTI"}
+            or "BRENT" in text
+            or "CRUDE OIL" in text
+            or "LIGHT SWEET CRUDE" in text
+            or "НЕФТЬ" in text
+        ):
+            return "OIL"
+
+        if is_currency and (
+            ticker in {"SI", "USDRUB", "USD"}
+            or "USD/RUB" in text
+            or "USDRUB" in text
+            or "USD RUB" in text
+            or "ДОЛЛАР" in text
+        ):
+            return "USD"
+
+        if is_commodity and (
+            ticker in {"GOLD", "GLD", "GD"}
+            or "GOLD" in text
+            or "GOLD/RUB" in text
+            or "ЗОЛОТ" in text
+        ):
+            return "GOLD"
+
+        return None
 
     @classmethod
     def calculate_score(cls, radar, confirmation):
@@ -76,7 +152,6 @@ class FuturesTradeCandidateService:
 
         direction = cls._direction(radar)
         rs = cls._float(radar.get("relative_strength"))
-
         directional_rs = rs if direction == "LONG" else -rs
 
         if directional_rs > 0:
@@ -102,23 +177,11 @@ class FuturesTradeCandidateService:
         else:
             futures_change_bonus = 0.0
 
-        money_volume = cls._float(
-            confirmation.get("money_volume", radar.get("spot_money_volume"))
-        )
-        liquidity_bonus = 0.0
-        if money_volume >= 100_000_000:
-            liquidity_bonus = 10.0
-        elif money_volume >= 10_000_000:
-            liquidity_bonus = 6.0
-        elif money_volume >= 1_000_000:
-            liquidity_bonus = 3.0
-
         score = (
             radar_score * 0.60
             + confirmation_score * 0.30
             + rs_bonus
             + futures_change_bonus
-            + liquidity_bonus
         )
         return round(min(score, 100.0), 2)
 
@@ -144,21 +207,29 @@ class FuturesTradeCandidateService:
         if confirmed_direction != direction:
             return None
 
+        spot_group = cls._spot_group(radar)
+        if spot_group is None:
+            return None
+
         score = cls.calculate_score(radar, confirmation)
 
         return {
             "version": cls.VERSION,
             "status": "READY",
             "direction": direction,
+            "spot_group": spot_group,
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
             "futures_price": cls._float(confirmation.get("last_price")),
             "spot_ticker": radar.get("spot_ticker"),
             "spot_class_code": radar.get("spot_class_code"),
+            "spot_name": radar.get("spot_name", ""),
+            "spot_type": radar.get("spot_type", ""),
             "spot_price": cls._float(radar.get("spot_price", radar.get("last_close"))),
-            "spot_money_volume": cls._float(radar.get("spot_money_volume", radar.get("average_daily_money"))),
+            "spot_money_volume": cls._float(radar.get("spot_money_volume")),
             "spot_average_daily_money": cls._float(radar.get("average_daily_money")),
+            "spot_money_ratio": cls._float(radar.get("spot_money_ratio")),
             "spot_change_percent": cls._float(radar.get("change_percent")),
             "trend_state": radar.get("trend_state", "UNKNOWN"),
             "trend_days": int(cls._float(radar.get("trend_days"))),
@@ -181,59 +252,50 @@ class FuturesTradeCandidateService:
             "candidate_score": score,
         }
 
-    @staticmethod
-    def _spot_money(candidate):
-        return FuturesTradeCandidateService._float(
-            candidate.get("spot_money_volume")
-        )
-
     @classmethod
-    def _select_money_leader_radars(cls, radar_results, limit):
-        """Select current-money SPOT leaders before futures confirmation.
-
-        One SPOT is represented once. Current SPOT money is the primary
-        discovery signal; radar score is only a deterministic tie-breaker.
-        This prevents several futures expiries of the same SPOT from
-        consuming the money-leader shortlist.
-        """
-        grouped = {}
+    def _select_money_leader_radars(cls, radar_results):
+        """Select one current-money SPOT leader inside each target group."""
+        grouped = {group: [] for group in cls.TARGET_SPOT_GROUPS}
 
         for radar in radar_results:
             if not isinstance(radar, dict):
                 continue
-
-            spot_ticker = str(
-                radar.get("spot_ticker") or ""
-            ).strip().upper()
-            if not spot_ticker:
+            group = cls._spot_group(radar)
+            if group is None:
                 continue
-
-            grouped.setdefault(spot_ticker, []).append(radar)
+            grouped[group].append(radar)
 
         leaders = []
-        for spot_radars in grouped.values():
-            spot_radars.sort(
+        for group in cls.TARGET_SPOT_GROUPS:
+            candidates = grouped[group]
+            if not candidates:
+                continue
+
+            candidates.sort(
                 key=lambda item: (
                     cls._float(item.get("spot_money_volume")),
+                    cls._float(item.get("spot_money_ratio")),
                     cls._float(item.get("radar_score")),
                     cls._float(item.get("relative_strength")),
-                    str(item.get("futures_expiry") or "9999-12-31"),
+                    str(item.get("spot_ticker") or ""),
                 ),
                 reverse=True,
             )
-            leaders.append(spot_radars[0])
+            leader = dict(candidates[0])
+            leader["spot_group"] = group
+            leaders.append(leader)
 
         leaders.sort(
             key=lambda item: (
                 cls._float(item.get("spot_money_volume")),
+                cls._float(item.get("spot_money_ratio")),
                 cls._float(item.get("radar_score")),
-                cls._float(item.get("relative_strength")),
-                str(item.get("spot_ticker") or ""),
+                str(item.get("spot_group") or ""),
             ),
             reverse=True,
         )
 
-        return leaders[:limit]
+        return leaders
 
     @classmethod
     def _select_most_liquid_per_spot(cls, candidates):
@@ -264,7 +326,7 @@ class FuturesTradeCandidateService:
         return selected
 
     def rank(self, radar_results, confirmations=None, limit=3):
-        """Select money-leading SPOTs, confirm futures, then rank quality."""
+        """Select target SPOT money leaders, confirm futures, then rank."""
         if not isinstance(radar_results, list):
             return []
 
@@ -278,20 +340,10 @@ class FuturesTradeCandidateService:
             raise ValueError("limit must be >= 0")
 
         confirmation_map = confirmations or {}
-
-        # Do not start from the highest radar score. The user's trading
-        # workflow is SPOT-first: today's money/activity identifies where the
-        # market is concentrated, and only then do we inspect its futures.
-        radar_results = self._select_money_leader_radars(
-            radar_results,
-            max(self.MONEY_LEADER_SHORTLIST, limit),
-        )
+        radar_results = self._select_money_leader_radars(radar_results)
 
         candidates = []
         for radar in radar_results:
-            if not isinstance(radar, dict):
-                continue
-
             ticker = str(radar.get("futures_ticker") or "").strip().upper()
             confirmation = confirmation_map.get(ticker)
 
@@ -307,12 +359,10 @@ class FuturesTradeCandidateService:
                 candidates.append(candidate)
 
         candidates = self._select_most_liquid_per_spot(candidates)
-
-        # Current SPOT money is the primary ordering dimension. Quality,
-        # confirmation and radar metrics break ties among the money leaders.
         candidates.sort(
             key=lambda item: (
                 item["spot_money_volume"],
+                item["spot_money_ratio"],
                 item["candidate_score"],
                 item["confirmation_score"],
                 item["radar_score"],
