@@ -42,28 +42,38 @@ For each target group:
 
 `CURRENT SPOT PRICE × VOLUME`
 → `CURRENT SPOT MONEY LEADER`
-→ `SPOT STRUCTURE / STRENGTH`
+→ `SPOT IMPULSE / FIRST PULLBACK OR REBOUND`
+→ `SPOT CONSOLIDATION / STABILIZATION`
+→ `SPOT STRENGTH / WEAKNESS`
 → `CORRESPONDING FUTURES`
 → `FUTURES LIQUIDITY / CONFIRMATION`
 → `TOP 2–3 FUTURES`
 
 Current SPOT money/activity and structure have priority over historical futures turnover and radar score.
 
-## SPOT STRUCTURE — CONTEXT, NOT AUTOMATIC ENTRY
+## SPOT STRUCTURE — CURRENT IMPLEMENTATION
 
-The next scanner evolution should recognize the user's preferred early setups on SPOT.
+The scanner now has a dedicated `SpotFirstPullbackService`.
 
 ### LONG context
 
-`SPOT impulse up → first pullback down → consolidation / stabilization → strength remains → corresponding FUTURES candidate`
+`SPOT impulse up → first pullback down → 35–75% retracement zone → consolidation → strength remains → corresponding FUTURES candidate`
 
-A pullback can be meaningful when it approaches a retracement zone, for example around 50%, or a nearby structural level. The exact entry is deliberately left to the user.
+The ideal reference is approximately **50% retracement of the impulse range**, while nearby structural levels are also accepted by the broader 35–75% zone. This is a scanner context filter, not an automatic entry.
 
 ### SHORT context
 
-`SPOT impulse down → first rebound up → consolidation / stabilization → weakness remains → corresponding FUTURES candidate`
+`SPOT impulse down → first rebound up → 35–75% retracement zone → consolidation → weakness remains → corresponding FUTURES candidate`
 
-The concepts `FIRST_PULLBACK` and `FIRST_REBOUND` are SPOT structure labels. They describe where the target asset is in its movement, not where the futures contract must be bought/sold.
+The detector uses M5 SPOT candles from the **current Moscow trading session** (`MORNING`, `MAIN` or `EVENING`). It does not reuse the morning window after 10:00.
+
+### Setup states
+
+- `WATCH` — first pullback/rebound and stabilization are forming;
+- `CONFIRMED` — a later SPOT candle has broken the pullback/rebound confirmation level;
+- `WAIT` — no usable setup yet.
+
+The scanner exposes setup quality, impulse size, retracement percentage, consolidation candle count and structural levels. The exact user entry remains outside the application.
 
 ## MONEY DEFINITION
 
@@ -113,71 +123,60 @@ The animation is only a scan-state visual and does not change scanner logic.
 
 ## IMPLEMENTED BACKEND CHECKPOINT
 
+### `Program/services/spot_first_pullback_service.py`
+
+- new SPOT-first structure detector;
+- uses current `MORNING`, `MAIN` or `EVENING` session window;
+- detects directional M5 impulse;
+- detects first pullback for LONG and first rebound for SHORT;
+- accepts 35–75% retracement, with 50% as the quality center;
+- detects short consolidation/stabilization;
+- exposes `WATCH` / `CONFIRMED` state;
+- never produces orders or automatic entry commands.
+
 ### `Program/services/futures_morning_radar_service.py`
 
-- keeps valid futures mapped to each SPOT;
-- calculates SPOT current-session money once per unique SPOT;
-- stores `spot_money_volume`, `spot_average_daily_money`, `spot_money_ratio`;
-- sorts radar output with current SPOT money before radar score.
+- integrates the new SPOT setup detector;
+- setup is calculated once per unique SPOT mapping and reused across mapped futures;
+- final radar record carries setup phase, quality, impulse, retracement and consolidation metadata;
+- ranking now gives meaningful weight to SPOT setup quality while preserving current-session SPOT money/activity priority.
 
 ### `Program/services/futures_trade_candidate_service.py`
 
-- canonical target groups: MOEX stock, gas, oil, USD, gold;
-- rejects non-target SPOTs;
-- selects exactly one current-money leader per target group;
-- current SPOT money is primary ranking dimension;
-- current/average money ratio is first tie-breaker;
-- radar/RS/setup/confirmation and futures liquidity provide quality ordering;
-- keeps one most-liquid eligible futures contract per SPOT;
-- returns final TOP 2–3 futures candidates.
+- target groups remain MOEX stock, gas, oil, USD and gold;
+- setup quality participates in candidate scoring and final ordering;
+- `WATCH` and `CONFIRMED` setup states receive a controlled quality bonus;
+- SPOT remains the source of direction/structure;
+- FUTURES remains the tradable instrument.
 
-### `Program/services/session_money_volume_service.py`
+### Existing session/backend services
 
-- calculates active-session SPOT money/volume metrics;
-- supports session-aware evening windows;
-- returns zero for closed sessions.
-
-### `Program/services/market_session_service.py`
-
-- centralizes Moscow session boundaries;
-- converts timezone-aware UTC values to Moscow time;
-- exposes live date/time/session/label/market-open metadata.
-
-### `Program/services/morning_trading_pipeline_service.py`
-
-- session-aware scanner pipeline;
-- blocks scanning outside open futures sessions;
-- attaches live session metadata to candidates;
-- has an evening profile using confirmation and activity;
-- remains scanner-only with no orders/risk/position sizing.
+- `session_money_volume_service.py` — active-session SPOT money/activity;
+- `market_session_service.py` — Moscow session boundaries and live clock;
+- `morning_trading_pipeline_service.py` — session-aware pipeline;
+- `futures_trade_candidate_service.py` — futures confirmation/liquidity selection.
 
 ## TEST CHECKPOINT
 
-Recently passed regression suites:
+Regression suites previously passed:
 
 - `Program/test_session_money_volume_service.py`
 - `Program/test_market_session_service.py`
 - `Program/test_morning_trading_pipeline_service.py`
 - `Program/test_futures_trade_candidate_service.py`
 
+New structure tests:
+
+- `Program/test_spot_first_pullback_service.py`
+  - LONG pullback near the 50% reference zone;
+  - SHORT rebound structure;
+  - MAIN-session candle window selection.
+
 ## IMPORTANT BOUNDARIES
 
 Do not reintroduce automatic orders, automatic entry commands, position sizing, risk management, automatic SL/TP, portfolio management or automatic trade management.
 
 Historical replay is read-only.
-
-## NEXT SCANNER IMPROVEMENT
-
-Implement **SPOT-first structure recognition** without automatic entries:
-
-1. detect a meaningful SPOT impulse;
-2. measure the first pullback / first rebound on SPOT;
-3. detect consolidation/stabilization near a retracement zone or nearby structural level;
-4. preserve SPOT relative strength versus the market benchmark;
-5. combine the SPOT setup with current-session money/activity;
-6. map the result to the most liquid valid futures contract;
-7. present the candidate as an analytical state such as `READY` or `WATCH`;
-8. leave the exact entry decision to the user.
 
 Do not measure the first pullback/rebound on the futures chart. Do not turn `FIRST_PULLBACK` / `FIRST_REBOUND` into automatic trade signals. Do not revert to futures-first ranking.
 
@@ -191,6 +190,7 @@ Do not measure the first pullback/rebound on the futures chart. Do not turn `FIR
 cd ~/Documents/Trader_7_12
 git pull
 python3 -m py_compile \
+Program/services/spot_first_pullback_service.py \
 Program/services/market_session_service.py \
 Program/services/session_money_volume_service.py \
 Program/services/morning_trading_pipeline_service.py \
@@ -198,10 +198,12 @@ Program/services/futures_morning_radar_service.py \
 Program/services/futures_trade_candidate_service.py \
 Program/ui.py \
 Program/main.py \
+Program/test_spot_first_pullback_service.py \
 Program/test_session_money_volume_service.py \
 Program/test_market_session_service.py \
 Program/test_morning_trading_pipeline_service.py
 
+python3 Program/test_spot_first_pullback_service.py
 python3 Program/test_session_money_volume_service.py
 python3 Program/test_market_session_service.py
 python3 Program/test_morning_trading_pipeline_service.py
