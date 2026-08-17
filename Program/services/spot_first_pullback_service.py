@@ -1,17 +1,20 @@
-"""SPOT-first impulse -> first pullback/rebound -> consolidation detector."""
+"""SPOT-first impulse -> H1 structure -> first pullback/rebound detector."""
 
 from datetime import datetime, time, timezone
 
 
 class SpotFirstPullbackService:
-    VERSION = "0.2"
+    VERSION = "0.3"
     TIMEFRAME_MINUTES = 5
+    H1_TIMEFRAME_MINUTES = 60
+    H1_LOOKBACK_DAYS = 10
     MIN_IMPULSE_CANDLES = 2
     MIN_IMPULSE_PERCENT = 0.30
     RETRACEMENT_MIN = 0.35
     RETRACEMENT_IDEAL = 0.50
     RETRACEMENT_MAX = 0.75
     CONSOLIDATION_MAX_CANDLES = 5
+    H1_LEVEL_TOLERANCE_PERCENT = 0.80
 
     SESSION_WINDOWS = {
         "MORNING": (time(7, 0), time(10, 0)),
@@ -65,6 +68,94 @@ class SpotFirstPullbackService:
         result.sort(key=lambda item: self.history_service.to_moscow(item.get("time")) or datetime.min.replace(tzinfo=self.history_service.MOSCOW_TZ))
         return result
 
+    def load_h1_candles(self, ticker, class_code, trading_date=None):
+        """Load recent SPOT H1 candles used only for structural level context."""
+        trading_date = trading_date or self.session_service.get_trading_day()
+        if trading_date is None:
+            return []
+        tz = self.history_service.MOSCOW_TZ
+        start_moscow = datetime.combine(trading_date, time(0, 0), tzinfo=tz)
+        start_moscow = start_moscow.replace(day=max(1, start_moscow.day))
+        start_utc = start_moscow.astimezone(timezone.utc)
+        end_utc = self.history_service.now().astimezone(timezone.utc)
+        candles = self.history_service.load(
+            ticker, class_code,
+            start_time=start_utc,
+            end_time=end_utc,
+            timeframe_minutes=self.H1_TIMEFRAME_MINUTES,
+        )
+        result = []
+        for candle in candles or []:
+            dt = self.history_service.to_moscow(candle.get("time"))
+            high = self._float(candle.get("high"))
+            low = self._float(candle.get("low"))
+            close = self._float(candle.get("close"))
+            if dt is None or close <= 0 or high <= 0 or low <= 0 or high < low:
+                continue
+            result.append(candle)
+        result.sort(key=lambda item: self.history_service.to_moscow(item.get("time")) or datetime.min.replace(tzinfo=tz))
+        return result[-24 * self.H1_LOOKBACK_DAYS:]
+
+    def _h1_context(self, ticker, class_code, spot_price, trading_date=None):
+        """Find nearest H1 support/resistance around current SPOT price."""
+        price = self._float(spot_price)
+        empty = {
+            "h1_support": 0.0,
+            "h1_resistance": 0.0,
+            "h1_nearest_level": 0.0,
+            "h1_nearest_level_type": "NONE",
+            "h1_level_distance_percent": 0.0,
+            "h1_level_context": "UNAVAILABLE",
+            "h1_candle_count": 0,
+        }
+        if price <= 0:
+            return empty
+        try:
+            candles = self.load_h1_candles(ticker, class_code, trading_date=trading_date)
+        except Exception:
+            return empty
+        if not candles:
+            return empty
+
+        supports = []
+        resistances = []
+        for candle in candles:
+            high = self._float(candle.get("high"))
+            low = self._float(candle.get("low"))
+            if 0 < low <= price:
+                supports.append(low)
+            if high >= price:
+                resistances.append(high)
+
+        support = max(supports) if supports else 0.0
+        resistance = min(resistances) if resistances else 0.0
+        support_distance = ((price - support) / price * 100.0) if support else 999.0
+        resistance_distance = ((resistance - price) / price * 100.0) if resistance else 999.0
+
+        if support and support_distance <= resistance_distance:
+            nearest, level_type, distance = support, "SUPPORT", support_distance
+        elif resistance:
+            nearest, level_type, distance = resistance, "RESISTANCE", resistance_distance
+        else:
+            nearest, level_type, distance = 0.0, "NONE", 0.0
+
+        if level_type == "SUPPORT" and distance <= self.H1_LEVEL_TOLERANCE_PERCENT:
+            context = "NEAR_H1_SUPPORT"
+        elif level_type == "RESISTANCE" and distance <= self.H1_LEVEL_TOLERANCE_PERCENT:
+            context = "NEAR_H1_RESISTANCE"
+        else:
+            context = "BETWEEN_H1_LEVELS"
+
+        return {
+            "h1_support": round(support, 8),
+            "h1_resistance": round(resistance, 8),
+            "h1_nearest_level": round(nearest, 8),
+            "h1_nearest_level_type": level_type,
+            "h1_level_distance_percent": round(distance, 3) if distance < 999 else 0.0,
+            "h1_level_context": context,
+            "h1_candle_count": len(candles),
+        }
+
     @staticmethod
     def _empty(direction="NONE", reason="NO_SETUP"):
         return {
@@ -74,6 +165,10 @@ class SpotFirstPullbackService:
             "consolidation_candles": 0, "entry_trigger": 0.0,
             "previous_high": 0.0, "previous_low": 0.0,
             "impulse_high": 0.0, "impulse_low": 0.0,
+            "h1_support": 0.0, "h1_resistance": 0.0,
+            "h1_nearest_level": 0.0, "h1_nearest_level_type": "NONE",
+            "h1_level_distance_percent": 0.0, "h1_level_context": "UNAVAILABLE",
+            "h1_candle_count": 0, "h1_level_bonus": 0.0,
         }
 
     def _result(self, direction, state, phase, quality, impulse_percent, retracement_percent,
@@ -112,7 +207,6 @@ class SpotFirstPullbackService:
             impulse_percent = (impulse_close - impulse_open) / impulse_open * 100.0
             if impulse_percent < self.MIN_IMPULSE_PERCENT:
                 continue
-
             pullback_low = self._float(candles[end].get("low"))
             pullback_high = self._float(candles[end].get("high"))
             consolidation = 0
@@ -150,7 +244,6 @@ class SpotFirstPullbackService:
             impulse_percent = (impulse_close - impulse_open) / impulse_open * 100.0
             if impulse_percent > -self.MIN_IMPULSE_PERCENT:
                 continue
-
             rebound_high = self._float(candles[end].get("high"))
             rebound_low = self._float(candles[end].get("low"))
             consolidation = 0
@@ -174,15 +267,35 @@ class SpotFirstPullbackService:
                 rebound_low = min(rebound_low, self._float(candle.get("low")))
         return self._empty("SHORT")
 
-    def analyze(self, ticker, class_code, direction=None, session=None, trading_date=None):
+    def _apply_h1_context(self, result, h1_context, direction):
+        result.update(h1_context)
+        context = h1_context.get("h1_level_context", "UNAVAILABLE")
+        distance = self._float(h1_context.get("h1_level_distance_percent"))
+        bonus = 0.0
+        if direction == "LONG" and context == "NEAR_H1_SUPPORT":
+            bonus = max(0.0, 8.0 - distance * 4.0)
+        elif direction == "SHORT" and context == "NEAR_H1_RESISTANCE":
+            bonus = max(0.0, 8.0 - distance * 4.0)
+        if bonus:
+            result["setup_quality_score"] = round(min(100.0, self._float(result.get("setup_quality_score")) + bonus), 1)
+        result["h1_level_bonus"] = round(bonus, 1)
+        return result
+
+    def analyze(self, ticker, class_code, direction=None, session=None, trading_date=None, spot_price=None):
         session = session or self.session_service.get_session()
+        trading_date = trading_date or self.session_service.get_trading_day()
         direction = str(direction or "").upper()
         if direction not in {"LONG", "SHORT"}:
             return self._empty("NONE", "NO_DIRECTION")
         candles = self.load_session_candles(ticker, class_code, session=session, trading_date=trading_date)
         if not candles:
-            return self._empty(direction, "NO_SESSION_CANDLES")
-        result = self._detect_long(candles) if direction == "LONG" else self._detect_short(candles)
+            result = self._empty(direction, "NO_SESSION_CANDLES")
+        else:
+            result = self._detect_long(candles) if direction == "LONG" else self._detect_short(candles)
+        if spot_price is None and candles:
+            spot_price = self._float(candles[-1].get("close"))
+        h1_context = self._h1_context(ticker, class_code, spot_price, trading_date=trading_date)
+        result = self._apply_h1_context(result, h1_context, direction)
         result["setup_session"] = session
         result["setup_candle_count"] = len(candles)
         return result
