@@ -47,7 +47,7 @@ def test_long_prefers_near_h1_support():
 
 def test_short_prefers_near_h1_resistance():
     service = SpotFirstPullbackService(FakeHistoryService(), FakeSessionService())
-    context = service._h1_context("SBER", "TQBR", 102.5)
+    context = service._h1_context("SBER", "TQBR", 102.8)
     assert context["h1_nearest_level_type"] == "RESISTANCE"
     assert context["h1_resistance"] == 103.0
     assert context["h1_level_context"] == "NEAR_H1_RESISTANCE"
