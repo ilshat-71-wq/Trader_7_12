@@ -45,6 +45,19 @@ def _rs_label(item):
     return RS_LABELS.get(signal, signal)
 
 
+def _activity_label(item):
+    ratio = float(item.get("spot_money_ratio", 0) or 0)
+    if ratio >= 3:
+        return "ОЧЕНЬ ВЫСОКАЯ"
+    if ratio >= 1.5:
+        return "ВЫСОКАЯ"
+    if ratio >= 0.75:
+        return "НОРМАЛЬНАЯ"
+    if ratio > 0:
+        return "НИЖЕ НОРМЫ"
+    return "НЕТ ДАННЫХ"
+
+
 class MarketScanWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
@@ -178,7 +191,7 @@ class TraderWindow(QWidget):
         info = self.session_service.get_session_info()
         session = info.get("session", "CLOSED")
         session_name = SESSION_LABELS.get(session, session)
-        self.result_box.setText(f"📡  {session_name}\nМСК {info.get('time', '—')}\n\nBCS → SPOT → ЛИКВИДНОСТЬ → RS → SETUP → FUTURES\n\n⏳ Анализ выполняется в фоне. Окно остаётся доступным.")
+        self.result_box.setText(f"📡  {session_name}\nМСК {info.get('time', '—')}\n\nBCS → SPOT → ЛИКВИДНОСТЬ → ТЕКУЩАЯ СЕССИЯ → RS → SETUP → FUTURES\n\n⏳ Анализ выполняется в фоне. Окно остаётся доступным.")
         self.scan_button.setEnabled(False)
         self.scan_button.setText("⏳  СКАНИРОВАНИЕ...")
         self._start_scan_animation()
@@ -228,19 +241,23 @@ class TraderWindow(QWidget):
             trigger = item.get("entry_trigger")
             if not trigger or float(trigger or 0) == 0:
                 trigger = item.get("previous_high") if direction == "LONG" else item.get("previous_low")
+            ratio = float(item.get("spot_money_ratio", 0) or 0)
             output.extend([
                 "",
                 f"████  #{index}  {item.get('futures_ticker', '-')}  /  {item.get('spot_ticker', '-')}  ████",
                 f"НАПРАВЛЕНИЕ:      {_label(DIRECTION_LABELS, direction)}",
+                f"СЕССИОННАЯ ОЦЕНКА: {_number(item.get('session_rank_score'), 1)} / 100",
                 f"ОЦЕНКА:           {_number(item.get('candidate_score'), 1)} / 100",
                 f"RS:               {_rs_label(item)}",
+                f"АКТИВНОСТЬ SPOT:  {_activity_label(item)} ({_number(ratio, 2)}× среднего)",
                 f"СЕТАП:            {_label(SETUP_LABELS, item.get('setup'))}",
                 f"СОСТОЯНИЕ:         {_label(SETUP_STATE_LABELS, item.get('setup_state'))}",
                 "",
                 f"SPOT ЦЕНА:         {_number(item.get('spot_price'), 4)}",
                 f"ФЬЮЧЕРС ЦЕНА:      {_number(item.get('futures_price'), 4)}",
                 f"SPOT СРЕДНИЙ ₽×V:  {_money(item.get('spot_average_daily_money', item.get('average_daily_money')))}",
-                f"SPOT СЕГОДНЯ ₽×V:  {_money(item.get('spot_money_volume'))}",
+                f"SPOT СЕССИЯ ₽×V:   {_money(item.get('spot_money_volume'))}",
+                f"SPOT ₽×V/МИН:      {_money(item.get('spot_money_per_minute'))}",
                 f"ФЬЮЧЕРС ₽×V:       {_money(item.get('money_volume'))}",
                 f"СДЕЛОК:            {int(item.get('trade_count', 0) or 0):,}".replace(",", " "),
                 f"ДВИЖЕНИЕ ФЬЮЧЕРСА: {_number(change, 2)}%",
@@ -253,6 +270,8 @@ class TraderWindow(QWidget):
             ])
 
         output.extend([
+            "",
+            f"СТРАТЕГИЯ СЕССИИ: {results[0].get('session_strategy', '—')}",
             "",
             "ВАЖНО: это АНАЛИТИЧЕСКИЙ РАДАР.",
             "Пользователь самостоятельно смотрит график и принимает решение о входе.",
