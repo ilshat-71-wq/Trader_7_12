@@ -11,6 +11,15 @@ Purpose:
 - never create or reverse the SPOT direction;
 - return CONFIRMED / BLOCKED / NO_DATA for the next execution stage.
 
+BCS market-data contract:
+- last-trades `volume` is already the trade volume in the instrument currency;
+- `quantity` is the number of units/contracts.
+Therefore money volume must use `volume` directly and must NOT multiply
+`price * volume` again.
+
+Historical candles follow the same BCS convention: candle `volume` is
+trading volume in the instrument currency.
+
 This service is intentionally small. It does not calculate the SPOT idea,
 does not choose a different direction, and does not place orders.
 """
@@ -19,7 +28,7 @@ does not choose a different direction, and does not place orders.
 class FuturesConfirmationService:
     """Confirm whether a futures contract is suitable for a SPOT idea."""
 
-    VERSION = "0.3"
+    VERSION = "0.4"
     MIN_TRADES = 20
     MIN_MONEY_VOLUME = 1_000_000.0
     MIN_HISTORICAL_CANDLES = 3
@@ -98,15 +107,15 @@ class FuturesConfirmationService:
                 continue
 
             price = cls._float(trade.get("price"))
-            volume = cls._float(
-                trade.get("volume", trade.get("quantity"))
-            )
+            # BCS `volume` is already monetary turnover for this trade.
+            # `quantity` is units/contracts and is NOT used here.
+            volume = cls._float(trade.get("volume"))
 
             if price <= 0 or volume <= 0:
                 continue
 
             valid.append(trade)
-            money_volume += price * volume
+            money_volume += volume
 
         if not valid:
             return cls._result(
@@ -194,6 +203,8 @@ class FuturesConfirmationService:
         BCS historical trade data is unavailable for completed prior days because
         the trades endpoint only serves the current day. M5 candles therefore
         provide the deterministic replay equivalent without using future bars.
+        BCS candle `volume` is already monetary turnover, so it is summed
+        directly and is not multiplied by candle price.
         """
         expected = str(spot_direction or "NONE").upper()
 
@@ -211,11 +222,12 @@ class FuturesConfirmationService:
                 continue
             open_price = cls._float(candle.get("open"))
             close_price = cls._float(candle.get("close"))
+            # BCS candle `volume` is already in the instrument currency.
             volume = cls._float(candle.get("volume"))
             if open_price <= 0 or close_price <= 0:
                 continue
             valid.append(candle)
-            money_volume += close_price * max(volume, 0.0)
+            money_volume += max(volume, 0.0)
 
         if not valid:
             return cls._result(
