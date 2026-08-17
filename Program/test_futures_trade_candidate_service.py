@@ -10,6 +10,7 @@ class TestFuturesTradeCandidateService:
         radar_score=70,
         rs=0.20,
         spot_ticker=None,
+        spot_money=0,
         expiry="2026-09-15",
     ):
         return {
@@ -21,6 +22,7 @@ class TestFuturesTradeCandidateService:
             "direction": direction,
             "radar_score": radar_score,
             "relative_strength": rs,
+            "spot_money_volume": spot_money,
         }
 
     @staticmethod
@@ -60,12 +62,12 @@ class TestFuturesTradeCandidateService:
         result = service.build_candidate(self.radar("SRU6"), blocked)
         assert result is None
 
-    def test_rank_orders_by_candidate_score(self):
+    def test_rank_orders_by_candidate_score_when_spot_money_is_equal(self):
         service = FuturesTradeCandidateService()
         radars = [
-            self.radar("SRU6", radar_score=60),
-            self.radar("LKU6", radar_score=90, rs=0.40),
-            self.radar("RNU6", radar_score=75),
+            self.radar("SRU6", radar_score=60, spot_money=50_000_000),
+            self.radar("LKU6", radar_score=90, rs=0.40, spot_money=50_000_000),
+            self.radar("RNU6", radar_score=75, spot_money=50_000_000),
         ]
         confirmations = {
             "SRU6": self.confirmation(score=60),
@@ -78,12 +80,53 @@ class TestFuturesTradeCandidateService:
         assert result[0]["futures_ticker"] == "LKU6"
         assert [item["rank"] for item in result] == [1, 2, 3]
 
+    def test_current_spot_money_is_primary_selection_signal(self):
+        service = FuturesTradeCandidateService()
+        radars = [
+            self.radar(
+                "SRU6",
+                spot_ticker="SBER",
+                radar_score=95,
+                spot_money=20_000_000,
+            ),
+            self.radar(
+                "MEU6",
+                spot_ticker="MOEX",
+                radar_score=60,
+                spot_money=200_000_000,
+            ),
+            self.radar(
+                "GDU6",
+                spot_ticker="GOLD",
+                radar_score=90,
+                spot_money=100_000_000,
+            ),
+        ]
+        confirmations = {
+            "SRU6": self.confirmation(score=95, money=150_000_000),
+            "MEU6": self.confirmation(score=60, money=10_000_000),
+            "GDU6": self.confirmation(score=90, money=80_000_000),
+        }
+
+        result = service.rank(radars, confirmations, limit=3)
+
+        assert [item["spot_ticker"] for item in result] == [
+            "MOEX",
+            "GOLD",
+            "SBER",
+        ]
+        assert [item["spot_money_volume"] for item in result] == [
+            200_000_000,
+            100_000_000,
+            20_000_000,
+        ]
+
     def test_one_most_liquid_futures_per_spot(self):
         service = FuturesTradeCandidateService()
         radars = [
-            self.radar("ALU6", spot_ticker="ALRS", radar_score=95),
-            self.radar("ALZ6", spot_ticker="ALRS", radar_score=95),
-            self.radar("ASU6", spot_ticker="ASTR", radar_score=90),
+            self.radar("ALU6", spot_ticker="ALRS", radar_score=95, spot_money=80_000_000),
+            self.radar("ALZ6", spot_ticker="ALRS", radar_score=95, spot_money=80_000_000),
+            self.radar("ASU6", spot_ticker="ASTR", radar_score=90, spot_money=20_000_000),
         ]
         confirmations = {
             "ALU6": self.confirmation(score=90, money=120_000_000, trades=300),
@@ -108,9 +151,9 @@ class TestFuturesTradeCandidateService:
     def test_limit_returns_top_two(self):
         service = FuturesTradeCandidateService()
         radars = [
-            self.radar("SRU6", radar_score=60),
-            self.radar("LKU6", radar_score=90),
-            self.radar("RNU6", radar_score=80),
+            self.radar("SRU6", radar_score=60, spot_money=30_000_000),
+            self.radar("LKU6", radar_score=90, spot_money=50_000_000),
+            self.radar("RNU6", radar_score=80, spot_money=40_000_000),
         ]
         confirmations = {
             "SRU6": self.confirmation(score=60),
@@ -138,7 +181,8 @@ if __name__ == "__main__":
         test.test_build_ready_candidate,
         test.test_conflicting_confirmation_is_rejected,
         test.test_blocked_confirmation_is_rejected,
-        test.test_rank_orders_by_candidate_score,
+        test.test_rank_orders_by_candidate_score_when_spot_money_is_equal,
+        test.test_current_spot_money_is_primary_selection_signal,
         test.test_one_most_liquid_futures_per_spot,
         test.test_contract_with_three_or_fewer_days_to_expiry_is_rejected,
         test.test_limit_returns_top_two,
