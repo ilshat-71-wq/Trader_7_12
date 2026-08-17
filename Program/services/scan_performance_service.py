@@ -108,9 +108,12 @@ class ScanPerformanceService:
     def classify(total_seconds: float, target_seconds: float = TARGET_SECONDS) -> str:
         value = float(total_seconds)
         target = float(target_seconds)
+        if target <= 0:
+            raise ValueError("target_seconds must be > 0")
+        good = min(25.0, target * 0.8333333333)
         if value <= target * 0.5:
             return "EXCELLENT"
-        if value <= 25.0:
+        if value <= good:
             return "GOOD"
         if value <= target:
             return "TARGET"
