@@ -30,7 +30,7 @@ from services.session_money_volume_service import SessionMoneyVolumeService
 class FuturesMorningRadarService:
     """Build the current-session futures shortlist through the SPOT-first radar."""
 
-    VERSION = "0.5"
+    VERSION = "0.6"
     MAX_CONTRACTS_PER_SPOT = 2
 
     def __init__(self, mapping_service=None, radar_service=None, history_service=None, session_service=None, session_money_service=None):
@@ -42,6 +42,31 @@ class FuturesMorningRadarService:
             history_service=self.history_service,
             session_service=self.session_service,
         )
+
+    @staticmethod
+    def _activity_ratio(current_money, average_daily_money, elapsed_minutes, expected_minutes):
+        """Compare current session pace with the prorated daily baseline.
+
+        A raw current-session/daily ratio unfairly penalizes later sessions
+        because only part of the trading day has elapsed. The prorated ratio
+        answers the useful question: is this instrument trading faster or
+        slower than its normal pace for the amount of session time elapsed?
+        """
+        try:
+            current = float(current_money or 0)
+            average = float(average_daily_money or 0)
+            elapsed = float(elapsed_minutes or 0)
+            expected = float(expected_minutes or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+        if current <= 0 or average <= 0 or elapsed <= 0 or expected <= 0:
+            return 0.0
+
+        expected_to_now = average * (elapsed / expected)
+        if expected_to_now <= 0:
+            return 0.0
+        return round(current / expected_to_now, 4)
 
     def scan(self, mappings=None, limit=None):
         """Run SPOT radar and attach money/activity for the active Moscow session."""
@@ -125,10 +150,18 @@ class FuturesMorningRadarService:
             session_money = money_cache[radar_key]
             current_spot_money = float(session_money.get("money_volume", 0) or 0)
             average_spot_money = float(radar.get("average_daily_money", 0) or 0)
+            elapsed_minutes = int(session_money.get("elapsed_minutes", 0) or 0)
+            expected_minutes = int(session_money.get("expected_minutes", 0) or 0)
             spot_money_ratio = (
                 current_spot_money / average_spot_money
                 if average_spot_money > 0
                 else 0.0
+            )
+            spot_session_activity_ratio = self._activity_ratio(
+                current_spot_money,
+                average_spot_money,
+                elapsed_minutes,
+                expected_minutes,
             )
 
             result = dict(radar)
@@ -146,9 +179,10 @@ class FuturesMorningRadarService:
                 "spot_money_volume": round(current_spot_money, 2),
                 "spot_average_daily_money": round(average_spot_money, 2),
                 "spot_money_ratio": round(spot_money_ratio, 4),
+                "spot_session_activity_ratio": spot_session_activity_ratio,
                 "spot_money_per_minute": round(float(session_money.get("money_per_minute", 0) or 0), 2),
-                "session_elapsed_minutes": int(session_money.get("elapsed_minutes", 0) or 0),
-                "session_expected_minutes": int(session_money.get("expected_minutes", 0) or 0),
+                "session_elapsed_minutes": elapsed_minutes,
+                "session_expected_minutes": expected_minutes,
             })
             results.append(result)
 
@@ -230,30 +264,30 @@ class FuturesMorningRadarService:
         except (TypeError, ValueError):
             money = 0.0
         try:
-            ratio = float(item.get("spot_money_ratio", 0) or 0)
+            activity = float(item.get("spot_session_activity_ratio", 0) or 0)
         except (TypeError, ValueError):
-            ratio = 0.0
+            activity = 0.0
         try:
             radar_score = float(item.get("radar_score", 0) or 0)
         except (TypeError, ValueError):
             radar_score = 0.0
         if status == "OK":
-            return (1, money, ratio, radar_score)
-        return (0, money, ratio, radar_score)
+            return (1, activity, money, radar_score)
+        return (0, activity, money, radar_score)
 
     @staticmethod
     def print_results(results):
         print()
-        print("=" * 130)
+        print("=" * 145)
         print("TRADER_7_12 PRO - SPOT MONEY -> FUTURES SESSION RADAR")
-        print("=" * 130)
+        print("=" * 145)
         print()
         print(
             f"{'RANK':<6}{'FUTURES':<12}{'SPOT':<9}"
-            f"{'MONEY':>16}{'AVG MONEY':>16}{'RATIO':>9}"
+            f"{'MONEY':>16}{'AVG MONEY':>16}{'RAW':>8}{'PACE':>9}"
             f"{'EXPIRY':<12}{'DIR':<8}{'RADAR':>8}  SESSION"
         )
-        print("-" * 130)
+        print("-" * 145)
 
         for item in results:
             print(
@@ -262,7 +296,8 @@ class FuturesMorningRadarService:
                 f"{item.get('spot_ticker', '-'): <9}"
                 f"{float(item.get('spot_money_volume', 0) or 0):>16,.0f}"
                 f"{float(item.get('spot_average_daily_money', 0) or 0):>16,.0f}"
-                f"{float(item.get('spot_money_ratio', 0) or 0):>9.2f}"
+                f"{float(item.get('spot_money_ratio', 0) or 0):>8.2f}"
+                f"{float(item.get('spot_session_activity_ratio', 0) or 0):>9.2f}"
                 f"{item.get('futures_expiry', '-'): <12}"
                 f"{item.get('direction', '-'): <8}"
                 f"{float(item.get('radar_score', 0) or 0):>7.2f}  "
@@ -270,6 +305,7 @@ class FuturesMorningRadarService:
             )
 
         print()
-        print("Current SPOT money = M5 price x volume from session start to current Moscow time.")
+        print("RAW = current session money / daily average money.")
+        print("PACE = current session money / prorated daily baseline for elapsed session time.")
         print("No trade execution is performed by this service.")
-        print("=" * 130)
+        print("=" * 145)
