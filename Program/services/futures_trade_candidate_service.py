@@ -15,8 +15,8 @@ Purpose:
   the SPOT-first selection principle.
 
 The trading instrument is always the futures contract. The SPOT is the
-source of market-interest/liquidity selection. The service does not place
-orders and does not invent a direction.
+source of market-interest/liquidity selection and setup structure. The service
+does not place orders and does not invent the user's exact entry.
 """
 
 from datetime import date
@@ -25,7 +25,7 @@ from datetime import date
 class FuturesTradeCandidateService:
     """Build and rank final scanner candidates."""
 
-    VERSION = "0.7"
+    VERSION = "0.8"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
 
@@ -98,7 +98,16 @@ class FuturesTradeCandidateService:
         futures_change = cls._float(confirmation.get("price_change_percent"))
         directional_change = futures_change if direction == "LONG" else -futures_change if direction == "SHORT" else 0.0
         futures_change_bonus = min(directional_change * 5.0, 5.0) if directional_change > 0 else max(directional_change * 5.0, -5.0) if directional_change < 0 else 0.0
-        return round(min(radar_score * 0.60 + confirmation_score * 0.30 + rs_bonus + futures_change_bonus, 100.0), 2)
+
+        setup_state = str(radar.get("setup_state") or "WAIT").upper()
+        setup_quality = max(0.0, min(100.0, cls._float(radar.get("setup_quality_score"))))
+        setup_bonus = setup_quality * 0.10
+        if setup_state == "CONFIRMED":
+            setup_bonus += 5.0
+        elif setup_state == "WATCH":
+            setup_bonus += 2.0
+
+        return round(min(radar_score * 0.55 + confirmation_score * 0.25 + rs_bonus + futures_change_bonus + setup_bonus, 100.0), 2)
 
     @classmethod
     def build_candidate(cls, radar, confirmation):
@@ -153,6 +162,12 @@ class FuturesTradeCandidateService:
             "setup": radar.get("setup", "NONE"),
             "setup_direction": radar.get("setup_direction", direction),
             "setup_state": radar.get("setup_state", "WAIT"),
+            "setup_phase": radar.get("setup_phase", "UNKNOWN"),
+            "setup_quality_score": cls._float(radar.get("setup_quality_score")),
+            "impulse_percent": cls._float(radar.get("impulse_percent")),
+            "retracement_percent": cls._float(radar.get("retracement_percent")),
+            "retracement_ratio": cls._float(radar.get("retracement_ratio")),
+            "consolidation_candles": int(cls._float(radar.get("consolidation_candles"))),
             "entry_trigger": cls._float(radar.get("entry_trigger")),
             "previous_high": cls._float(radar.get("previous_high")),
             "previous_low": cls._float(radar.get("previous_low")),
@@ -176,6 +191,7 @@ class FuturesTradeCandidateService:
             candidates.sort(key=lambda item: (
                 cls._float(item.get("spot_money_volume")),
                 cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
+                cls._float(item.get("setup_quality_score")),
                 cls._float(item.get("spot_money_ratio")),
                 cls._float(item.get("radar_score")),
                 cls._float(item.get("relative_strength")),
@@ -185,6 +201,7 @@ class FuturesTradeCandidateService:
             leader["spot_group"] = group
             leaders.append(leader)
         leaders.sort(key=lambda item: (
+            cls._float(item.get("setup_quality_score")),
             cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
             cls._float(item.get("spot_money_volume")),
             cls._float(item.get("radar_score")),
@@ -232,9 +249,16 @@ class FuturesTradeCandidateService:
                 candidates.append(candidate)
         candidates = self._select_most_liquid_per_spot(candidates)
         candidates.sort(key=lambda item: (
-            item["spot_session_activity_ratio"], item["spot_money_volume"], item["candidate_score"],
-            item["confirmation_score"], item["radar_score"], item["relative_strength"], item["money_volume"],
-            item["trade_count"], item["futures_ticker"],
+            item["setup_quality_score"],
+            item["spot_session_activity_ratio"],
+            item["spot_money_volume"],
+            item["candidate_score"],
+            item["confirmation_score"],
+            item["radar_score"],
+            item["relative_strength"],
+            item["money_volume"],
+            item["trade_count"],
+            item["futures_ticker"],
         ), reverse=True)
         for rank, candidate in enumerate(candidates, start=1):
             candidate["rank"] = rank
