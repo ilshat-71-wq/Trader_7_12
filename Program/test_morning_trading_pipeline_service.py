@@ -4,13 +4,21 @@ from services.morning_trading_pipeline_service import MorningTradingPipelineServ
 
 
 class FakeSessionService:
+    def __init__(self, session="MORNING"):
+        self.session = session
+
     def get_session_info(self):
+        labels = {
+            "MORNING": "УТРЕННЯЯ СЕССИЯ",
+            "MAIN": "ОСНОВНАЯ СЕССИЯ",
+            "EVENING": "ВЕЧЕРНЯЯ СЕССИЯ",
+        }
         return {
             "timezone": "Europe/Moscow",
             "date": "2026-08-17",
-            "time": "08:30:00",
-            "session": "MORNING",
-            "label": "УТРЕННЯЯ СЕССИЯ",
+            "time": "20:30:00" if self.session == "EVENING" else "08:30:00",
+            "session": self.session,
+            "label": labels[self.session],
             "market_open": True,
         }
 
@@ -50,6 +58,7 @@ class TestMorningTradingPipelineService:
         direction="LONG",
         spot_group="MOEX_STOCK",
         spot_money_volume=200_000_000,
+        spot_money_ratio=2.0,
     ):
         return {
             "status": "OK",
@@ -69,7 +78,7 @@ class TestMorningTradingPipelineService:
             "previous_high": 305.0,
             "previous_low": 95.0,
             "spot_money_volume": spot_money_volume,
-            "spot_money_ratio": 2.0,
+            "spot_money_ratio": spot_money_ratio,
             "spot_group": spot_group,
         }
 
@@ -88,12 +97,12 @@ class TestMorningTradingPipelineService:
             "futures_class_code": "SPBFUT",
         }
 
-    def service(self, radars, confirmations):
+    def service(self, radars, confirmations, session="MORNING"):
         return MorningTradingPipelineService(
             radar_service=FakeRadarService(radars),
             confirmation_service=FakeConfirmationService(confirmations),
             candidate_service=FakeCandidateService(),
-            session_service=FakeSessionService(),
+            session_service=FakeSessionService(session),
         )
 
     def test_pipeline_returns_candidate_with_session_metadata(self):
@@ -109,9 +118,11 @@ class TestMorningTradingPipelineService:
         assert candidates[0]["status"] == "READY"
         assert candidates[0]["direction"] == "LONG"
         assert candidates[0]["futures_ticker"] == "SRU6"
-        assert candidates[0]["pipeline_version"] == "0.5"
+        assert candidates[0]["pipeline_version"] == "0.6"
         assert candidates[0]["market_session"] == "MORNING"
         assert candidates[0]["market_time"] == "08:30:00"
+        assert candidates[0]["session_strategy"] == "ИМПУЛЬС / SPOT / ПЕРВЫЙ ДВИЖ"
+        assert candidates[0]["session_rank_score"] > 0
         assert candidates[0]["rank"] == 1
         assert "stop_loss" not in candidates[0]
         assert "take_profit" not in candidates[0]
@@ -125,9 +136,6 @@ class TestMorningTradingPipelineService:
         assert self.service([radar], {"SRU6": blocked}).scan(confirmations={"SRU6": blocked}) == []
 
     def test_pipeline_keeps_only_top_two(self):
-        # The candidate service intentionally keeps one money leader per SPOT
-        # group. Use three different target groups so the pipeline can produce
-        # three valid candidates and then verify the final limit=2 ranking.
         radars = [
             self.radar("A1U6", "MOEX", 70, spot_group="MOEX_STOCK", spot_money_volume=100_000_000),
             self.radar("B1U6", "BR", 95, spot_group="OIL", spot_money_volume=300_000_000),
@@ -145,6 +153,24 @@ class TestMorningTradingPipelineService:
         assert candidates[1]["futures_ticker"] == "C1U6"
         assert candidates[1]["rank"] == 2
 
+    def test_evening_profile_uses_confirmation_and_activity(self):
+        radars = [
+            self.radar("A1U6", "MOEX", 95, spot_group="MOEX_STOCK", spot_money_volume=100_000_000, spot_money_ratio=1.0),
+            self.radar("B1U6", "BR", 80, spot_group="OIL", spot_money_volume=100_000_000, spot_money_ratio=5.0),
+        ]
+        confirmations = {
+            "A1U6": self.confirmation(ticker="A1U6", score=70),
+            "B1U6": self.confirmation(ticker="B1U6", score=95),
+        }
+        candidates = self.service(radars, confirmations, session="EVENING").scan(
+            confirmations=confirmations,
+            limit=2,
+        )
+        assert len(candidates) == 2
+        assert candidates[0]["market_session"] == "EVENING"
+        assert candidates[0]["futures_ticker"] == "B1U6"
+        assert candidates[0]["session_strategy"] == "ВЕЧЕРНИЙ ИМПУЛЬС / ПОДТВЕРЖДЕНИЕ / АКТИВНОСТЬ"
+
     def test_pipeline_does_not_execute_orders(self):
         result = self.service([], {}).scan(limit=3)
         assert isinstance(result, list)
@@ -157,6 +183,7 @@ def run_tests():
         test.test_pipeline_returns_candidate_with_session_metadata,
         test.test_pipeline_rejects_blocked_confirmation,
         test.test_pipeline_keeps_only_top_two,
+        test.test_evening_profile_uses_confirmation_and_activity,
         test.test_pipeline_does_not_execute_orders,
     ]
     for function in tests:
