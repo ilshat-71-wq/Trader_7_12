@@ -96,8 +96,10 @@ def historical_money(history_service, ticker, class_code, trading_date, days=5):
 
     completed.sort(key=lambda item: item[0])
     selected = completed[-days:]
+    # BCS candles-chart already returns daily volume as money turnover.
+    # Do not multiply by close again.
     turnovers = [
-        close * volume
+        volume
         for _, close, volume in selected
         if close > 0 and volume > 0
     ]
