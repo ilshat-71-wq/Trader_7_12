@@ -12,6 +12,11 @@ Purpose:
   stock-only universe;
 - reject ambiguous or unmapped contracts instead of guessing.
 
+Performance rules:
+- instrument metadata is cached in-process for a short TTL;
+- independent SPOT instrument-type requests run concurrently;
+- a temporary failure of one type does not block the remaining universe.
+
 There is deliberately NO fixed instrument universe here.
 
 Hard universe rule:
@@ -22,6 +27,8 @@ Hard universe rule:
 """
 
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from api.bcs_api import BCSAPI
 from services.futures_universe_service import FuturesUniverseService
@@ -44,6 +51,13 @@ class FuturesSpotMappingService:
         "BCS_UNDERLYING",
         "SPOT_METADATA",
     }
+
+    # Metadata is stable enough to reuse between scans. A fresh process starts
+    # empty; subsequent scans avoid repeating the same 7 instrument-list calls.
+    INSTRUMENT_CACHE_SECONDS = 300
+    MAX_METADATA_WORKERS = 4
+    _instrument_cache = {}
+    _instrument_cache_at = {}
 
     EXPLICIT_SPOT_KEYS = (
         "baseAssetSecuritySecCode",
@@ -114,36 +128,81 @@ class FuturesSpotMappingService:
 
         return result
 
+    @classmethod
+    def _cached_type(cls, instrument_type):
+        now = time.monotonic()
+        cached = cls._instrument_cache.get(instrument_type)
+        cached_at = cls._instrument_cache_at.get(instrument_type, 0.0)
+        if cached is not None and now - cached_at < cls.INSTRUMENT_CACHE_SECONDS:
+            return list(cached)
+        return None
+
+    @classmethod
+    def _store_type(cls, instrument_type, records):
+        cls._instrument_cache[instrument_type] = list(records)
+        cls._instrument_cache_at[instrument_type] = time.monotonic()
+
+    def _load_one_spot_type(self, instrument_type):
+        cached = self._cached_type(instrument_type)
+        if cached is not None:
+            return instrument_type, cached, True
+
+        try:
+            records = self.api.get_instruments(instrument_type)
+        except Exception as exc:
+            print(
+                f"⚠️ SPOT metadata skipped: {instrument_type} "
+                f"({type(exc).__name__})"
+            )
+            return instrument_type, [], False
+
+        if not isinstance(records, list):
+            records = []
+
+        self._store_type(instrument_type, records)
+        return instrument_type, records, False
+
     def _load_spot_instruments(self):
-        """Load BCS-supported SPOT types; unavailable types are skipped."""
+        """Load SPOT metadata concurrently and reuse it between scans."""
         result = []
         seen = set()
 
-        for instrument_type in self.SPOT_INSTRUMENT_TYPES:
-            try:
-                records = self.api.get_instruments(instrument_type)
-            except Exception:
+        pending = []
+        with ThreadPoolExecutor(
+            max_workers=min(self.MAX_METADATA_WORKERS, len(self.SPOT_INSTRUMENT_TYPES)),
+            thread_name_prefix="spot-meta",
+        ) as executor:
+            futures = {
+                executor.submit(self._load_one_spot_type, instrument_type): instrument_type
+                for instrument_type in self.SPOT_INSTRUMENT_TYPES
+            }
+            for future in as_completed(futures):
+                try:
+                    _, records, _ = future.result()
+                except Exception as exc:
+                    print(
+                        "⚠️ SPOT metadata worker failed:",
+                        type(exc).__name__
+                    )
+                    records = []
+                pending.extend(records)
+
+        for record in pending:
+            if not isinstance(record, dict):
                 continue
 
-            if not isinstance(records, list):
+            ticker = str(record.get("ticker") or "").strip().upper()
+            class_code = self._class_code(record)
+
+            if not ticker or not class_code:
                 continue
 
-            for record in records:
-                if not isinstance(record, dict):
-                    continue
+            key = (ticker, class_code)
+            if key in seen:
+                continue
 
-                ticker = str(record.get("ticker") or "").strip().upper()
-                class_code = self._class_code(record)
-
-                if not ticker or not class_code:
-                    continue
-
-                key = (ticker, class_code)
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                result.append(record)
+            seen.add(key)
+            result.append(record)
 
         return result
 
