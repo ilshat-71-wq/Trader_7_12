@@ -55,7 +55,9 @@ class FuturesSpotMappingService:
     # Metadata is stable enough to reuse between scans. A fresh process starts
     # empty; subsequent scans avoid repeating the same 7 instrument-list calls.
     INSTRUMENT_CACHE_SECONDS = 300
-    MAX_METADATA_WORKERS = 4
+    # Keep metadata discovery concurrent, but below the observed BCS rate-limit
+    # threshold during an active market session.
+    MAX_METADATA_WORKERS = 2
     _instrument_cache = {}
     _instrument_cache_at = {}
 
