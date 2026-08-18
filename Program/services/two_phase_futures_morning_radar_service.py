@@ -1,0 +1,102 @@
+"""Two-phase futures radar: cheap SPOT screen first, deep analysis only for finalists."""
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from services.futures_morning_radar_service import FuturesMorningRadarService
+
+
+class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
+    """Keep the existing radar contract while reducing expensive history calls."""
+
+    VERSION = "0.9"
+    PRELIMINARY_WORKERS = 4
+    DEEP_SPOT_LIMIT = 5
+
+    def _preliminary_one(self, spot_key):
+        ticker, class_code = spot_key
+        try:
+            base = getattr(self.radar_service, "radar_service", None)
+            if base is None:
+                return spot_key, None
+            raw = base.calculate(ticker=ticker, class_code=class_code)
+            if not isinstance(raw, dict):
+                return spot_key, None
+            daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
+            trend = daily.get("trend") if isinstance(daily.get("trend"), dict) else {}
+            money = raw.get("money") if isinstance(raw.get("money"), dict) else {}
+            trend_score = self.radar_service.calculate_trend_score(trend)
+            money_score = self.radar_service.calculate_money_score(money)
+            radar_score = self.radar_service.calculate_radar_score(trend_score, money_score)
+            return spot_key, {
+                "status": "OK",
+                "direction": str(trend.get("direction", "NONE")).upper(),
+                "radar_score": float(radar_score or 0),
+                "average_daily_money": float(money.get("average_daily_money_volume", 0) or 0),
+                "trend_score": float(trend_score or 0),
+                "money_score": float(money_score or 0),
+            }
+        except Exception as exc:
+            return spot_key, {"status": "ERROR", "error": str(exc)}
+
+    def _preliminary_scan(self, mappings):
+        keys = sorted({
+            (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip())
+            for item in mappings
+            if isinstance(item, dict)
+            and str(item.get("spot_ticker") or "").strip()
+            and str(item.get("spot_class_code") or "").strip()
+        })
+        results = {}
+        if not keys:
+            return results
+        with ThreadPoolExecutor(max_workers=min(self.PRELIMINARY_WORKERS, len(keys)), thread_name_prefix="radar-pre") as executor:
+            futures = [executor.submit(self._preliminary_one, key) for key in keys]
+            for future in as_completed(futures):
+                key, result = future.result()
+                if result is not None:
+                    results[key] = result
+        return results
+
+    def scan(self, mappings=None, limit=None):
+        """Fast pass over all SPOTs, then deep H1/RS/M5 analysis for top finalists."""
+        if mappings is None:
+            mappings = self._load_mappings_cached()
+        if not isinstance(mappings, list):
+            return []
+        mappings = self._select_current_contracts(mappings)
+        if not mappings:
+            return []
+
+        preliminary = self._preliminary_scan(mappings)
+        ranked_spots = sorted(
+            (
+                key for key, value in preliminary.items()
+                if str(value.get("status", "")).upper() == "OK"
+            ),
+            key=lambda key: (
+                preliminary[key].get("radar_score", 0),
+                preliminary[key].get("average_daily_money", 0),
+            ),
+            reverse=True,
+        )
+        deep_keys = set(ranked_spots[:self.DEEP_SPOT_LIMIT])
+
+        # If a test double does not expose the underlying MorningRadarService,
+        # preserve the original behavior instead of silently returning nothing.
+        if not deep_keys and not hasattr(self.radar_service, "radar_service"):
+            return super().scan(mappings=mappings, limit=limit)
+
+        deep_mappings = [
+            item for item in mappings
+            if (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip()) in deep_keys
+        ]
+
+        results = super().scan(mappings=deep_mappings, limit=limit)
+        for item in results:
+            item["scan_phase"] = "DEEP"
+            key = (
+                str(item.get("spot_ticker") or "").strip().upper(),
+                str(item.get("spot_class_code") or "").strip(),
+            )
+            item["preliminary_radar_score"] = round(float(preliminary.get(key, {}).get("radar_score", item.get("radar_score", 0)) or 0), 2)
+        return results
