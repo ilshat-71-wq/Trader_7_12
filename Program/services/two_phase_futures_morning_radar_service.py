@@ -15,6 +15,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     # of HTTP 429/timeout responses during an active session.
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
+    DEEP_DIRECTION_LIMIT = 3
 
     def _is_target_spot(self, mapping):
         """Limit the expensive SPOT screen to the project's five target groups."""
@@ -73,8 +74,53 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
                     results[key] = result
         return results
 
+    @classmethod
+    def _select_deep_keys(cls, preliminary):
+        """Select deep finalists across the full market while preserving LONG/SHORT competition."""
+        valid = [
+            (key, value)
+            for key, value in preliminary.items()
+            if isinstance(value, dict) and str(value.get("status", "")).upper() == "OK"
+        ]
+        ranked = sorted(
+            valid,
+            key=lambda item: (
+                item[1].get("radar_score", 0),
+                item[1].get("average_daily_money", 0),
+            ),
+            reverse=True,
+        )
+
+        selected = []
+        selected_keys = set()
+
+        # Keep both directions alive in the deep phase. This is only a
+        # performance shortlist; the final ranking and filters remain unchanged.
+        for direction in ("LONG", "SHORT"):
+            count = 0
+            for key, value in ranked:
+                if key in selected_keys or str(value.get("direction", "")).upper() != direction:
+                    continue
+                selected.append(key)
+                selected_keys.add(key)
+                count += 1
+                if count >= cls.DEEP_DIRECTION_LIMIT or len(selected) >= cls.DEEP_SPOT_LIMIT:
+                    break
+            if len(selected) >= cls.DEEP_SPOT_LIMIT:
+                break
+
+        # Fill remaining deep slots by the global preliminary score.
+        for key, _value in ranked:
+            if len(selected) >= cls.DEEP_SPOT_LIMIT:
+                break
+            if key not in selected_keys:
+                selected.append(key)
+                selected_keys.add(key)
+
+        return set(selected)
+
     def scan(self, mappings=None, limit=None):
-        """Fast pass over target SPOTs, then deep H1/RS/M5 analysis for top finalists."""
+        """Fast pass over target SPOTs, then deep H1/RS/M5 analysis for finalists."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
@@ -84,18 +130,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             return []
 
         preliminary = self._preliminary_scan(mappings)
-        ranked_spots = sorted(
-            (
-                key for key, value in preliminary.items()
-                if str(value.get("status", "")).upper() == "OK"
-            ),
-            key=lambda key: (
-                preliminary[key].get("radar_score", 0),
-                preliminary[key].get("average_daily_money", 0),
-            ),
-            reverse=True,
-        )
-        deep_keys = set(ranked_spots[:self.DEEP_SPOT_LIMIT])
+        deep_keys = self._select_deep_keys(preliminary)
 
         # If a test double does not expose the underlying MorningRadarService,
         # preserve the original behavior instead of silently returning nothing.
