@@ -9,7 +9,10 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     """Keep the existing radar contract while reducing expensive history calls."""
 
     VERSION = "0.9"
-    PRELIMINARY_WORKERS = 4
+    # BCS rate-limits concurrent history requests. Keep the preliminary pass
+    # parallel, but bounded enough to avoid turning the fast phase into a burst
+    # of HTTP 429/timeout responses during an active session.
+    PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
 
     def _preliminary_one(self, spot_key):
