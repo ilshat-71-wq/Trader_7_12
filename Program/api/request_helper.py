@@ -3,10 +3,13 @@ import requests
 
 
 class RequestHelper:
+    """Small HTTP helper with a fail-fast profile for scanner reads."""
 
-    MAX_RETRIES = 3
-
-    RETRY_DELAY = 0.5
+    # A failed market-data request must not stall the whole scanner for minutes.
+    # Callers that need a more tolerant request can override these per call.
+    MAX_RETRIES = 1
+    RETRY_DELAY = 0.2
+    REQUEST_TIMEOUT = 8
 
     RETRY_HTTP_CODES = {
         429,
@@ -16,6 +19,14 @@ class RequestHelper:
         504
     }
 
+    REQUEST_EXCEPTIONS = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.ReadTimeout,
+        requests.exceptions.SSLError,
+        requests.exceptions.ChunkedEncodingError,
+    )
+
     # ---------------------------------------------------------
 
     @staticmethod
@@ -23,52 +34,50 @@ class RequestHelper:
         url,
         headers=None,
         json=None,
-        data=None
+        data=None,
+        timeout=None,
+        max_retries=None,
     ):
+        retries = (
+            RequestHelper.MAX_RETRIES
+            if max_retries is None
+            else max(1, int(max_retries))
+        )
+        request_timeout = (
+            RequestHelper.REQUEST_TIMEOUT
+            if timeout is None
+            else max(0.1, float(timeout))
+        )
 
-        for attempt in range(1, RequestHelper.MAX_RETRIES + 1):
-
+        for attempt in range(1, retries + 1):
             try:
-
                 response = requests.post(
                     url,
                     headers=headers,
                     json=json,
                     data=data,
-                    timeout=15
+                    timeout=request_timeout
                 )
 
-                #
-                # Если сервер просит повторить
-                #
                 if response.status_code in RequestHelper.RETRY_HTTP_CODES:
-
                     print(
-                        f"Retry {attempt}: HTTP {response.status_code}"
+                        f"Retry {attempt}/{retries}: HTTP {response.status_code}"
                     )
-
-                    time.sleep(RequestHelper.RETRY_DELAY)
-
-                    continue
+                    if attempt < retries:
+                        time.sleep(RequestHelper.RETRY_DELAY)
+                        continue
 
                 return response
 
-            except (
-                requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout,
-                requests.exceptions.ReadTimeout,
-                requests.exceptions.SSLError,
-                requests.exceptions.ChunkedEncodingError
-            ) as error:
-
+            except RequestHelper.REQUEST_EXCEPTIONS as error:
                 print(
-                    f"Retry {attempt}: {type(error).__name__}"
+                    f"Retry {attempt}/{retries}: {type(error).__name__}"
                 )
-
-                time.sleep(RequestHelper.RETRY_DELAY)
+                if attempt < retries:
+                    time.sleep(RequestHelper.RETRY_DELAY)
 
         raise RuntimeError(
-            "Не удалось выполнить POST после повторных попыток."
+            f"Не удалось выполнить POST после {retries} попытки(ок)."
         )
 
     # ---------------------------------------------------------
@@ -77,46 +86,47 @@ class RequestHelper:
     def get(
         url,
         headers=None,
-        params=None
+        params=None,
+        timeout=None,
+        max_retries=None,
     ):
+        retries = (
+            RequestHelper.MAX_RETRIES
+            if max_retries is None
+            else max(1, int(max_retries))
+        )
+        request_timeout = (
+            RequestHelper.REQUEST_TIMEOUT
+            if timeout is None
+            else max(0.1, float(timeout))
+        )
 
-        for attempt in range(1, RequestHelper.MAX_RETRIES + 1):
-
+        for attempt in range(1, retries + 1):
             try:
-
                 response = requests.get(
                     url,
                     headers=headers,
                     params=params,
-                    timeout=15
+                    timeout=request_timeout
                 )
 
                 if response.status_code in RequestHelper.RETRY_HTTP_CODES:
-
                     print(
-                        f"Retry {attempt}: HTTP {response.status_code}"
+                        f"Retry {attempt}/{retries}: HTTP {response.status_code}"
                     )
-
-                    time.sleep(RequestHelper.RETRY_DELAY)
-
-                    continue
+                    if attempt < retries:
+                        time.sleep(RequestHelper.RETRY_DELAY)
+                        continue
 
                 return response
 
-            except (
-                requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout,
-                requests.exceptions.ReadTimeout,
-                requests.exceptions.SSLError,
-                requests.exceptions.ChunkedEncodingError
-            ) as error:
-
+            except RequestHelper.REQUEST_EXCEPTIONS as error:
                 print(
-                    f"Retry {attempt}: {type(error).__name__}"
+                    f"Retry {attempt}/{retries}: {type(error).__name__}"
                 )
-
-                time.sleep(RequestHelper.RETRY_DELAY)
+                if attempt < retries:
+                    time.sleep(RequestHelper.RETRY_DELAY)
 
         raise RuntimeError(
-            "Не удалось выполнить GET после повторных попыток."
+            f"Не удалось выполнить GET после {retries} попытки(ок)."
         )
