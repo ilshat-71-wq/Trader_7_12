@@ -39,16 +39,6 @@ class InstrumentMorningRadarService:
 
     VERSION = "0.4"
 
-    DEFAULT_INSTRUMENTS = {
-        "SBER": "SPBRU",
-        "LKOH": "SPBRU",
-        "ROSN": "SPBRU",
-        "TATN": "SPBRU",
-        "PLZL": "SPBRU",
-        "SNGSP": "SPBRU",
-        "YDEX": "SPBRU",
-    }
-
     BENCHMARK_TICKERS = ("IMOEX2", "IRUS2")
 
     MORNING_TIMEFRAME_MINUTES = 5
@@ -1229,9 +1219,6 @@ class InstrumentMorningRadarService:
         self,
         instruments=None
     ):
-        if instruments is None:
-            instruments = self.DEFAULT_INSTRUMENTS
-
         if not isinstance(
             instruments,
             dict
