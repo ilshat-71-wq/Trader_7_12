@@ -43,7 +43,7 @@ class TestMorningTradingPipelineService:
         candidates = self.service([radar], {"SRU6": confirmation}).scan(mappings=[{"futures_ticker": "SRU6", "spot_ticker": "MOEX"}], confirmations={"SRU6": confirmation}, limit=3)
         assert len(candidates) == 1
         assert candidates[0]["status"] == "READY"
-        assert candidates[0]["pipeline_version"] == "0.7"
+        assert candidates[0]["pipeline_version"] == "0.8"
         assert candidates[0]["market_session"] == "MORNING"
         assert candidates[0]["market_time"] == "08:30:00"
         assert candidates[0]["session_strategy"] == "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"

@@ -30,9 +30,25 @@ class FakeInstrumentRadar:
 
 
 class FakeMapping:
+    GROUPS = {
+        "A": "MOEX_STOCK",
+        "B": "GAS",
+        "C": "OIL",
+        "D": "USD",
+        "E": "GOLD",
+        "F": "MOEX_STOCK",
+    }
+
     def load(self):
         return [
-            {"spot_ticker": ticker, "spot_class_code": "SPOT", "futures_ticker": f"F{ticker}", "futures_class_code": "SPBFUT", "futures_expiry": "2099-01-01"}
+            {
+                "spot_ticker": ticker,
+                "spot_class_code": "SPOT",
+                "spot_group": self.GROUPS[ticker],
+                "futures_ticker": f"F{ticker}",
+                "futures_class_code": "SPBFUT",
+                "futures_expiry": "2099-01-01",
+            }
             for ticker in "ABCDEF"
         ]
 
@@ -75,7 +91,14 @@ def test_preliminary_keeps_top_five():
         key=lambda item: item[1]["radar_score"],
         reverse=True,
     )
-    assert [key[0] for key in ranked[:5]] == ["A", "B", "C", "D", "E"]
+
+    assert [key for key, _value in ranked[:5]] == [
+        ("A", "SPOT"),
+        ("B", "SPOT"),
+        ("C", "SPOT"),
+        ("D", "SPOT"),
+        ("E", "SPOT"),
+    ]
 
 
 def test_deep_limit_is_five():
