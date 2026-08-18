@@ -2,8 +2,8 @@
 
 ## CANONICAL CURRENT STATE
 
-Date: 2026-08-17
-Branch: `agent/futures-expiry-liquidity`
+Date: 2026-08-18
+Branch: `agent/scan-speed-optimization-v2`
 Repository: `ilshat-71-wq/Trader_7_12`
 
 This file is the single source of truth for the current technical state.
@@ -149,6 +149,24 @@ The UI displays live Moscow date, time with seconds and current session. No sess
 - no session countdown;
 - results remain analytical/read-only.
 
+## PERFORMANCE CONTRACT — NEW CHECKPOINT
+
+The normal live scanner target is **20–30 seconds**.
+
+The scanner must remove avoidable repeated BCS requests and long retry waits without weakening the SPOT-first architecture.
+
+Current optimization checkpoint:
+
+- `Program/api/request_helper.py` uses a fail-fast default of one attempt, 0.2 s retry delay and 8 s request timeout; per-call overrides remain available;
+- `FuturesSpotMappingService` caches SPOT instrument metadata for 5 minutes within the running process;
+- independent SPOT instrument-type metadata requests use bounded `ThreadPoolExecutor` concurrency (maximum four workers);
+- failure of one SPOT metadata type does not block the remaining types;
+- offline regression coverage exists in `Program/test_scan_network_optimization.py`.
+
+Detailed plan and validation procedure: `Docs/SCAN_SPEED_OPTIMIZATION.md`.
+
+The next live validation must measure total scan time and retry count. If the first live scan remains above 30 seconds, shared candle/history caching and bounded concurrency for independent SPOT/futures data requests are the next optimization targets.
+
 ## IMPLEMENTED BACKEND CHECKPOINT
 
 ### `Program/services/futures_spot_mapping_service.py`
@@ -158,7 +176,9 @@ The UI displays live Moscow date, time with seconds and current session. No sess
 - nested underlying security metadata is supported;
 - ambiguous mappings are rejected rather than guessed;
 - no permanent manual futures/SPOT ticker universe is required;
-- canonical regression is locked: `BMU6 → BRENT1026`.
+- canonical regression is locked: `BMU6 → BRENT1026`;
+- SPOT metadata is cached for five minutes;
+- independent SPOT instrument-type requests are bounded and parallel.
 
 ### `Program/services/spot_first_pullback_service.py`
 
@@ -204,6 +224,11 @@ Mapping regression now explicitly covers:
 - ambiguous mapping rejection;
 - explicit metadata taking priority over a name guess.
 
+The new network optimization regression covers:
+
+- SPOT metadata cache reuse;
+- all supported SPOT metadata types surviving bounded parallel loading.
+
 Existing regression suites cover session, money-volume, morning pipeline, futures candidate, SPOT pullback and H1 levels.
 
 ## IMPORTANT BOUNDARIES
@@ -217,13 +242,3 @@ Do not measure the first pullback/rebound on the futures chart. Do not turn `FIR
 ## UI / COMPATIBILITY NOTE
 
 `QPainter` belongs to `PySide6.QtGui`, not `PySide6.QtCore`.
-
-## CANONICAL PRINCIPLE TO PRESERVE
-
-**The scanner finds where to look. The user decides where to enter.**
-
-**SPOT determines the idea and structure. FUTURES is what the user trades.**
-
-**H1 is the primary SPOT structural context; M5 is the session formation layer.**
-
-**Futures → SPOT correspondence comes from explicit exchange/BCS underlying metadata whenever available; never guess an ambiguous mapping.**
