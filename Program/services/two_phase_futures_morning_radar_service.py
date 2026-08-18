@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
+from services.futures_trade_candidate_service import FuturesTradeCandidateService
 
 
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
@@ -14,6 +15,15 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     # of HTTP 429/timeout responses during an active session.
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
+
+    def _is_target_spot(self, mapping):
+        """Limit the expensive SPOT screen to the project's five target groups."""
+        if not isinstance(mapping, dict):
+            return False
+        try:
+            return FuturesTradeCandidateService._spot_group(mapping) in FuturesTradeCandidateService.TARGET_SPOT_GROUPS
+        except Exception:
+            return False
 
     def _preliminary_one(self, spot_key):
         ticker, class_code = spot_key
@@ -42,10 +52,13 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             return spot_key, {"status": "ERROR", "error": str(exc)}
 
     def _preliminary_scan(self, mappings):
+        # Do not spend D-candle requests on unrelated futures (indices,
+        # technical/other derivatives, etc.). The final scanner is explicitly
+        # limited to stocks, gas, oil, USD and gold.
         keys = sorted({
             (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip())
             for item in mappings
-            if isinstance(item, dict)
+            if self._is_target_spot(item)
             and str(item.get("spot_ticker") or "").strip()
             and str(item.get("spot_class_code") or "").strip()
         })
@@ -61,7 +74,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return results
 
     def scan(self, mappings=None, limit=None):
-        """Fast pass over all SPOTs, then deep H1/RS/M5 analysis for top finalists."""
+        """Fast pass over target SPOTs, then deep H1/RS/M5 analysis for top finalists."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
