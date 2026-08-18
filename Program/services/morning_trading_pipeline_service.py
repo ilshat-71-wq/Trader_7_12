@@ -2,7 +2,7 @@
 
 from api.bcs_api import BCSAPI
 from services.futures_confirmation_service import FuturesConfirmationService
-from services.futures_morning_radar_service import FuturesMorningRadarService
+from services.two_phase_futures_morning_radar_service import TwoPhaseFuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
 from services.market_session_service import MarketSessionService
 
@@ -10,7 +10,7 @@ from services.market_session_service import MarketSessionService
 class MorningTradingPipelineService:
     """Build the current-session shortlist from Spot radar and futures confirmation."""
 
-    VERSION = "0.7"
+    VERSION = "0.8"
 
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.60, "confirmation": 0.20, "activity": 0.15, "momentum": 0.05, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
@@ -19,7 +19,7 @@ class MorningTradingPipelineService:
     }
 
     def __init__(self, radar_service=None, confirmation_service=None, candidate_service=None, session_service=None):
-        self.radar_service = radar_service or FuturesMorningRadarService()
+        self.radar_service = radar_service or TwoPhaseFuturesMorningRadarService()
         self.session_service = session_service or MarketSessionService()
         if confirmation_service is None:
             api = BCSAPI()
@@ -46,7 +46,6 @@ class MorningTradingPipelineService:
             activity_ratio = max(0.0, float(candidate.get("spot_session_activity_ratio", 0) or 0))
         except (TypeError, ValueError):
             activity_ratio = 0.0
-        # 1.0x = normal prorated pace; 2.0x = twice the normal pace.
         activity_score = min(100.0, activity_ratio * 50.0)
 
         direction = str(candidate.get("direction") or "").upper()
@@ -127,6 +126,6 @@ class MorningTradingPipelineService:
             print(f"TIME: {first.get('market_date', '-')} {first.get('market_time', '-')} MSK")
             print(f"STRATEGY: {first.get('session_strategy', '-')}")
         print()
-        print("Pipeline: SPOT RADAR -> FUTURES CONFIRMATION -> SESSION RANKING -> TOP CANDIDATES")
+        print("Pipeline: FAST SPOT SCREEN -> DEEP SPOT H1/RS/M5 -> FUTURES CONFIRMATION -> TOP CANDIDATES")
         print("Scanner output is read-only and contains no portfolio or order operations.")
         print("=" * 118)
