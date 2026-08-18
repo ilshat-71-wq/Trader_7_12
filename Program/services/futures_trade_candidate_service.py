@@ -68,23 +68,75 @@ class FuturesTradeCandidateService:
         explicit = str(item.get("spot_group") or "").strip().upper()
         if explicit in cls.TARGET_SPOT_GROUPS:
             return explicit
+
         ticker = str(item.get("spot_ticker") or "").strip().upper()
         name = str(item.get("spot_name") or "").strip().upper()
+        class_code = str(item.get("spot_class_code") or "").strip().upper()
         spot_type = str(item.get("spot_type") or "").strip().upper()
+
         text = f"{ticker} {name}"
-        if ticker == "MOEX" or "MOSCOW EXCHANGE" in text or "МОСКОВСКАЯ БИРЖА" in text:
+
+        # IMOEX2 / IRUS2 are market benchmarks, not trading SPOTs.
+        if ticker in {"IMOEX2", "IMOEX", "IRUS2"}:
+            return None
+
+        # MOEX main-board shares.
+        if class_code == "TQBR":
             return "MOEX_STOCK"
-        commodity_types = {"GOODS", "COMMODITY", "COMMODITIES", "METALS"}
-        is_commodity = spot_type in commodity_types or not spot_type
-        is_currency = spot_type in {"CURRENCY", "FX", "CURRENCIES"} or not spot_type
-        if is_commodity and (ticker in {"NG", "NGM"} or "NATURAL GAS" in text or "NATURALGAS" in text or "ПРИРОДНЫЙ ГАЗ" in text):
-            return "GAS"
-        if is_commodity and (ticker in {"BR", "BRM", "CL", "WTI"} or "BRENT" in text or "CRUDE OIL" in text or "LIGHT SWEET CRUDE" in text or "НЕФТЬ" in text):
-            return "OIL"
-        if is_currency and (ticker in {"SI", "USDRUB", "USD"} or "USD/RUB" in text or "USDRUB" in text or "USD RUB" in text or "ДОЛЛАР" in text):
+
+        # USD/RUB spot.
+        if (
+            ticker in {"USD000SMALL", "USDRUB", "USD"}
+            and class_code in {"CETS_FX", "CETS"}
+        ):
             return "USD"
-        if is_commodity and (ticker in {"GOLD", "GLD", "GD"} or "GOLD" in text or "GOLD/RUB" in text or "ЗОЛОТ" in text):
+
+        if spot_type in {"CURRENCY", "FX", "CURRENCIES"} and (
+            ticker in {"USD000SMALL", "USDRUB", "USD"}
+            or "USD/RUB" in text
+            or "USDRUB" in text
+            or "USD RUB" in text
+            or "ДОЛЛАР" in text
+        ):
+            return "USD"
+
+        # Commodity classification.
+        commodity_types = {
+            "GOODS",
+            "COMMODITY",
+            "COMMODITIES",
+            "METALS",
+        }
+        is_commodity = (
+            spot_type in commodity_types
+            or class_code == "FEG"
+        )
+
+        if is_commodity and (
+            ticker in {"NG", "NGM"}
+            or "NATURAL GAS" in text
+            or "NATURALGAS" in text
+            or "ПРИРОДНЫЙ ГАЗ" in text
+        ):
+            return "GAS"
+
+        if is_commodity and (
+            ticker in {"BR", "BRM", "CL", "WTI"}
+            or "BRENT" in text
+            or "CRUDE OIL" in text
+            or "LIGHT SWEET CRUDE" in text
+            or "НЕФТЬ" in text
+        ):
+            return "OIL"
+
+        if is_commodity and (
+            ticker in {"GOLD", "GLD", "GD"}
+            or "GOLD" in text
+            or "GOLD/RUB" in text
+            or "ЗОЛОТ" in text
+        ):
             return "GOLD"
+
         return None
 
     @classmethod

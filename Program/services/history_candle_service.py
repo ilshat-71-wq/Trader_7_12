@@ -362,10 +362,11 @@ class HistoryCandleService:
                 ):
                     continue
 
-                candle["money_volume"] = (
-                    candle["volume"]
-                    * candle["close"]
-                )
+                # BCS candles-chart возвращает volume
+                # уже как денежный оборот.
+                # Дополнительное умножение на close
+                # искажает показатель в тысячи раз.
+                candle["money_volume"] = candle["volume"]
 
                 candles.append(
                     candle

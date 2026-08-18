@@ -210,8 +210,38 @@ class FuturesSpotMappingService:
 
     @staticmethod
     def _class_code(item):
+        """Return the most relevant trading class for a SPOT instrument.
+
+        BCS can return the same ticker on several venues, e.g.:
+            SBER -> SPBRU + TQBR
+            GAZP -> SPBRU + TQBR + SMAL
+
+        For the spot-first MOEX pipeline we must prefer the MOEX board.
+        The top-level classCode is used only as a fallback.
+        """
         boards = item.get("boards") or []
+
         if isinstance(boards, list):
+            moex_codes = []
+
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+
+                exchange = str(board.get("exchange") or "").strip().upper()
+                class_code = str(board.get("classCode") or "").strip()
+
+                if exchange == "MOEX" and class_code:
+                    moex_codes.append(class_code)
+
+            # Prefer the standard MOEX stock class when it exists.
+            if "TQBR" in moex_codes:
+                return "TQBR"
+
+            if moex_codes:
+                return moex_codes[0]
+
+            # No MOEX board: retain a usable board code as fallback.
             for board in boards:
                 if not isinstance(board, dict):
                     continue
@@ -223,7 +253,13 @@ class FuturesSpotMappingService:
 
     @classmethod
     def _build_spot_index(cls, spots):
-        index = {}
+        """Index SPOT records by ticker, keeping only relevant board variants.
+
+        The BCS instrument list may contain the same ticker on SPB, MOEX and
+        quote venues.  The downstream pipeline needs the MOEX representation
+        whenever one exists.
+        """
+        grouped = {}
 
         for spot in spots:
             if not isinstance(spot, dict):
@@ -233,9 +269,42 @@ class FuturesSpotMappingService:
             if not ticker:
                 continue
 
-            index.setdefault(ticker, []).append(spot)
+            grouped.setdefault(ticker, []).append(spot)
+
+        index = {}
+
+        for ticker, candidates in grouped.items():
+            relevant = cls._select_relevant_spots(candidates)
+
+            if relevant:
+                index[ticker] = relevant
 
         return index
+
+    @classmethod
+    def _select_relevant_spots(cls, candidates):
+        """Reduce venue duplicates without guessing between real MOEX assets."""
+        if not candidates:
+            return []
+
+        moex = []
+
+        for spot in candidates:
+            boards = spot.get("boards") or []
+            if not isinstance(boards, list):
+                continue
+
+            if any(
+                isinstance(board, dict)
+                and str(board.get("exchange") or "").strip().upper() == "MOEX"
+                for board in boards
+            ):
+                moex.append(spot)
+
+        if moex:
+            return moex
+
+        return candidates
 
     @classmethod
     def _map_future(cls, future, spots, spot_index):
@@ -254,14 +323,24 @@ class FuturesSpotMappingService:
             candidates = spot_index.get(explicit["ticker"], [])
 
             if explicit["class_code"]:
-                candidates = [
+                class_candidates = [
                     item for item in candidates
                     if cls._class_code(item) == explicit["class_code"]
                 ]
 
-            # An explicit BCS underlying is authoritative. If it cannot be
-            # resolved to exactly one usable SPOT, reject the future rather
-            # than falling back to name matching and accidentally guessing.
+                # BCS underlying metadata is authoritative only when it maps
+                # to exactly one usable SPOT record.
+                if len(class_candidates) == 1:
+                    return cls._result(
+                        future,
+                        class_candidates[0],
+                        "BCS_UNDERLYING",
+                    )
+
+                # Do not silently guess another class when BCS explicitly
+                # supplied one.
+                return None
+
             if len(candidates) != 1:
                 return None
 
