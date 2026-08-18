@@ -70,8 +70,12 @@ def test_preliminary_keeps_top_five():
     service = TestableRadar()
     mappings = FakeMapping().load()
     preliminary = service._preliminary_scan(mappings)
-    ranked = sorted(preliminary, key=lambda key: preliminary[key]["radar_score"], reverse=True)
-    assert ranked[:5] == ["A", "B", "C", "D", "E"]
+    ranked = sorted(
+        preliminary.items(),
+        key=lambda item: item[1]["radar_score"],
+        reverse=True,
+    )
+    assert [key[0] for key in ranked[:5]] == ["A", "B", "C", "D", "E"]
 
 
 def test_deep_limit_is_five():
