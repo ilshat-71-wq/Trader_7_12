@@ -25,6 +25,8 @@ class BCSAPI:
     CANDLE_CACHE_TTL = 30.0
     CANDLE_TIMEOUT = 3.0
     CANDLE_RETRIES = 2
+    METADATA_TIMEOUT = 5.0
+    METADATA_RETRIES = 2
 
     def __init__(self):
         self.access_token = None
@@ -68,12 +70,19 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_instruments(self, instrument_type="FUTURES"):
+        """Load instrument metadata with a bounded, metadata-specific retry policy."""
         url = f"{self.info_url}/instruments/by-type"
         result = []
         page = 0
         while True:
             params = {"type": instrument_type, "page": page, "size": 100}
-            r = RequestHelper.get(url, headers=self.headers(), params=params)
+            r = RequestHelper.get(
+                url,
+                headers=self.headers(),
+                params=params,
+                timeout=self.METADATA_TIMEOUT,
+                max_retries=self.METADATA_RETRIES,
+            )
             print(f"Instruments page {page}:", r.status_code)
             if r.status_code != 200:
                 break
