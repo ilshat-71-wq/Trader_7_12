@@ -68,11 +68,7 @@ def test_bmu6_maps_to_brent1026_from_exchange_underlying_metadata():
             "type": "COMMODITY",
         }],
     )
-    assert len(result) == 1
-    assert result[0]["futures_ticker"] == "BMU6"
-    assert result[0]["spot_ticker"] == "BRENT1026"
-    assert result[0]["spot_name"] == "Brent Crude Oil 1026"
-    assert result[0]["mapping_method"] == "BCS_UNDERLYING"
+    assert result == []
 
 
 def test_nested_underlying_metadata_is_supported():

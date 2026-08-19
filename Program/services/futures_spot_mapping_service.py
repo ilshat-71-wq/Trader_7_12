@@ -197,6 +197,9 @@ class FuturesSpotMappingService:
             ticker = str(record.get("ticker") or "").strip().upper()
             class_code = self._class_code(record)
 
+            if self._looks_like_expiring_contract(ticker):
+                continue
+
             if not ticker or not class_code:
                 continue
 
@@ -457,6 +460,12 @@ class FuturesSpotMappingService:
         return list(unique.values())
 
     @staticmethod
+    def _looks_like_expiring_contract(ticker):
+        """Reject derivative-style tickers accidentally exposed as SPOT."""
+        ticker = str(ticker or "").strip().upper()
+        return bool(re.search(r"^[A-Z]+\d{4}$", ticker))
+
+    @staticmethod
     def _contains_token(text, token):
         if not token:
             return False
@@ -501,6 +510,9 @@ class FuturesSpotMappingService:
         spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
         spot_class = str(mapping.get("spot_class_code") or "").strip()
         method = str(mapping.get("mapping_method") or "").strip().upper()
+
+        if cls._looks_like_expiring_contract(spot_ticker):
+            return False
 
         return bool(
             futures_ticker
