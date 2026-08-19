@@ -5,24 +5,24 @@ Futures Trade Candidate Service.
 
 Stage 5 of the Spot-first architecture.
 
-The current scanner universe is the MOEX Russia Index (IMOEX) equity basket.
-The trading instrument is still the mapped futures contract. The service does
-not place orders and does not invent the user's exact entry.
+The scanner universe is the current IMOEX equity basket plus the configured
+macro markets OIL/GOLD/GAS/USDRUB. The trading instrument is the mapped
+futures contract. The service does not place orders and does not invent the
+user's exact entry.
 """
 
 from datetime import date
+
+from services.market_trading_universe_service import MarketTradingUniverseService
 
 
 class FuturesTradeCandidateService:
     """Build and rank final scanner candidates."""
 
-    VERSION = "0.9"
+    VERSION = "1.0"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
-
-    # The radar is now equity-only: current IMOEX constituents mapped to
-    # MOEX TQBR SPOTs. Futures remain the tradable instruments.
-    TARGET_SPOT_GROUPS = ("MOEX_STOCK",)
+    TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -55,24 +55,6 @@ class FuturesTradeCandidateService:
         if "SHORT" in signal:
             return "SHORT"
         return "NONE"
-
-    @classmethod
-    def _spot_group(cls, item):
-        explicit = str(item.get("spot_group") or "").strip().upper()
-        if explicit in cls.TARGET_SPOT_GROUPS:
-            return explicit
-
-        ticker = str(item.get("spot_ticker") or "").strip().upper()
-        class_code = str(item.get("spot_class_code") or "").strip().upper()
-
-        # Market benchmarks are never tradable SPOT candidates.
-        if ticker in {"IMOEX2", "IMOEX", "IRUS", "IRUS2"}:
-            return None
-
-        if class_code == "TQBR":
-            return "MOEX_STOCK"
-
-        return None
 
     @classmethod
     def calculate_score(cls, radar, confirmation):
@@ -117,6 +99,7 @@ class FuturesTradeCandidateService:
             "status": "READY",
             "direction": direction,
             "spot_group": spot_group,
+            "market_group": spot_group,
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
@@ -163,14 +146,12 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _select_money_leader_radars(cls, radar_results):
-        # There is now one logical group: current IMOEX constituents. Do not
-        # discard SBER/LKOH/GAZP/ROSN/etc. just because another sector/group has
-        # a higher raw money turnover.
+        """Keep the best money/activity leaders across all configured groups."""
         candidates = []
         for radar in radar_results:
             if not isinstance(radar, dict):
                 continue
-            if cls._spot_group(radar) == "MOEX_STOCK":
+            if cls._spot_group(radar) in cls.TARGET_SPOT_GROUPS:
                 candidates.append(radar)
 
         candidates.sort(key=lambda item: (
@@ -186,19 +167,31 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _select_most_liquid_per_spot(cls, candidates):
+        """One underlying gets one final contract: most liquid of the nearest two."""
         grouped = {}
         for candidate in candidates:
             spot_ticker = str(candidate.get("spot_ticker") or "").strip().upper()
             if spot_ticker:
                 grouped.setdefault(spot_ticker, []).append(candidate)
+
         selected = []
         for spot_candidates in grouped.values():
             spot_candidates.sort(key=lambda item: (
-                item["money_volume"], item["trade_count"], item["confirmation_score"], item["candidate_score"],
-                str(item.get("futures_expiry") or "9999-12-31"), str(item.get("futures_ticker") or ""),
+                item["money_volume"],
+                item["trade_count"],
+                item["confirmation_score"],
+                item["candidate_score"],
+                str(item.get("futures_expiry") or "9999-12-31"),
+                str(item.get("futures_ticker") or ""),
             ), reverse=True)
             selected.append(spot_candidates[0])
         return selected
+
+    @classmethod
+    def _spot_group(cls, item):
+        if not isinstance(item, dict):
+            return None
+        return MarketTradingUniverseService.spot_group(item)
 
     def rank(self, radar_results, confirmations=None, limit=3):
         if not isinstance(radar_results, list):
@@ -211,17 +204,24 @@ class FuturesTradeCandidateService:
             raise TypeError("limit must be an integer")
         if limit < 0:
             raise ValueError("limit must be >= 0")
+
         confirmation_map = confirmations or {}
         radar_results = self._select_money_leader_radars(radar_results)
         candidates = []
+
         for radar in radar_results:
             ticker = str(radar.get("futures_ticker") or "").strip().upper()
             confirmation = confirmation_map.get(ticker)
             if confirmation is None and self.confirmation_service is not None:
-                confirmation = self.confirmation_service.analyze(ticker, radar.get("futures_class_code"), self._direction(radar))
+                confirmation = self.confirmation_service.analyze(
+                    ticker,
+                    radar.get("futures_class_code"),
+                    self._direction(radar),
+                )
             candidate = self.build_candidate(radar, confirmation)
             if candidate is not None:
                 candidates.append(candidate)
+
         candidates = self._select_most_liquid_per_spot(candidates)
         candidates.sort(key=lambda item: (
             item["setup_quality_score"],
@@ -235,6 +235,7 @@ class FuturesTradeCandidateService:
             item["trade_count"],
             item["futures_ticker"],
         ), reverse=True)
+
         for rank, candidate in enumerate(candidates, start=1):
             candidate["rank"] = rank
         return candidates[:limit]
