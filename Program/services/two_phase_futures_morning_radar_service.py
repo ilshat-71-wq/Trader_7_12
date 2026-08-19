@@ -354,7 +354,13 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         preliminary = self._preliminary_scan(mappings)
         deep_keys = self._select_deep_keys(preliminary)
 
-        if not deep_keys and not hasattr(self.radar_service, "radar_service"):
+        # Network failures in the FAST stage must not turn a read-only market
+        # scan into a false "NO FINAL CANDIDATES".  If FAST produced no usable
+        # finalists, fall back to the proven base radar over the prepared
+        # universe.  The base radar applies its normal liquidity, direction,
+        # RS, group and candidate filters; this changes resilience only, not
+        # trading criteria.
+        if not deep_keys:
             return super().scan(mappings=mappings, limit=limit)
 
         deep_mappings = [
