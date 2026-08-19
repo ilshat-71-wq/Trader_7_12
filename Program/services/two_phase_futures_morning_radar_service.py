@@ -1,5 +1,6 @@
 """Two-phase futures radar: broad market screen, deep analysis for finalists."""
 
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
@@ -11,15 +12,82 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     """Scan IMOEX equities plus the configured macro markets."""
 
-    VERSION = "1.1"
+    VERSION = "1.2"
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 8
     DEEP_DIRECTION_LIMIT = 4
+    MAX_CONTRACTS_PER_SPOT = 2
+    MAX_DAYS_TO_EXPIRY = 3
 
     def __init__(self, *args, index_universe_service=None, trading_universe_service=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.index_universe_service = index_universe_service or MoexIndexUniverseService()
         self.trading_universe_service = trading_universe_service or MarketTradingUniverseService()
+
+    @staticmethod
+    def _parse_expiry(value):
+        if value is None:
+            return None
+        if isinstance(value, date):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+    @classmethod
+    def _select_current_contracts(cls, mappings):
+        """Keep the nearest two eligible contracts for every underlying.
+
+        The final choice between these two is made later by the candidate
+        service using actual futures liquidity/turnover. Contracts with three
+        or fewer calendar days to expiry are excluded unconditionally.
+        """
+        grouped = {}
+        today = date.today()
+
+        for mapping in mappings or []:
+            if not isinstance(mapping, dict):
+                continue
+
+            spot_ticker = str(mapping.get("spot_ticker") or "").strip().upper()
+            if not spot_ticker:
+                continue
+
+            expiry = cls._parse_expiry(mapping.get("futures_expiry"))
+            if expiry is None:
+                continue
+
+            days_to_expiry = (expiry - today).days
+            if days_to_expiry <= cls.MAX_DAYS_TO_EXPIRY:
+                continue
+
+            item = dict(mapping)
+            item["futures_expiry"] = expiry.isoformat()
+            item["days_to_expiry"] = days_to_expiry
+            grouped.setdefault(spot_ticker, []).append(item)
+
+        selected = []
+        for candidates in grouped.values():
+            candidates.sort(
+                key=lambda item: (
+                    cls._parse_expiry(item.get("futures_expiry")) or date.max,
+                    str(item.get("futures_ticker") or ""),
+                )
+            )
+            selected.extend(candidates[: cls.MAX_CONTRACTS_PER_SPOT])
+
+        return sorted(
+            selected,
+            key=lambda item: (
+                str(item.get("spot_ticker") or ""),
+                cls._parse_expiry(item.get("futures_expiry")) or date.max,
+                str(item.get("futures_ticker") or ""),
+            ),
+        )
 
     def _prepare_universe(self, mappings):
         """Keep current IMOEX equities and OIL/GOLD/GAS/USDRUB mappings."""
@@ -30,14 +98,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         # are intentionally preserved and then classified by the unified
         # trading-universe service.
         imoex = self.index_universe_service.filter_mappings(mappings)
-        imoex_keys = {
-            (
-                str(item.get("spot_ticker") or "").strip().upper(),
-                str(item.get("futures_ticker") or "").strip().upper(),
-                str(item.get("futures_class_code") or "").strip(),
-            )
-            for item in imoex
-        }
 
         macro = []
         for item in mappings:
