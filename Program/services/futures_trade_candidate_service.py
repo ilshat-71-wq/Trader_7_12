@@ -84,6 +84,16 @@ class FuturesTradeCandidateService:
         direction = cls._direction(radar)
         if direction not in {"LONG", "SHORT"}:
             return None
+
+        # Direction must agree with the BASE ASSET's relative strength.
+        # LONG requires SPOT to outperform the benchmark; SHORT requires
+        # SPOT to underperform it. Futures never participate in this rule.
+        rs = cls._float(radar.get("relative_strength"))
+        if direction == "LONG" and rs <= 0.0:
+            return None
+        if direction == "SHORT" and rs >= 0.0:
+            return None
+
         spot_group = cls._spot_group(radar)
         if spot_group not in cls.TARGET_SPOT_GROUPS:
             return None
@@ -123,7 +133,7 @@ class FuturesTradeCandidateService:
             "trend_state": radar.get("trend_state", "UNKNOWN"),
             "trend_days": int(cls._float(radar.get("trend_days"))),
             "radar_score": round(cls._float(radar.get("radar_score")), 2),
-            "relative_strength": cls._float(radar.get("relative_strength")),
+            "relative_strength": rs,
             "relative_strength_score": cls._float(radar.get("relative_strength_score")),
             "relative_strength_signal": radar.get("relative_strength_signal", "UNAVAILABLE"),
             "relative_strength_status": radar.get("relative_strength_status", "NO_DATA"),
