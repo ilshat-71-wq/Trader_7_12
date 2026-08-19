@@ -24,8 +24,9 @@ class FuturesMorningRadarService:
     MAX_CONTRACTS_PER_SPOT = 2
     MAPPING_CACHE_SECONDS = 300
 
-    def __init__(self, mapping_service=None, radar_service=None, history_service=None, session_service=None, session_money_service=None, spot_setup_service=None):
-        self.mapping_service = mapping_service or FuturesSpotMappingService()
+    def __init__(self, api=None, mapping_service=None, radar_service=None, history_service=None, session_service=None, session_money_service=None, spot_setup_service=None):
+        self.api = api
+        self.mapping_service = mapping_service or FuturesSpotMappingService(api=self.api)
         self.radar_service = radar_service or InstrumentMorningRadarService()
         self.history_service = history_service or HistoryCandleService()
         self.session_service = session_service or MarketSessionService()

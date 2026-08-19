@@ -19,15 +19,26 @@ class MorningTradingPipelineService:
     }
 
     def __init__(self, radar_service=None, confirmation_service=None, candidate_service=None, session_service=None):
-        self.radar_service = radar_service or TwoPhaseFuturesMorningRadarService()
         self.session_service = session_service or MarketSessionService()
-        if confirmation_service is None:
+
+        api = None
+        if radar_service is None or confirmation_service is None:
             api = BCSAPI()
             if not api.authorize():
                 raise RuntimeError("BCS API authorization failed")
+
+        self.radar_service = (
+            radar_service
+            or TwoPhaseFuturesMorningRadarService(api=api)
+        )
+
+        if confirmation_service is None:
             confirmation_service = FuturesConfirmationService(api=api)
+
         self.confirmation_service = confirmation_service
-        self.candidate_service = candidate_service or FuturesTradeCandidateService(confirmation_service=self.confirmation_service)
+        self.candidate_service = candidate_service or FuturesTradeCandidateService(
+            confirmation_service=self.confirmation_service
+        )
 
     @classmethod
     def _session_rank_score(cls, candidate, session):

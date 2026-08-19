@@ -127,30 +127,136 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return self.trading_universe_service.spot_group(mapping) in self.trading_universe_service.TARGET_GROUPS
 
     def _preliminary_one(self, spot_key):
+        """
+        FAST SCREEN.
+
+        The preliminary stage answers only:
+        "Where is money/activity appearing TODAY?"
+
+        Historical average turnover is used only as the denominator for
+        activity_ratio. It is NOT used as the primary ranking criterion.
+        Expensive RS/setup/futures confirmation remain in the DEEP stage.
+        """
         ticker, class_code = spot_key
+
         try:
             base = getattr(self.radar_service, "radar_service", None)
             if base is None:
                 return spot_key, None
-            raw = base.calculate(ticker=ticker, class_code=class_code)
+
+            raw = base.calculate(
+                ticker=ticker,
+                class_code=class_code,
+            )
+
             if not isinstance(raw, dict):
                 return spot_key, None
-            daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
-            trend = daily.get("trend") if isinstance(daily.get("trend"), dict) else {}
-            money = raw.get("money") if isinstance(raw.get("money"), dict) else {}
-            trend_score = self.radar_service.calculate_trend_score(trend)
-            money_score = self.radar_service.calculate_money_score(money)
-            radar_score = self.radar_service.calculate_radar_score(trend_score, money_score)
+
+            daily = raw.get("daily")
+            if not isinstance(daily, dict):
+                daily = {}
+
+            trend = daily.get("trend")
+            if not isinstance(trend, dict):
+                trend = {}
+
+            money = raw.get("money")
+            if not isinstance(money, dict):
+                money = {}
+
+            direction = str(
+                trend.get("direction", "NONE")
+            ).upper()
+
+            change_percent = float(
+                trend.get("change_percent", 0) or 0
+            )
+
+            average_daily_money = float(
+                money.get("average_daily_money_volume", 0) or 0
+            )
+
+            # Use the same current-session money source as the real
+            # FuturesMorningRadarService. This keeps FAST and DEEP
+            # based on exactly the same money/activity definition.
+            session_money_service = self.session_money_service
+            session_service = self.session_service
+
+            if session_money_service is None or session_service is None:
+                return spot_key, {
+                    "status": "ERROR",
+                    "error": "Session money service unavailable",
+                }
+
+            trading_date = session_service.get_trading_day()
+            session = session_service.get_session()
+
+            session_money = session_money_service.calculate(
+                ticker,
+                class_code,
+                trading_date=trading_date,
+                timeframe_minutes=5,
+                session=session,
+            )
+
+            if not isinstance(session_money, dict):
+                session_money = {}
+
+            current_money = float(
+                session_money.get("money_volume", 0) or 0
+            )
+            elapsed_minutes = int(
+                session_money.get("elapsed_minutes", 0) or 0
+            )
+            expected_minutes = int(
+                session_money.get("expected_minutes", 0) or 0
+            )
+            money_per_minute = float(
+                session_money.get("money_per_minute", 0) or 0
+            )
+
+            activity_ratio = FuturesMorningRadarService._activity_ratio(
+                current_money,
+                average_daily_money,
+                elapsed_minutes,
+                expected_minutes,
+            )
+
+            # Directional movement is secondary to current money/activity.
+            directional_change = (
+                change_percent
+                if direction == "LONG"
+                else -change_percent
+                if direction == "SHORT"
+                else 0.0
+            )
+
             return spot_key, {
                 "status": "OK",
-                "direction": str(trend.get("direction", "NONE")).upper(),
-                "radar_score": float(radar_score or 0),
-                "average_daily_money": float(money.get("average_daily_money_volume", 0) or 0),
-                "trend_score": float(trend_score or 0),
-                "money_score": float(money_score or 0),
+                "direction": direction,
+
+                # TODAY'S MONEY — primary FAST SCREEN factors
+                "spot_money_volume": current_money,
+                "spot_money_per_minute": money_per_minute,
+                "spot_session_activity_ratio": activity_ratio,
+
+                # Historical turnover is retained only for context /
+                # denominator, never as the main ranking factor.
+                "average_daily_money": average_daily_money,
+
+                # Secondary directional context.
+                "change_percent": change_percent,
+                "directional_change": directional_change,
+
+                "elapsed_minutes": elapsed_minutes,
+                "expected_minutes": expected_minutes,
             }
+
         except Exception as exc:
-            return spot_key, {"status": "ERROR", "error": str(exc)}
+            return spot_key, {
+                "status": "ERROR",
+                "error": str(exc),
+            }
 
     def _preliminary_scan(self, mappings):
         keys = sorted({
@@ -173,41 +279,63 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     @classmethod
     def _select_deep_keys(cls, preliminary):
+        """
+        Select finalists primarily by TODAY'S money/activity.
+
+        Priority:
+        1. unusual current-session activity;
+        2. money flow per minute;
+        3. absolute current-session money;
+        4. directional movement.
+
+        Historical average turnover is intentionally NOT a ranking factor.
+        It is already embedded in activity_ratio as the asset's own baseline.
+        """
         valid = [
             (key, value)
             for key, value in preliminary.items()
-            if isinstance(value, dict) and str(value.get("status", "")).upper() == "OK"
+            if (
+                isinstance(value, dict)
+                and str(value.get("status", "")).upper() == "OK"
+            )
         ]
+
+        def f(value, default=0.0):
+            try:
+                return float(value or default)
+            except (TypeError, ValueError):
+                return default
+
         ranked = sorted(
             valid,
             key=lambda item: (
-                item[1].get("radar_score", 0),
-                item[1].get("average_daily_money", 0),
+                f(item[1].get("spot_session_activity_ratio")),
+                f(item[1].get("spot_money_per_minute")),
+                f(item[1].get("spot_money_volume")),
+                f(item[1].get("directional_change")),
             ),
             reverse=True,
         )
 
+        # Keep directional diversity where possible, but do NOT sacrifice
+        # a materially stronger money/activity leader just to fill LONG/SHORT.
         selected = []
         selected_keys = set()
-        for direction in ("LONG", "SHORT"):
-            count = 0
-            for key, value in ranked:
-                if key in selected_keys or str(value.get("direction", "")).upper() != direction:
-                    continue
-                selected.append(key)
-                selected_keys.add(key)
-                count += 1
-                if count >= cls.DEEP_DIRECTION_LIMIT or len(selected) >= cls.DEEP_SPOT_LIMIT:
-                    break
+
+        for key, value in ranked:
             if len(selected) >= cls.DEEP_SPOT_LIMIT:
                 break
 
-        for key, _value in ranked:
-            if len(selected) >= cls.DEEP_SPOT_LIMIT:
-                break
-            if key not in selected_keys:
-                selected.append(key)
-                selected_keys.add(key)
+            activity = f(value.get("spot_session_activity_ratio"))
+            money_per_minute = f(value.get("spot_money_per_minute"))
+            money_volume = f(value.get("spot_money_volume"))
+
+            # Ignore instruments with no meaningful current-session flow.
+            if activity <= 0 and money_per_minute <= 0 and money_volume <= 0:
+                continue
+
+            selected.append(key)
+            selected_keys.add(key)
 
         return set(selected)
 

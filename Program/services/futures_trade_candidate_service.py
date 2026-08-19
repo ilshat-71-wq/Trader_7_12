@@ -19,7 +19,7 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class FuturesTradeCandidateService:
     """Build and rank final scanner candidates."""
 
-    VERSION = "1.1"
+    VERSION = "1.0"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
@@ -57,49 +57,95 @@ class FuturesTradeCandidateService:
         return "NONE"
 
     @classmethod
-    def _relative_strength_bonus(cls, radar, direction):
-        """Apply RS only when the SPOT benchmark comparison is valid.
-
-        RS is a property of the underlying SPOT asset, not of the futures
-        contract.  A positive RS means the SPOT is outperforming IMOEX2/IRUS2;
-        a negative RS means underperformance.  Therefore positive RS supports
-        LONG and negative RS supports SHORT.
-
-        Crucially, NO_DATA/ERROR/UNAVAILABLE must contribute zero rather than
-        treating the historical default 0.0 as a real neutral observation.
+    def calculate_score(cls, radar, confirmation):
         """
-        status = str(radar.get("relative_strength_status") or "").upper()
-        if status not in {"OK", "AVAILABLE"}:
-            return 0.0
+        Candidate score answers one question:
+
+        Where are money and unusual activity appearing TODAY,
+        and is there enough directional/movement confirmation to watch it?
+
+        Setup is deliberately NOT a gate and has only a small quality bonus.
+        The scanner finds WHERE to look; the user decides WHEN to enter.
+        """
+        direction = cls._direction(radar)
+
+        activity = max(
+            0.0,
+            cls._float(
+                radar.get(
+                    "spot_session_activity_ratio",
+                    radar.get("spot_money_ratio"),
+                )
+            ),
+        )
+
+        # Convert activity anomaly into a bounded 0..100 component.
+        # 1.0x = normal, 2.0x = strong, 3.0x+ = exceptional.
+        money_score = min(activity / 3.0, 1.0) * 100.0
+
+        money_per_minute = max(
+            0.0,
+            cls._float(radar.get("spot_money_per_minute")),
+        )
+        money_volume = max(
+            0.0,
+            cls._float(radar.get("spot_money_volume")),
+        )
+
+        # Activity remains the dominant factor. Absolute money only
+        # breaks ties between otherwise similar activity leaders.
+        money_presence_bonus = min(
+            (money_per_minute / 50_000_000.0) * 5.0,
+            5.0,
+        )
+        absolute_money_bonus = min(
+            (money_volume / 1_000_000_000.0) * 5.0,
+            5.0,
+        )
+
+        futures_score = max(
+            0.0,
+            min(100.0, cls._float(confirmation.get("score"))),
+        )
 
         rs = cls._float(radar.get("relative_strength"))
         directional_rs = rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
-        if directional_rs > 0:
-            return min(directional_rs * 20.0, 10.0)
-        if directional_rs < 0:
-            return max(directional_rs * 20.0, -10.0)
-        return 0.0
-
-    @classmethod
-    def calculate_score(cls, radar, confirmation):
-        radar_score = max(0.0, min(100.0, cls._float(radar.get("radar_score"))))
-        confirmation_score = max(0.0, min(100.0, cls._float(confirmation.get("score"))))
-        direction = cls._direction(radar)
-        rs_bonus = cls._relative_strength_bonus(radar, direction)
+        rs_bonus = max(-10.0, min(10.0, directional_rs * 20.0))
 
         futures_change = cls._float(confirmation.get("price_change_percent"))
-        directional_change = futures_change if direction == "LONG" else -futures_change if direction == "SHORT" else 0.0
-        futures_change_bonus = min(directional_change * 5.0, 5.0) if directional_change > 0 else max(directional_change * 5.0, -5.0) if directional_change < 0 else 0.0
+        directional_change = (
+            futures_change
+            if direction == "LONG"
+            else -futures_change
+            if direction == "SHORT"
+            else 0.0
+        )
+        movement_bonus = max(-5.0, min(5.0, directional_change * 5.0))
 
         setup_state = str(radar.get("setup_state") or "WAIT").upper()
-        setup_quality = max(0.0, min(100.0, cls._float(radar.get("setup_quality_score"))))
-        setup_bonus = setup_quality * 0.10
-        if setup_state == "CONFIRMED":
-            setup_bonus += 5.0
-        elif setup_state == "WATCH":
-            setup_bonus += 2.0
+        setup_quality = max(
+            0.0,
+            min(100.0, cls._float(radar.get("setup_quality_score"))),
+        )
 
-        return round(min(radar_score * 0.55 + confirmation_score * 0.25 + rs_bonus + futures_change_bonus + setup_bonus, 100.0), 2)
+        # Setup is context, not an entry signal and not a candidate gate.
+        setup_bonus = min(setup_quality * 0.03, 3.0)
+        if setup_state == "CONFIRMED":
+            setup_bonus += 1.0
+        elif setup_state == "WATCH":
+            setup_bonus += 0.5
+
+        score = (
+            money_score * 0.60
+            + futures_score * 0.15
+            + money_presence_bonus
+            + absolute_money_bonus
+            + rs_bonus
+            + movement_bonus
+            + setup_bonus
+        )
+
+        return round(max(0.0, min(score, 100.0)), 2)
 
     @classmethod
     def build_candidate(cls, radar, confirmation):
@@ -183,7 +229,7 @@ class FuturesTradeCandidateService:
             cls._float(item.get("setup_quality_score")),
             cls._float(item.get("spot_money_ratio")),
             cls._float(item.get("radar_score")),
-            cls._float(item.get("relative_strength")) if str(item.get("relative_strength_status") or "").upper() in {"OK", "AVAILABLE"} else 0.0,
+            cls._float(item.get("relative_strength")),
             str(item.get("spot_ticker") or ""),
         ), reverse=True)
         return candidates[: cls.MONEY_LEADER_SHORTLIST]
@@ -246,16 +292,18 @@ class FuturesTradeCandidateService:
                 candidates.append(candidate)
 
         candidates = self._select_most_liquid_per_spot(candidates)
+        # Final ranking: money/activity first.
+        # Setup is deliberately last and never determines eligibility.
         candidates.sort(key=lambda item: (
-            item["setup_quality_score"],
             item["spot_session_activity_ratio"],
+            item["spot_money_per_minute"],
             item["spot_money_volume"],
             item["candidate_score"],
+            item["relative_strength"],
             item["confirmation_score"],
-            item["radar_score"],
-            self._float(item.get("relative_strength")) if str(item.get("relative_strength_status") or "").upper() in {"OK", "AVAILABLE"} else 0.0,
             item["money_volume"],
             item["trade_count"],
+            item["setup_quality_score"],
             item["futures_ticker"],
         ), reverse=True)
 

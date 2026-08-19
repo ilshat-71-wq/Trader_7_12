@@ -99,8 +99,9 @@ class FuturesSpotMappingService:
 
     def load(self):
         """Return only futures for which a unique usable SPOT is known."""
-        if not self.api.authorize():
-            return []
+        if not getattr(self.api, "access_token", None):
+            if not self.api.authorize():
+                return []
 
         futures = self.futures_universe_service.load(authorize=False)
         spots = self._load_spot_instruments()
