@@ -514,9 +514,26 @@ class FuturesSpotMappingService:
 
     @staticmethod
     def _looks_like_expiring_contract(ticker):
-        """Reject derivative-style tickers accidentally exposed as SPOT."""
+        """Reject futures-style month/year tickers accidentally exposed as SPOT.
+
+        Real BCS SPOT GOODS may legitimately contain a four-digit year,
+        e.g. BRENT1026 and NGAS0926.  Futures use the MOEX month-code
+        convention followed by a one-digit year, e.g. BRU6, NGU6, WTU6.
+        """
         ticker = str(ticker or "").strip().upper()
-        return bool(re.search(r"^[A-Z]+\d{4}$", ticker))
+
+        if not ticker:
+            return False
+
+        # MOEX futures month codes:
+        # F=Jan G=Feb H=Mar J=Apr K=May M=Jun N=Jul Q=Aug
+        # U=Sep V=Oct X=Nov Z=Dec
+        return bool(
+            re.search(
+                r"^[A-Z]{2,6}[FGHJKMNQUVXZ]\d$",
+                ticker,
+            )
+        )
 
     @staticmethod
     def _contains_token(text, token):
