@@ -1,15 +1,16 @@
-"""Two-phase futures radar: cheap SPOT screen first, deep analysis only for finalists."""
+"""Two-phase futures radar: cheap IMOEX SPOT screen first, deep analysis only for finalists."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
+from services.moex_index_universe_service import MoexIndexUniverseService
 
 
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
-    """Keep the existing radar contract while reducing expensive history calls."""
+    """Keep the radar contract while restricting SPOT analysis to current IMOEX constituents."""
 
-    VERSION = "0.9"
+    VERSION = "1.0"
     # BCS rate-limits concurrent history requests. Keep the preliminary pass
     # parallel, but bounded enough to avoid turning the fast phase into a burst
     # of HTTP 429/timeout responses during an active session.
@@ -17,12 +18,16 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     DEEP_SPOT_LIMIT = 5
     DEEP_DIRECTION_LIMIT = 3
 
+    def __init__(self, *args, index_universe_service=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.index_universe_service = index_universe_service or MoexIndexUniverseService()
+
     def _is_target_spot(self, mapping):
-        """Limit the expensive SPOT screen to the project's five target groups."""
+        """Only MOEX main-board equities are eligible after the IMOEX universe gate."""
         if not isinstance(mapping, dict):
             return False
         try:
-            return FuturesTradeCandidateService._spot_group(mapping) in FuturesTradeCandidateService.TARGET_SPOT_GROUPS
+            return FuturesTradeCandidateService._spot_group(mapping) == "MOEX_STOCK"
         except Exception:
             return False
 
@@ -53,9 +58,9 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             return spot_key, {"status": "ERROR", "error": str(exc)}
 
     def _preliminary_scan(self, mappings):
-        # Do not spend D-candle requests on unrelated futures (indices,
-        # technical/other derivatives, etc.). The final scanner is explicitly
-        # limited to stocks, gas, oil, USD and gold.
+        # The IMOEX gate has already removed commodities, FX, indices and other
+        # derivatives. Keep this second gate as a defensive invariant so a
+        # direct/test caller cannot accidentally spend history calls elsewhere.
         keys = sorted({
             (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip())
             for item in mappings
@@ -76,7 +81,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     @classmethod
     def _select_deep_keys(cls, preliminary):
-        """Select deep finalists across the full market while preserving LONG/SHORT competition."""
+        """Select deep finalists while preserving LONG/SHORT competition."""
         valid = [
             (key, value)
             for key, value in preliminary.items()
@@ -109,7 +114,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             if len(selected) >= cls.DEEP_SPOT_LIMIT:
                 break
 
-        # Fill remaining deep slots by the global preliminary score.
         for key, _value in ranked:
             if len(selected) >= cls.DEEP_SPOT_LIMIT:
                 break
@@ -120,20 +124,27 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return set(selected)
 
     def scan(self, mappings=None, limit=None):
-        """Fast pass over target SPOTs, then deep H1/RS/M5 analysis for finalists."""
+        """Fast IMOEX pass, then deep H1/RS/M5 analysis for equity finalists."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
             return []
+
         mappings = self._select_current_contracts(mappings)
+        if not mappings:
+            return []
+
+        # Hard universe gate: only current IMOEX constituents enter any radar
+        # calculation. A temporary ISS outage uses the last successful cached
+        # snapshot; with no successful snapshot, the scanner safely returns no
+        # candidates instead of silently reverting to the old broad universe.
+        mappings = self.index_universe_service.filter_mappings(mappings)
         if not mappings:
             return []
 
         preliminary = self._preliminary_scan(mappings)
         deep_keys = self._select_deep_keys(preliminary)
 
-        # If a test double does not expose the underlying MorningRadarService,
-        # preserve the original behavior instead of silently returning nothing.
         if not deep_keys and not hasattr(self.radar_service, "radar_service"):
             return super().scan(mappings=mappings, limit=limit)
 
@@ -145,6 +156,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         results = super().scan(mappings=deep_mappings, limit=limit)
         for item in results:
             item["scan_phase"] = "DEEP"
+            item["spot_universe"] = "IMOEX"
             key = (
                 str(item.get("spot_ticker") or "").strip().upper(),
                 str(item.get("spot_class_code") or "").strip(),
