@@ -78,6 +78,13 @@ class FuturesSpotMappingService:
         "underlyingAsset",
     )
 
+    # BCS exposes WTI futures with textual underlying "WTI", while
+    # the actual usable SPOT instrument is LCROIL1026NY (FEG / GOODS).
+    # This is an explicit, verified BCS alias — not a heuristic guess.
+    UNDERLYING_TICKER_ALIASES = {
+        "WTI": "LCROIL1026NY",
+    }
+
     EXPLICIT_CLASS_KEYS = (
         "baseAssetSecurityClassCode",
         "underlyingClassCode",
@@ -311,12 +318,54 @@ class FuturesSpotMappingService:
         return candidates
 
     @classmethod
+    def _future_class_code(cls, future):
+        """Resolve the usable futures trading class from BCS metadata."""
+        value = str(future.get("classCode") or "").strip()
+        if value:
+            return value
+
+        boards = future.get("boards") or []
+        if isinstance(boards, list):
+            # Prefer the MOEX board when BCS puts classCode only there.
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+
+                exchange = str(
+                    board.get("exchange") or ""
+                ).strip().upper()
+
+                class_code = str(
+                    board.get("classCode") or ""
+                ).strip()
+
+                if exchange == "MOEX" and class_code:
+                    return class_code
+
+            # Generic board fallback.
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+
+                class_code = str(
+                    board.get("classCode") or ""
+                ).strip()
+
+                if class_code:
+                    return class_code
+
+        return ""
+
+    @classmethod
     def _map_future(cls, future, spots, spot_index):
         if not isinstance(future, dict):
             return None
 
-        futures_ticker = str(future.get("ticker") or "").strip().upper()
-        futures_class_code = str(future.get("classCode") or "").strip()
+        futures_ticker = str(
+            future.get("ticker") or ""
+        ).strip().upper()
+
+        futures_class_code = cls._future_class_code(future)
 
         if not futures_ticker or not futures_class_code:
             return None
@@ -324,7 +373,11 @@ class FuturesSpotMappingService:
         explicit = cls._explicit_underlying(future)
 
         if explicit["ticker"]:
-            candidates = spot_index.get(explicit["ticker"], [])
+            spot_ticker = cls.UNDERLYING_TICKER_ALIASES.get(
+                explicit["ticker"],
+                explicit["ticker"],
+            )
+            candidates = spot_index.get(spot_ticker, [])
 
             if explicit["class_code"]:
                 class_candidates = [
@@ -482,7 +535,7 @@ class FuturesSpotMappingService:
     def _result(cls, future, spot, method):
         return {
             "futures_ticker": future.get("ticker"),
-            "futures_class_code": future.get("classCode"),
+            "futures_class_code": cls._future_class_code(future),
             "futures_expiry": future.get("expiry"),
             "spot_ticker": str(spot.get("ticker") or "").strip().upper(),
             "spot_class_code": cls._class_code(spot),
