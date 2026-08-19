@@ -1,228 +1,66 @@
-"""
-Trader_7_12 Pro
+"""Relative strength of a BASE ASSET (SPOT) versus IMOEX2 / IRUS2.
 
-Relative Strength Service v0.1
-
-Назначение:
-
-- сравнение доходности инструмента с benchmark
-- benchmark: IMOEX2 / IRUS2 — динамически определяемый рыночный индекс
-- подготовка Relative Strength для VolumeScanner
-
-Формула:
-
-instrument_return =
-(instrument_current - instrument_previous)
-/ instrument_previous * 100
-
-benchmark_return =
-(benchmark_current - benchmark_previous)
-/ benchmark_previous * 100
-
-relative_strength =
-instrument_return - benchmark_return
+The futures contract is never part of this calculation.
 """
 
 
 class RelativeStrengthService:
+    """Calculate SPOT relative strength against the market benchmark."""
 
-    def __init__(self):
-        pass
-
-    # ---------------------------------------------------------
-    # RETURN
-    # ---------------------------------------------------------
-
-    def calculate_return(
-        self,
-        previous_price,
-        current_price
-    ):
-        """
-        Доходность инструмента в процентах.
-        """
-
+    def calculate_return(self, previous_price, current_price):
         try:
             previous_price = float(previous_price)
             current_price = float(current_price)
-
         except (TypeError, ValueError):
-
             return 0.0
-
         if previous_price <= 0:
-
             return 0.0
-
-        return (
-            (current_price - previous_price)
-            / previous_price
-            * 100
-        )
-
-    # ---------------------------------------------------------
-    # RELATIVE STRENGTH
-    # ---------------------------------------------------------
+        return (current_price - previous_price) / previous_price * 100.0
 
     def calculate(
         self,
         instrument_previous,
         instrument_current,
         benchmark_previous,
-        benchmark_current
+        benchmark_current,
     ):
-        """
-        Сравнивает доходность инструмента с benchmark.
-        """
-
-        instrument_return = self.calculate_return(
-            instrument_previous,
-            instrument_current
-        )
-
-        benchmark_return = self.calculate_return(
-            benchmark_previous,
-            benchmark_current
-        )
-
-        relative_strength = (
-            instrument_return
-            - benchmark_return
-        )
-
-        score = self._score(
-            relative_strength
-        )
-
-        signal = self._signal(
-            relative_strength
-        )
-
+        instrument_return = self.calculate_return(instrument_previous, instrument_current)
+        benchmark_return = self.calculate_return(benchmark_previous, benchmark_current)
+        relative_strength = instrument_return - benchmark_return
         return {
-            "instrument_return": round(
-                instrument_return,
-                4
-            ),
-
-            "benchmark_return": round(
-                benchmark_return,
-                4
-            ),
-
-            "relative_strength": round(
-                relative_strength,
-                4
-            ),
-
-            "relative_strength_score": score,
-
-            "relative_strength_signal": signal
+            "instrument_return": round(instrument_return, 4),
+            "benchmark_return": round(benchmark_return, 4),
+            "relative_strength": round(relative_strength, 4),
+            "relative_strength_score": self._score(relative_strength),
+            "relative_strength_signal": self._signal(relative_strength),
         }
 
-    # ---------------------------------------------------------
-    # SCORE
-    # ---------------------------------------------------------
-
-    def _score(
-        self,
-        relative_strength
-    ):
-        """
-        Нормализованный RS score 0-100.
-
-        50 = нейтрально
-        >50 = сильнее рынка
-        <50 = слабее рынка
-        """
-
+    @staticmethod
+    def _score(relative_strength):
         try:
-
-            rs = float(
-                relative_strength
-            )
-
+            rs = float(relative_strength)
         except (TypeError, ValueError):
-
             return 50.0
+        return round(max(0.0, min(100.0, 50.0 + rs * 20.0)), 2)
 
-        # RS после calculate_return хранится
-        # в процентных пунктах:
-        #
-        # +1.00 = +1%
-        # -1.00 = -1%
-        #
-        # Нормализация:
-        #
-        # +2.50% относительно benchmark -> 100
-        #  0.00%                         -> 50
-        # -2.50% относительно benchmark -> 0
+    @staticmethod
+    def _signal(relative_strength):
+        """Canonical project labels: STRONGER / WEAKER / NEUTRAL.
 
-        score = 50 + (
-            rs * 20
-        )
+        Positive RS means the SPOT asset outperformed the benchmark:
+        - market up + asset up more => STRONGER
+        - market down + asset down less => STRONGER
 
-        return round(
-            max(
-                0,
-                min(
-                    100,
-                    score
-                )
-            ),
-            2
-        )
-
-    # ---------------------------------------------------------
-    # SIGNAL
-    # ---------------------------------------------------------
-
-    def _signal(
-        self,
-        relative_strength
-    ):
+        Negative RS means underperformance:
+        - market up + asset up less => WEAKER
+        - market down + asset down more => WEAKER
         """
-        Направление относительно benchmark.
-        """
-
         try:
-
-            rs = float(
-                relative_strength
-            )
-
+            rs = float(relative_strength)
         except (TypeError, ValueError):
-
             return "NEUTRAL"
-
-        # RS хранится в процентных пунктах:
-        #
-        # +1.00 = +1%
-        # -1.00 = -1%
-
-        # Сильная относительная сила:
-        # инструмент существенно сильнее IMOEX.
-
-        if rs >= 1.50:
-
-            return "STRONG"
-
-        # Положительная относительная сила.
-
-        if rs >= 0.50:
-
-            return "POSITIVE"
-
-        # Сильная относительная слабость:
-        # инструмент существенно слабее IMOEX.
-
-        if rs <= -1.50:
-
-            return "WEAK"
-
-        # Отрицательная относительная сила.
-
-        if rs <= -0.50:
-
-            return "NEGATIVE"
-
+        if rs >= 0.20:
+            return "STRONGER"
+        if rs <= -0.20:
+            return "WEAKER"
         return "NEUTRAL"
