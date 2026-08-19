@@ -5,8 +5,6 @@ shown to the user; futures trades, futures price movement and futures
 confirmation never determine eligibility, direction, RS or score.
 """
 
-from datetime import date
-
 from services.market_trading_universe_service import MarketTradingUniverseService
 
 
@@ -98,14 +96,10 @@ class FuturesTradeCandidateService:
         if spot_group not in cls.TARGET_SPOT_GROUPS:
             return None
 
-        expiry = radar.get("futures_expiry")
-        if expiry:
-            try:
-                if (date.fromisoformat(str(expiry)[:10]) - date.today()).days <= cls.MAX_DAYS_TO_EXPIRY:
-                    return None
-            except ValueError:
-                return None
-
+        # Futures are not part of SPOT candidate eligibility.
+        # Expiry, futures price, futures volume and futures confirmation
+        # must never remove a BASE ASSET from the radar.
+        
         score = cls.calculate_score(radar)
         return {
             "version": cls.VERSION,
