@@ -9,9 +9,13 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 
 
 class FuturesTradeCandidateService:
-    VERSION = "1.1"
+    VERSION = "1.2"
     MAX_DAYS_TO_EXPIRY = 3
-    MONEY_LEADER_SHORTLIST = 5
+    # Do not discard strong current-day instruments before eligibility checks.
+    # The preliminary/deep radar already limits the universe by current-session
+    # money/activity. Candidate ranking must then see the whole deep shortlist
+    # so RS, direction and setup quality can determine the final TOP-N.
+    MONEY_LEADER_SHORTLIST = 20
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
 
     def __init__(self, confirmation_service=None):
@@ -99,7 +103,7 @@ class FuturesTradeCandidateService:
         # Futures are not part of SPOT candidate eligibility.
         # Expiry, futures price, futures volume and futures confirmation
         # must never remove a BASE ASSET from the radar.
-        
+
         score = cls.calculate_score(radar)
         return {
             "version": cls.VERSION,
