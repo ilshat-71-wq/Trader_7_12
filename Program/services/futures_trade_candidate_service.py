@@ -19,7 +19,7 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class FuturesTradeCandidateService:
     """Build and rank final scanner candidates."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
@@ -57,13 +57,36 @@ class FuturesTradeCandidateService:
         return "NONE"
 
     @classmethod
+    def _relative_strength_bonus(cls, radar, direction):
+        """Apply RS only when the SPOT benchmark comparison is valid.
+
+        RS is a property of the underlying SPOT asset, not of the futures
+        contract.  A positive RS means the SPOT is outperforming IMOEX2/IRUS2;
+        a negative RS means underperformance.  Therefore positive RS supports
+        LONG and negative RS supports SHORT.
+
+        Crucially, NO_DATA/ERROR/UNAVAILABLE must contribute zero rather than
+        treating the historical default 0.0 as a real neutral observation.
+        """
+        status = str(radar.get("relative_strength_status") or "").upper()
+        if status not in {"OK", "AVAILABLE"}:
+            return 0.0
+
+        rs = cls._float(radar.get("relative_strength"))
+        directional_rs = rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
+        if directional_rs > 0:
+            return min(directional_rs * 20.0, 10.0)
+        if directional_rs < 0:
+            return max(directional_rs * 20.0, -10.0)
+        return 0.0
+
+    @classmethod
     def calculate_score(cls, radar, confirmation):
         radar_score = max(0.0, min(100.0, cls._float(radar.get("radar_score"))))
         confirmation_score = max(0.0, min(100.0, cls._float(confirmation.get("score"))))
         direction = cls._direction(radar)
-        rs = cls._float(radar.get("relative_strength"))
-        directional_rs = rs if direction == "LONG" else -rs
-        rs_bonus = min(directional_rs * 20.0, 10.0) if directional_rs > 0 else max(directional_rs * 20.0, -10.0) if directional_rs < 0 else 0.0
+        rs_bonus = cls._relative_strength_bonus(radar, direction)
+
         futures_change = cls._float(confirmation.get("price_change_percent"))
         directional_change = futures_change if direction == "LONG" else -futures_change if direction == "SHORT" else 0.0
         futures_change_bonus = min(directional_change * 5.0, 5.0) if directional_change > 0 else max(directional_change * 5.0, -5.0) if directional_change < 0 else 0.0
@@ -160,7 +183,7 @@ class FuturesTradeCandidateService:
             cls._float(item.get("setup_quality_score")),
             cls._float(item.get("spot_money_ratio")),
             cls._float(item.get("radar_score")),
-            cls._float(item.get("relative_strength")),
+            cls._float(item.get("relative_strength")) if str(item.get("relative_strength_status") or "").upper() in {"OK", "AVAILABLE"} else 0.0,
             str(item.get("spot_ticker") or ""),
         ), reverse=True)
         return candidates[: cls.MONEY_LEADER_SHORTLIST]
@@ -230,7 +253,7 @@ class FuturesTradeCandidateService:
             item["candidate_score"],
             item["confirmation_score"],
             item["radar_score"],
-            item["relative_strength"],
+            self._float(item.get("relative_strength")) if str(item.get("relative_strength_status") or "").upper() in {"OK", "AVAILABLE"} else 0.0,
             item["money_volume"],
             item["trade_count"],
             item["futures_ticker"],
