@@ -31,8 +31,8 @@ class MorningScannerRunner:
             return
 
         print(
-            f"{'#':>3} {'FUTURES':<10} {'SPOT':<8} {'DIR':<7} "
-            f"{'RADAR':>8} {'CONF':>8} {'RS':>8} {'MONEY VOL':>16} {'SCORE':>8}"
+            f"{'#':>3} {'FUTURES':<10} {'SPOT':<12} {'DIR':<7} "
+            f"{'RADAR':>8} {'PACE':>8} {'RS':>8} {'SPOT MONEY':>16} {'SCORE':>8}"
         )
         print("-" * 96)
 
@@ -40,18 +40,18 @@ class MorningScannerRunner:
             print(
                 f"{index:>3} "
                 f"{str(item.get('futures_ticker', '-')):<10} "
-                f"{str(item.get('spot_ticker', '-')):<8} "
+                f"{str(item.get('spot_ticker', '-')):<12} "
                 f"{str(item.get('direction', '-')):<7} "
                 f"{float(item.get('radar_score', 0) or 0):>8.2f} "
-                f"{float(item.get('confirmation_score', 0) or 0):>8.2f} "
+                f"{float(item.get('spot_session_activity_ratio', 0) or 0):>8.2f} "
                 f"{float(item.get('relative_strength', 0) or 0):>8.2f} "
-                f"{float(item.get('money_volume', 0) or 0):>16,.0f} "
+                f"{float(item.get('spot_money_volume', 0) or 0):>16,.0f} "
                 f"{float(item.get('candidate_score', item.get('final_score', 0)) or 0):>8.2f}"
             )
 
         print()
-        print("Pipeline: SPOT RADAR -> FUTURES CONFIRMATION -> TOP CANDIDATES")
-        print("No risk sizing, SL/TP calculation or order execution is performed.")
+        print("Pipeline: FAST SPOT SCREEN -> DEEP SPOT H1/RS/M5 -> TOP 2-3 BASE ASSETS")
+        print("Futures are mapping-only; no futures confirmation, ranking or order execution is performed.")
         print("=" * 96)
 
 
