@@ -1,35 +1,70 @@
-"""Two-phase futures radar: cheap IMOEX SPOT screen first, deep analysis only for finalists."""
+"""Two-phase futures radar: broad market screen, deep analysis for finalists."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
 from services.moex_index_universe_service import MoexIndexUniverseService
+from services.market_trading_universe_service import MarketTradingUniverseService
 
 
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
-    """Keep the radar contract while restricting SPOT analysis to current IMOEX constituents."""
+    """Scan IMOEX equities plus the configured macro markets."""
 
-    VERSION = "1.0"
-    # BCS rate-limits concurrent history requests. Keep the preliminary pass
-    # parallel, but bounded enough to avoid turning the fast phase into a burst
-    # of HTTP 429/timeout responses during an active session.
+    VERSION = "1.1"
     PRELIMINARY_WORKERS = 2
-    DEEP_SPOT_LIMIT = 5
-    DEEP_DIRECTION_LIMIT = 3
+    DEEP_SPOT_LIMIT = 8
+    DEEP_DIRECTION_LIMIT = 4
 
-    def __init__(self, *args, index_universe_service=None, **kwargs):
+    def __init__(self, *args, index_universe_service=None, trading_universe_service=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.index_universe_service = index_universe_service or MoexIndexUniverseService()
+        self.trading_universe_service = trading_universe_service or MarketTradingUniverseService()
+
+    def _prepare_universe(self, mappings):
+        """Keep current IMOEX equities and OIL/GOLD/GAS/USDRUB mappings."""
+        if not isinstance(mappings, list):
+            return []
+
+        # First apply the dynamic IMOEX gate to equities only. Macro mappings
+        # are intentionally preserved and then classified by the unified
+        # trading-universe service.
+        imoex = self.index_universe_service.filter_mappings(mappings)
+        imoex_keys = {
+            (
+                str(item.get("spot_ticker") or "").strip().upper(),
+                str(item.get("futures_ticker") or "").strip().upper(),
+                str(item.get("futures_class_code") or "").strip(),
+            )
+            for item in imoex
+        }
+
+        macro = []
+        for item in mappings:
+            if not isinstance(item, dict):
+                continue
+            group = self.trading_universe_service.futures_group(item.get("futures_ticker"))
+            if group in self.trading_universe_service.MACRO_GROUPS:
+                macro.append(item)
+
+        combined = imoex + macro
+        result = []
+        seen = set()
+        for item in combined:
+            key = (
+                str(item.get("spot_ticker") or "").strip().upper(),
+                str(item.get("futures_ticker") or "").strip().upper(),
+                str(item.get("futures_class_code") or "").strip(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(item)
+
+        return self.trading_universe_service.filter_mappings(result)
 
     def _is_target_spot(self, mapping):
-        """Only MOEX main-board equities are eligible after the IMOEX universe gate."""
-        if not isinstance(mapping, dict):
-            return False
-        try:
-            return FuturesTradeCandidateService._spot_group(mapping) == "MOEX_STOCK"
-        except Exception:
-            return False
+        return self.trading_universe_service.spot_group(mapping) in self.trading_universe_service.TARGET_GROUPS
 
     def _preliminary_one(self, spot_key):
         ticker, class_code = spot_key
@@ -58,9 +93,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             return spot_key, {"status": "ERROR", "error": str(exc)}
 
     def _preliminary_scan(self, mappings):
-        # The IMOEX gate has already removed commodities, FX, indices and other
-        # derivatives. Keep this second gate as a defensive invariant so a
-        # direct/test caller cannot accidentally spend history calls elsewhere.
         keys = sorted({
             (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip())
             for item in mappings
@@ -81,7 +113,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     @classmethod
     def _select_deep_keys(cls, preliminary):
-        """Select deep finalists while preserving LONG/SHORT competition."""
         valid = [
             (key, value)
             for key, value in preliminary.items()
@@ -98,9 +129,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
         selected = []
         selected_keys = set()
-
-        # Keep both directions alive in the deep phase. This is only a
-        # performance shortlist; the final ranking and filters remain unchanged.
         for direction in ("LONG", "SHORT"):
             count = 0
             for key, value in ranked:
@@ -124,21 +152,14 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return set(selected)
 
     def scan(self, mappings=None, limit=None):
-        """Fast IMOEX pass, then deep H1/RS/M5 analysis for equity finalists."""
+        """Fast unified-market pass, then deep SPOT analysis for finalists."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
             return []
 
         mappings = self._select_current_contracts(mappings)
-        if not mappings:
-            return []
-
-        # Hard universe gate: only current IMOEX constituents enter any radar
-        # calculation. A temporary ISS outage uses the last successful cached
-        # snapshot; with no successful snapshot, the scanner safely returns no
-        # candidates instead of silently reverting to the old broad universe.
-        mappings = self.index_universe_service.filter_mappings(mappings)
+        mappings = self._prepare_universe(mappings)
         if not mappings:
             return []
 
@@ -156,7 +177,9 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         results = super().scan(mappings=deep_mappings, limit=limit)
         for item in results:
             item["scan_phase"] = "DEEP"
-            item["spot_universe"] = "IMOEX"
+            group = self.trading_universe_service.spot_group(item)
+            item["spot_universe"] = "IMOEX" if group == "MOEX_STOCK" else group
+            item["market_group"] = group
             key = (
                 str(item.get("spot_ticker") or "").strip().upper(),
                 str(item.get("spot_class_code") or "").strip(),
