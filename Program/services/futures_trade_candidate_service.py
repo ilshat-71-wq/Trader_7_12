@@ -5,18 +5,9 @@ Futures Trade Candidate Service.
 
 Stage 5 of the Spot-first architecture.
 
-Purpose:
-- identify today's money leaders inside the five target SPOT groups;
-- confirm the corresponding futures contract;
-- reject blocked futures confirmations;
-- reject contracts with 3 or fewer calendar days to expiry;
-- keep exactly one, most-liquid futures contract per SPOT;
-- rank the surviving candidates without allowing futures turnover to replace
-  the SPOT-first selection principle.
-
-The trading instrument is always the futures contract. The SPOT is the
-source of market-interest/liquidity selection and setup structure. The service
-does not place orders and does not invent the user's exact entry.
+The current scanner universe is the MOEX Russia Index (IMOEX) equity basket.
+The trading instrument is still the mapped futures contract. The service does
+not place orders and does not invent the user's exact entry.
 """
 
 from datetime import date
@@ -25,11 +16,13 @@ from datetime import date
 class FuturesTradeCandidateService:
     """Build and rank final scanner candidates."""
 
-    VERSION = "0.8"
+    VERSION = "0.9"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 5
 
-    TARGET_SPOT_GROUPS = ("MOEX_STOCK", "GAS", "OIL", "USD", "GOLD")
+    # The radar is now equity-only: current IMOEX constituents mapped to
+    # MOEX TQBR SPOTs. Futures remain the tradable instruments.
+    TARGET_SPOT_GROUPS = ("MOEX_STOCK",)
 
     def __init__(self, confirmation_service=None):
         self.confirmation_service = confirmation_service
@@ -70,72 +63,14 @@ class FuturesTradeCandidateService:
             return explicit
 
         ticker = str(item.get("spot_ticker") or "").strip().upper()
-        name = str(item.get("spot_name") or "").strip().upper()
         class_code = str(item.get("spot_class_code") or "").strip().upper()
-        spot_type = str(item.get("spot_type") or "").strip().upper()
 
-        text = f"{ticker} {name}"
-
-        # IMOEX2 / IRUS2 are market benchmarks, not trading SPOTs.
-        if ticker in {"IMOEX2", "IMOEX", "IRUS2"}:
+        # Market benchmarks are never tradable SPOT candidates.
+        if ticker in {"IMOEX2", "IMOEX", "IRUS", "IRUS2"}:
             return None
 
-        # MOEX main-board shares.
         if class_code == "TQBR":
             return "MOEX_STOCK"
-
-        # USD/RUB spot.
-        if (
-            ticker in {"USD000SMALL", "USDRUB", "USD"}
-            and class_code in {"CETS_FX", "CETS"}
-        ):
-            return "USD"
-
-        if spot_type in {"CURRENCY", "FX", "CURRENCIES"} and (
-            ticker in {"USD000SMALL", "USDRUB", "USD"}
-            or "USD/RUB" in text
-            or "USDRUB" in text
-            or "USD RUB" in text
-            or "ДОЛЛАР" in text
-        ):
-            return "USD"
-
-        # Commodity classification.
-        commodity_types = {
-            "GOODS",
-            "COMMODITY",
-            "COMMODITIES",
-            "METALS",
-        }
-        is_commodity = (
-            spot_type in commodity_types
-            or class_code == "FEG"
-        )
-
-        if is_commodity and (
-            ticker in {"NG", "NGM"}
-            or "NATURAL GAS" in text
-            or "NATURALGAS" in text
-            or "ПРИРОДНЫЙ ГАЗ" in text
-        ):
-            return "GAS"
-
-        if is_commodity and (
-            ticker in {"BR", "BRM", "CL", "WTI"}
-            or "BRENT" in text
-            or "CRUDE OIL" in text
-            or "LIGHT SWEET CRUDE" in text
-            or "НЕФТЬ" in text
-        ):
-            return "OIL"
-
-        if is_commodity and (
-            ticker in {"GOLD", "GLD", "GD"}
-            or "GOLD" in text
-            or "GOLD/RUB" in text
-            or "ЗОЛОТ" in text
-        ):
-            return "GOLD"
 
         return None
 
@@ -228,38 +163,26 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _select_money_leader_radars(cls, radar_results):
-        grouped = {group: [] for group in cls.TARGET_SPOT_GROUPS}
+        # There is now one logical group: current IMOEX constituents. Do not
+        # discard SBER/LKOH/GAZP/ROSN/etc. just because another sector/group has
+        # a higher raw money turnover.
+        candidates = []
         for radar in radar_results:
             if not isinstance(radar, dict):
                 continue
-            group = cls._spot_group(radar)
-            if group is not None:
-                grouped[group].append(radar)
-        leaders = []
-        for group in cls.TARGET_SPOT_GROUPS:
-            candidates = grouped[group]
-            if not candidates:
-                continue
-            candidates.sort(key=lambda item: (
-                cls._float(item.get("spot_money_volume")),
-                cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
-                cls._float(item.get("setup_quality_score")),
-                cls._float(item.get("spot_money_ratio")),
-                cls._float(item.get("radar_score")),
-                cls._float(item.get("relative_strength")),
-                str(item.get("spot_ticker") or ""),
-            ), reverse=True)
-            leader = dict(candidates[0])
-            leader["spot_group"] = group
-            leaders.append(leader)
-        leaders.sort(key=lambda item: (
-            cls._float(item.get("setup_quality_score")),
+            if cls._spot_group(radar) == "MOEX_STOCK":
+                candidates.append(radar)
+
+        candidates.sort(key=lambda item: (
             cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
             cls._float(item.get("spot_money_volume")),
+            cls._float(item.get("setup_quality_score")),
+            cls._float(item.get("spot_money_ratio")),
             cls._float(item.get("radar_score")),
-            str(item.get("spot_group") or ""),
+            cls._float(item.get("relative_strength")),
+            str(item.get("spot_ticker") or ""),
         ), reverse=True)
-        return leaders
+        return candidates[: cls.MONEY_LEADER_SHORTLIST]
 
     @classmethod
     def _select_most_liquid_per_spot(cls, candidates):
