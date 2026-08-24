@@ -15,6 +15,7 @@ BCS API
 """
 
 from datetime import datetime, timedelta, timezone
+import threading
 
 from config import REFRESH_TOKEN
 from api.request_helper import RequestHelper
@@ -25,6 +26,7 @@ class BCSAPI:
     CANDLE_CACHE_TTL = 30.0
     CANDLE_TIMEOUT = 3.0
     CANDLE_RETRIES = 2
+    CANDLE_MAX_CONCURRENCY = 1
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
 
@@ -57,6 +59,7 @@ class BCSAPI:
             "trade-api-market-data-connector/api/v1"
         )
         self._candle_cache = {}
+        self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
 
     # ---------------------------------------------------------
@@ -245,12 +248,12 @@ class BCSAPI:
         return (str(ticker).upper(), str(class_code), str(interval).upper(), start_key, end_key)
 
     def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
-        """Load BCS candles with a short bounded retry and a tiny in-process cache.
+        """Load BCS candles with bounded retry, cache and global concurrency control.
 
-        General scanner requests remain fail-fast. Historical candles are different:
-        H1/D SPOT structure is a required dependency, so a transient TLS/network
-        failure gets one quick retry instead of being interpreted as "no candidate".
-        The bounded policy is at most ~6 seconds for this request, never minutes.
+        The scanner intentionally keeps preliminary workers for non-network work,
+        but all candles-chart HTTP calls pass through one shared semaphore. This
+        prevents concurrent M5/D/H1 candle requests from competing for the BCS
+        market-data endpoint while preserving the existing service architecture.
         """
         url = f"{self.market_url}/candles-chart"
 
@@ -302,13 +305,14 @@ class BCSAPI:
         }
 
         try:
-            r = RequestHelper.get(
-                url,
-                headers=self.headers(),
-                params=params,
-                timeout=self.CANDLE_TIMEOUT,
-                max_retries=self.CANDLE_RETRIES,
-            )
+            with self._candle_semaphore:
+                r = RequestHelper.get(
+                    url,
+                    headers=self.headers(),
+                    params=params,
+                    timeout=self.CANDLE_TIMEOUT,
+                    max_retries=self.CANDLE_RETRIES,
+                )
         except Exception as exc:
             print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
             return {}
