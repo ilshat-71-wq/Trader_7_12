@@ -28,7 +28,25 @@ class BCSAPI:
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
 
+    _shared_instance = None
+    _initialized = False
+
+    def __new__(cls):
+        """Return one process-wide read-only market-data client.
+
+        Scanner services are composed from several layers, and historically
+        each layer created its own BCSAPI. That caused repeated authorization,
+        independent candle caches and unnecessary concurrent HTTP load.
+        Keep one client instance while preserving the existing BCSAPI API.
+        """
+        if cls._shared_instance is None:
+            cls._shared_instance = super().__new__(cls)
+        return cls._shared_instance
+
     def __init__(self):
+        if self.__class__._initialized:
+            return
+
         self.access_token = None
         self.info_url = (
             "https://be.broker.ru/"
@@ -39,10 +57,16 @@ class BCSAPI:
             "trade-api-market-data-connector/api/v1"
         )
         self._candle_cache = {}
+        self.__class__._initialized = True
 
     # ---------------------------------------------------------
 
     def authorize(self):
+        # Reuse an already authorized shared client. This prevents every
+        # nested service from refreshing the same BCS access token again.
+        if self.access_token:
+            return True
+
         url = (
             "https://be.broker.ru/"
             "trade-api-keycloak/"
