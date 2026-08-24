@@ -9,12 +9,11 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 
 
 class FuturesTradeCandidateService:
-    VERSION = "1.3"
+    VERSION = "1.4"
     MAX_DAYS_TO_EXPIRY = 3
 
-    # Event-driven / abnormal price movement must never enter
-    # the normal TOP-2/3 trading selection.
-    EVENT_MAX_DAILY_TREND_PERCENT = 15.0
+    # MOEX-style price-instability/event filter is supplied by the SPOT radar.
+    # Event-driven papers never compete with normal TOP-2/3 continuation setups.
 
     # Do not discard strong current-day instruments before eligibility checks.
     # The preliminary/deep radar already limits the universe by current-session
@@ -92,11 +91,10 @@ class FuturesTradeCandidateService:
         if direction not in {"LONG", "SHORT"}:
             return None
 
-        # Hard exclusion for event-driven / abnormal SPOT movement.
-        # Such instruments require a different trading scheme and must
-        # never compete with normal continuation setups.
-        change = abs(cls._float(radar.get("change_percent")))
-        if change >= cls.EVENT_MAX_DAILY_TREND_PERCENT:
+        # Hard exclusion for MOEX price-instability / event-driven movement.
+        # The detector is based on authenticated BCS SPOT candles and applies
+        # the official +/-20% DA threshold plus the +/-3% weekend DSVT band.
+        if bool(radar.get("moex_event_risk")):
             return None
 
         # Direction must agree with the BASE ASSET's relative strength.
@@ -132,7 +130,6 @@ class FuturesTradeCandidateService:
             "direction": direction,
             "spot_group": spot_group,
             "market_group": spot_group,
-            # Mapping only: no futures market data is used for selection.
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
@@ -142,13 +139,25 @@ class FuturesTradeCandidateService:
             "spot_type": radar.get("spot_type", ""),
             "spot_price": cls._float(radar.get("spot_price", radar.get("last_close"))),
             "spot_money_volume": cls._float(radar.get("spot_money_volume")),
-            "spot_average_daily_money": cls._float(radar.get("average_daily_money")),
+            "spot_average_daily_money": cls._float(radar.get("spot_average_daily_money", radar.get("average_daily_money"))),
             "spot_money_ratio": cls._float(radar.get("spot_money_ratio")),
             "spot_session_activity_ratio": cls._float(radar.get("spot_session_activity_ratio")),
             "spot_money_per_minute": cls._float(radar.get("spot_money_per_minute")),
             "session_elapsed_minutes": int(cls._float(radar.get("session_elapsed_minutes"))),
             "session_expected_minutes": int(cls._float(radar.get("session_expected_minutes"))),
             "spot_change_percent": cls._float(radar.get("change_percent")),
+            "moex_event_risk": bool(radar.get("moex_event_risk")),
+            "moex_da_trigger_inferred": bool(radar.get("moex_da_trigger_inferred")),
+            "moex_da_trigger_percent": cls._float(radar.get("moex_da_trigger_percent"), 20.0),
+            "moex_da_window_minutes": int(cls._float(radar.get("moex_da_window_minutes"), 10)),
+            "moex_weekend_band_percent": cls._float(radar.get("moex_weekend_band_percent"), 3.0),
+            "moex_weekend_band_near": bool(radar.get("moex_weekend_band_near")),
+            "moex_weekend_band_hit": bool(radar.get("moex_weekend_band_hit")),
+            "moex_max_abs_move_percent": cls._float(radar.get("moex_max_abs_move_percent")),
+            "moex_price_stability_state": radar.get("moex_price_stability_state", "NORMAL"),
+            "moex_price_stability_reason": radar.get("moex_price_stability_reason", ""),
+            "moex_candles_loaded": int(cls._float(radar.get("moex_candles_loaded"))),
+            "moex_data_status": radar.get("moex_data_status", "NO_DATA"),
             "trend_state": radar.get("trend_state", "UNKNOWN"),
             "trend_days": int(cls._float(radar.get("trend_days"))),
             "radar_score": round(cls._float(radar.get("radar_score")), 2),
@@ -205,7 +214,6 @@ class FuturesTradeCandidateService:
             if candidate is not None:
                 candidates.append(candidate)
 
-        # One result per BASE ASSET. No futures liquidity/turnover is consulted.
         candidates.sort(key=lambda item: (
             item["spot_session_activity_ratio"],
             item["spot_money_per_minute"],
