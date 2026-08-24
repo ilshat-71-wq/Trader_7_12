@@ -104,6 +104,15 @@ class FuturesTradeCandidateService:
         # Expiry, futures price, futures volume and futures confirmation
         # must never remove a BASE ASSET from the radar.
 
+        setup_phase = str(radar.get("setup_phase") or "UNKNOWN").upper()
+        setup_error = radar.get("setup_error")
+
+        # Final TOP selection requires valid SPOT M5 data.
+        # Missing/failed M5 data must never be promoted by a high
+        # activity/pace score alone.
+        if setup_phase in {"NO_SESSION_CANDLES", "SETUP_ERROR"} or setup_error:
+            return None
+
         score = cls.calculate_score(radar)
         return {
             "version": cls.VERSION,
@@ -143,7 +152,7 @@ class FuturesTradeCandidateService:
             "setup": radar.get("setup", "NONE"),
             "setup_direction": radar.get("setup_direction", direction),
             "setup_state": radar.get("setup_state", "WAIT"),
-            "setup_phase": radar.get("setup_phase", "UNKNOWN"),
+            "setup_phase": setup_phase,
             "setup_quality_score": cls._float(radar.get("setup_quality_score")),
             "impulse_percent": cls._float(radar.get("impulse_percent")),
             "retracement_percent": cls._float(radar.get("retracement_percent")),
