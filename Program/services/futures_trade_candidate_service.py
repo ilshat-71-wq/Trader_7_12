@@ -9,8 +9,13 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 
 
 class FuturesTradeCandidateService:
-    VERSION = "1.2"
+    VERSION = "1.3"
     MAX_DAYS_TO_EXPIRY = 3
+
+    # Event-driven / abnormal price movement must never enter
+    # the normal TOP-2/3 trading selection.
+    EVENT_MAX_DAILY_TREND_PERCENT = 15.0
+
     # Do not discard strong current-day instruments before eligibility checks.
     # The preliminary/deep radar already limits the universe by current-session
     # money/activity. Candidate ranking must then see the whole deep shortlist
@@ -85,6 +90,13 @@ class FuturesTradeCandidateService:
             return None
         direction = cls._direction(radar)
         if direction not in {"LONG", "SHORT"}:
+            return None
+
+        # Hard exclusion for event-driven / abnormal SPOT movement.
+        # Such instruments require a different trading scheme and must
+        # never compete with normal continuation setups.
+        change = abs(cls._float(radar.get("change_percent")))
+        if change >= cls.EVENT_MAX_DAILY_TREND_PERCENT:
             return None
 
         # Direction must agree with the BASE ASSET's relative strength.
