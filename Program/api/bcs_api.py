@@ -16,7 +16,6 @@ BCS API
 
 from datetime import datetime, timedelta, timezone
 import threading
-import time
 
 from config import REFRESH_TOKEN
 from api.request_helper import RequestHelper
@@ -249,12 +248,11 @@ class BCSAPI:
         return (str(ticker).upper(), str(class_code), str(interval).upper(), start_key, end_key)
 
     def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
-        """Load BCS candles with bounded retry, cache and global concurrency control.
+        """Load BCS candles with bounded retry, cache and concurrency control.
 
-        The scanner intentionally keeps preliminary workers for non-network work,
-        but all candles-chart HTTP calls pass through one shared semaphore. This
-        prevents concurrent M5/D/H1 candle requests from competing for the BCS
-        market-data endpoint while preserving the existing service architecture.
+        All candles-chart HTTP calls pass through one semaphore on the shared
+        BCSAPI instance. This limits candle endpoint concurrency without
+        serializing the rest of the scanner.
         """
         url = f"{self.market_url}/candles-chart"
 
@@ -305,31 +303,8 @@ class BCSAPI:
             "timeFrame": interval
         }
 
-        request_started = time.perf_counter()
-        print(
-            "CANDLE START:",
-            str(ticker).upper(),
-            class_code,
-            str(interval).upper(),
-            params["startDate"],
-            "->",
-            params["endDate"],
-            "THREAD:",
-            threading.current_thread().name,
-        )
-
-        semaphore_wait_started = time.perf_counter()
         try:
             with self._candle_semaphore:
-                semaphore_wait = time.perf_counter() - semaphore_wait_started
-                http_started = time.perf_counter()
-                print(
-                    "CANDLE HTTP:",
-                    str(ticker).upper(),
-                    str(interval).upper(),
-                    "WAIT:",
-                    f"{semaphore_wait:.3f}s",
-                )
                 r = RequestHelper.get(
                     url,
                     headers=self.headers(),
@@ -337,71 +312,53 @@ class BCSAPI:
                     timeout=self.CANDLE_TIMEOUT,
                     max_retries=self.CANDLE_RETRIES,
                 )
-                http_elapsed = time.perf_counter() - http_started
         except Exception as exc:
-            elapsed = time.perf_counter() - request_started
-            print(
-                "CANDLE FAIL:",
-                str(ticker).upper(),
-                class_code,
-                str(interval).upper(),
-                type(exc).__name__,
-                "HTTP_TIME:",
-                f"{locals().get('http_elapsed', 0.0):.3f}s",
-                "TOTAL_TIME:",
-                f"{elapsed:.3f}s",
-            )
             print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
             return {}
 
         if r.status_code != 200:
-            elapsed = time.perf_counter() - request_started
-            print(
-                "CANDLE HTTP FAIL:",
-                str(ticker).upper(),
-                class_code,
-                str(interval).upper(),
-                "STATUS:",
-                r.status_code,
-                "HTTP_TIME:",
-                f"{http_elapsed:.3f}s",
-                "TOTAL_TIME:",
-                f"{elapsed:.3f}s",
-            )
             return {}
 
         try:
             data = r.json()
         except ValueError:
-            elapsed = time.perf_counter() - request_started
-            print(
-                "CANDLE JSON FAIL:",
-                str(ticker).upper(),
-                str(interval).upper(),
-                "HTTP_TIME:",
-                f"{http_elapsed:.3f}s",
-                "TOTAL_TIME:",
-                f"{elapsed:.3f}s",
-            )
             print("❌ Candles JSON error")
             return {}
 
-        bars = data.get("bars", []) if isinstance(data, dict) else []
-        elapsed = time.perf_counter() - request_started
-        print(
-            "CANDLE DONE:",
-            str(ticker).upper(),
-            class_code,
-            str(interval).upper(),
-            "HTTP:",
-            r.status_code,
-            "BARS:",
-            len(bars) if isinstance(bars, list) else 0,
-            "HTTP_TIME:",
-            f"{http_elapsed:.3f}s",
-            "TOTAL_TIME:",
-            f"{elapsed:.3f}s",
-        )
-
         self._candle_cache[cache_key] = (now, data)
         return data
+
+    # ---------------------------------------------------------
+    # HISTORY TRADES
+    # ---------------------------------------------------------
+
+    def get_trades_period(self, ticker, class_code, start_time, end_time):
+        start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        records = []
+        current = start
+        while current < end:
+            chunk_end = min(current + timedelta(hours=1), end)
+            payload = {
+                "ticker": ticker,
+                "classCode": class_code,
+                "startDateTime": current.isoformat(),
+                "endDateTime": chunk_end.isoformat()
+            }
+            print("\nPERIOD TRADES PAYLOAD:")
+            print(payload)
+            r = RequestHelper.post(
+                f"{self.market_url}/last-trades",
+                headers={**self.headers(), "Content-Type": "application/json"},
+                json=payload
+            )
+            print("Period trades status:", r.status_code)
+            if r.status_code == 200:
+                data = r.json()
+                chunk_records = data.get("records", [])
+                records.extend(chunk_records)
+                print("Chunk records:", len(chunk_records))
+            else:
+                print("Period trades raw:", r.text[:500])
+            current = chunk_end
+        return {"records": records}
