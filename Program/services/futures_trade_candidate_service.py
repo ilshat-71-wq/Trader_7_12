@@ -9,7 +9,7 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 
 
 class FuturesTradeCandidateService:
-    VERSION = "1.4"
+    VERSION = "1.5"
     MAX_DAYS_TO_EXPIRY = 3
     MONEY_LEADER_SHORTLIST = 20
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
@@ -101,6 +101,21 @@ class FuturesTradeCandidateService:
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
+            "futures_days_to_expiry": int(cls._float(radar.get("days_to_expiry"))),
+            "futures_selection_version": radar.get("futures_selection_version", "UNAVAILABLE"),
+            "futures_selection_score": cls._float(radar.get("selection_score")),
+            "futures_liquidity_score": cls._float(radar.get("liquidity_score")),
+            "futures_spread_score": cls._float(radar.get("spread_score")),
+            "futures_expiry_score": cls._float(radar.get("expiry_score")),
+            "futures_spread_percent": cls._float(radar.get("spread_percent")),
+            "futures_turnover_30m": cls._float(radar.get("turnover_30m")),
+            "futures_trade_count_30m": int(cls._float(radar.get("trade_count_30m"))),
+            "futures_depth_notional": cls._float(radar.get("depth_notional")),
+            "futures_bid": cls._float(radar.get("bid")),
+            "futures_ask": cls._float(radar.get("ask")),
+            "futures_last": cls._float(radar.get("last")),
+            "futures_selection_reason": radar.get("futures_selection_reason", ""),
+            "futures_selection_candidates": int(cls._float(radar.get("futures_selection_candidates"))),
             "spot_ticker": radar.get("spot_ticker"),
             "spot_class_code": radar.get("spot_class_code"),
             "spot_name": radar.get("spot_name", ""),
