@@ -279,21 +279,28 @@ class InstrumentMorningRadarService:
     def calculate_relative_strength(
         self,
         ticker,
-        class_code
+        class_code,
+        instrument_candles=None
     ):
-        try:
-            instrument_candles = self.history_service.load_daily(
-                ticker,
-                class_code
-            )
-        except Exception as exc:
-            return {
+        if not isinstance(
+            instrument_candles,
+            list
+        ):
+            try:
+                instrument_candles = (
+                    self.history_service.load_daily(
+                        ticker,
+                        class_code
+                    )
+                )
+            except Exception as exc:
+                return {
                 "status": "ERROR",
                 "error": str(exc),
                 "relative_strength": 0.0,
                 "relative_strength_score": 50.0,
-                "relative_strength_signal": "NEUTRAL",
-            }
+                    "relative_strength_signal": "NEUTRAL",
+                }
 
         return self.calculate_relative_strength_from_candles(
             instrument_candles,
@@ -992,9 +999,19 @@ class InstrumentMorningRadarService:
         class_code
     ):
         try:
+            # Один D-запрос на инструмент.
+            # Эти же свечи используются Trend, Money и RS.
+            daily_candles = (
+                self.radar_service.load_daily_candles(
+                    ticker,
+                    class_code
+                )
+            )
+
             radar = self.radar_service.calculate(
                 ticker=ticker,
-                class_code=class_code
+                class_code=class_code,
+                daily_candles=daily_candles
             )
 
         except Exception as exc:
@@ -1083,7 +1100,8 @@ class InstrumentMorningRadarService:
         relative_strength = (
             self.calculate_relative_strength(
                 ticker,
-                class_code
+                class_code,
+                instrument_candles=daily_candles
             )
         )
 

@@ -218,6 +218,15 @@ class MorningRadarService:
                                 "volume",
                                 0
                             ) or 0
+                        ),
+
+                    # BCS candles-chart: volume = денежный оборот.
+                    "money_volume":
+                        float(
+                            bar.get(
+                                "volume",
+                                0
+                            ) or 0
                         )
                 }
 
@@ -411,10 +420,75 @@ class MorningRadarService:
         self,
         ticker,
         class_code,
-        completed_days=5
+        completed_days=5,
+        candles=None
     ):
 
         try:
+
+            # Если дневные свечи уже загружены текущим radar pass,
+            # повторный BCS D-запрос не нужен.
+            if isinstance(candles, list):
+                current_date = self.now().date()
+                daily = {}
+
+                for candle in candles:
+                    if not isinstance(candle, dict):
+                        continue
+
+                    try:
+                        candle_time = candle.get("time")
+                        if not candle_time:
+                            continue
+
+                        dt = self.history_service.to_moscow(
+                            candle_time
+                        )
+
+                        if dt is None:
+                            continue
+
+                        day = dt.date()
+
+                        if day >= current_date:
+                            continue
+
+                        money = float(
+                            candle.get(
+                                "money_volume",
+                                0
+                            ) or 0
+                        )
+
+                        if money <= 0:
+                            continue
+
+                        daily[day] = (
+                            daily.get(day, 0.0)
+                            + money
+                        )
+
+                    except (TypeError, ValueError):
+                        continue
+
+                selected_days = sorted(
+                    daily.keys(),
+                    reverse=True
+                )[:int(completed_days)]
+
+                values = [
+                    daily[day]
+                    for day in selected_days
+                    if daily[day] > 0
+                ]
+
+                if values:
+                    return round(
+                        sum(values) / len(values),
+                        2
+                    )
+
+                return 0
 
             return (
                 self.history_service.calculate_average_daily_money(
@@ -444,19 +518,24 @@ class MorningRadarService:
         ticker,
         class_code,
         morning_money_volume=0,
-        completed_days=5
+        completed_days=5,
+        daily_candles=None
     ):
 
         session_info = (
             self.session_service.get_session_info()
         )
 
-        daily_candles = (
-            self.load_daily_candles(
-                ticker,
-                class_code
+        if not isinstance(
+            daily_candles,
+            list
+        ):
+            daily_candles = (
+                self.load_daily_candles(
+                    ticker,
+                    class_code
+                )
             )
-        )
 
         daily_trend = (
             self.calculate_daily_trend(
@@ -468,7 +547,8 @@ class MorningRadarService:
             self.calculate_average_daily_money(
                 ticker,
                 class_code,
-                completed_days=completed_days
+                completed_days=completed_days,
+                candles=daily_candles
             )
         )
 
