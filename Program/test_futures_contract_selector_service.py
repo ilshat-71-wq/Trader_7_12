@@ -56,7 +56,7 @@ def test_selector_prefers_liquid_near_contract():
     assert len(result) == 1
     assert result[0]["futures_ticker"] == "NU6"
     assert result[0]["spread_percent"] < 0.2
-    assert result[0]["turnover_30m"] > result[0]["futures_ticker"].count("Z")
+    assert result[0]["turnover_30m"] > 1_000_000
     assert result[0]["selection_score"] > 0
 
 
