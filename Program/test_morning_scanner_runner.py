@@ -12,19 +12,19 @@ class FakePipeline:
 
 
 def test_runner_delegates_to_pipeline():
-    pipeline = FakePipeline([{"futures_ticker": "SBERM6", "direction": "LONG"}])
+    pipeline = FakePipeline([{"spot_ticker": "SBER", "direction": "LONG", "setup_state": "WAIT"}])
     runner = MorningScannerRunner(pipeline)
     result = runner.run(limit=2)
-    assert result == [{"futures_ticker": "SBERM6", "direction": "LONG"}]
+    assert result == [{"spot_ticker": "SBER", "direction": "LONG", "setup_state": "WAIT"}]
     assert pipeline.calls == [2]
 
 
 def test_runner_limits_to_three_by_default():
     pipeline = FakePipeline([
-        {"futures_ticker": "A"},
-        {"futures_ticker": "B"},
-        {"futures_ticker": "C"},
-        {"futures_ticker": "D"},
+        {"spot_ticker": "A"},
+        {"spot_ticker": "B"},
+        {"spot_ticker": "C"},
+        {"spot_ticker": "D"},
     ])
     runner = MorningScannerRunner(pipeline)
     assert len(runner.run()) == 3
@@ -35,22 +35,30 @@ def test_runner_allows_empty_result():
     assert runner.run() == []
 
 
-def test_runner_does_not_submit_orders():
-    pipeline = FakePipeline([{"futures_ticker": "SBERM6"}])
+def test_runner_is_read_only():
+    pipeline = FakePipeline([{"spot_ticker": "SBER", "direction": "LONG"}])
     runner = MorningScannerRunner(pipeline)
     assert not hasattr(pipeline, "submit_order")
-    assert runner.run(limit=1)[0]["futures_ticker"] == "SBERM6"
+    assert runner.run(limit=1)[0]["spot_ticker"] == "SBER"
+
+
+def test_runner_preserves_watchlist_state():
+    pipeline = FakePipeline([{"spot_ticker": "AFLT", "setup_state": "WATCH", "opportunity_score": 88.2}])
+    result = MorningScannerRunner(pipeline).run(limit=1)
+    assert result[0]["setup_state"] == "WATCH"
+    assert result[0]["opportunity_score"] == 88.2
 
 
 def run_tests():
     print("=" * 76)
-    print("TRADER_7_12 PRO - MORNING SCANNER RUNNER TEST")
+    print("TRADER_7_12 PRO - SPOT OPPORTUNITY WATCHLIST RUNNER TEST")
     print("=" * 76)
     tests = [
         test_runner_delegates_to_pipeline,
         test_runner_limits_to_three_by_default,
         test_runner_allows_empty_result,
-        test_runner_does_not_submit_orders,
+        test_runner_is_read_only,
+        test_runner_preserves_watchlist_state,
     ]
     for test in tests:
         test()
