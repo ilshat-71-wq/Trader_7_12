@@ -14,7 +14,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     VERSION = "1.2"
     PRELIMINARY_WORKERS = 2
-    DEEP_SPOT_LIMIT = 8
+    DEEP_SPOT_LIMIT = 5
     DEEP_DIRECTION_LIMIT = 4
     MAX_CONTRACTS_PER_SPOT = 2
     MAX_DAYS_TO_EXPIRY = 3
@@ -250,6 +250,15 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
                 "elapsed_minutes": elapsed_minutes,
                 "expected_minutes": expected_minutes,
+
+                # Compatibility score for preliminary diagnostics/tests.
+                # FAST ranking remains based on current-session money/activity.
+                "radar_score": round(
+                    max(0.0, activity_ratio) * 100.0
+                    + max(0.0, money_per_minute) / 1_000_000.0
+                    + max(0.0, directional_change),
+                    2,
+                ),
             }
 
         except Exception as exc:

@@ -34,7 +34,7 @@ class FakeMapping:
         "A": "MOEX_STOCK",
         "B": "GAS",
         "C": "OIL",
-        "D": "USD",
+        "D": "USDRUB",
         "E": "GOLD",
         "F": "MOEX_STOCK",
     }
@@ -54,16 +54,46 @@ class FakeMapping:
 
 
 class FakeSession:
+    def now(self):
+        from datetime import datetime
+        return datetime(2099, 1, 1, 10, 0, 0)
+
     def get_session(self):
         return "MORNING"
 
     def get_trading_day(self):
-        return "2099-01-01"
+        from datetime import date
+        return date(2099, 1, 1)
+
+
+class FakeSessionMoney:
+    def calculate(self, ticker, class_code, trading_date=None, timeframe_minutes=5, session=None):
+        values = {
+            "A": 600_000_000,
+            "B": 500_000_000,
+            "C": 400_000_000,
+            "D": 300_000_000,
+            "E": 200_000_000,
+            "F": 100_000_000,
+        }
+        money = values.get(ticker, 0)
+        return {
+            "session": session,
+            "money_volume": money,
+            "elapsed_minutes": 180,
+            "expected_minutes": 180,
+            "money_per_minute": money / 180,
+        }
 
 
 class TestableRadar(TwoPhaseFuturesMorningRadarService):
     def __init__(self):
-        super().__init__(mapping_service=FakeMapping(), radar_service=FakeInstrumentRadar(), session_service=FakeSession())
+        super().__init__(
+            mapping_service=FakeMapping(),
+            radar_service=FakeInstrumentRadar(),
+            session_service=FakeSession(),
+            session_money_service=FakeSessionMoney(),
+        )
         self.deep_calls = []
 
     def _select_current_contracts(self, mappings):
