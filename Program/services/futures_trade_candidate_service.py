@@ -11,19 +11,10 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class FuturesTradeCandidateService:
     VERSION = "1.4"
     MAX_DAYS_TO_EXPIRY = 3
-
-    # MOEX-style price-instability/event filter is supplied by the SPOT radar.
-    # Event-driven papers never compete with normal TOP-2/3 continuation setups.
-
-    # Do not discard strong current-day instruments before eligibility checks.
-    # The preliminary/deep radar already limits the universe by current-session
-    # money/activity. Candidate ranking must then see the whole deep shortlist
-    # so RS, direction and setup quality can determine the final TOP-N.
     MONEY_LEADER_SHORTLIST = 20
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
 
     def __init__(self, confirmation_service=None):
-        # Kept for constructor compatibility. Intentionally unused.
         self.confirmation_service = None
 
     @staticmethod
@@ -63,15 +54,12 @@ class FuturesTradeCandidateService:
         money_volume = max(0.0, cls._float(radar.get("spot_money_volume")))
         money_presence_bonus = min((money_per_minute / 50_000_000.0) * 5.0, 5.0)
         absolute_money_bonus = min((money_volume / 1_000_000_000.0) * 5.0, 5.0)
-
         rs = cls._float(radar.get("relative_strength"))
         directional_rs = rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
         rs_bonus = max(-10.0, min(10.0, directional_rs * 20.0))
-
         change = cls._float(radar.get("change_percent"))
         directional_change = change if direction == "LONG" else -change if direction == "SHORT" else 0.0
         movement_bonus = max(-5.0, min(5.0, directional_change * 5.0))
-
         setup_quality = max(0.0, min(100.0, cls._float(radar.get("setup_quality_score"))))
         setup_bonus = min(setup_quality * 0.03, 3.0)
         setup_state = str(radar.get("setup_state") or "WAIT").upper()
@@ -79,7 +67,6 @@ class FuturesTradeCandidateService:
             setup_bonus += 1.0
         elif setup_state == "WATCH":
             setup_bonus += 0.5
-
         score = money_score * 0.60 + money_presence_bonus + absolute_money_bonus + rs_bonus + movement_bonus + setup_bonus
         return round(max(0.0, min(score, 100.0)), 2)
 
@@ -90,39 +77,20 @@ class FuturesTradeCandidateService:
         direction = cls._direction(radar)
         if direction not in {"LONG", "SHORT"}:
             return None
-
-        # Hard exclusion for MOEX price-instability / event-driven movement.
-        # The detector is based on authenticated BCS SPOT candles and applies
-        # the official +/-20% DA threshold plus the +/-3% weekend DSVT band.
         if bool(radar.get("moex_event_risk")):
             return None
-
-        # Direction must agree with the BASE ASSET's relative strength.
-        # LONG requires SPOT to outperform the benchmark; SHORT requires
-        # SPOT to underperform it. Futures never participate in this rule.
         rs = cls._float(radar.get("relative_strength"))
         if direction == "LONG" and rs <= 0.0:
             return None
         if direction == "SHORT" and rs >= 0.0:
             return None
-
         spot_group = cls._spot_group(radar)
         if spot_group not in cls.TARGET_SPOT_GROUPS:
             return None
-
-        # Futures are not part of SPOT candidate eligibility.
-        # Expiry, futures price, futures volume and futures confirmation
-        # must never remove a BASE ASSET from the radar.
-
         setup_phase = str(radar.get("setup_phase") or "UNKNOWN").upper()
         setup_error = radar.get("setup_error")
-
-        # Final TOP selection requires valid SPOT M5 data.
-        # Missing/failed M5 data must never be promoted by a high
-        # activity/pace score alone.
         if setup_phase in {"NO_SESSION_CANDLES", "SETUP_ERROR"} or setup_error:
             return None
-
         score = cls.calculate_score(radar)
         return {
             "version": cls.VERSION,
@@ -204,9 +172,12 @@ class FuturesTradeCandidateService:
     def rank(self, radar_results, confirmations=None, limit=3):
         if not isinstance(radar_results, list):
             return []
-        limit = 3 if limit is None else int(limit)
-        if limit < 0:
-            raise ValueError("limit must be >= 0")
+        if limit is None:
+            limit = None
+        else:
+            limit = int(limit)
+            if limit < 0:
+                raise ValueError("limit must be >= 0")
 
         candidates = []
         for radar in self._select_money_leader_radars(radar_results):
@@ -232,7 +203,7 @@ class FuturesTradeCandidateService:
                 continue
             seen.add(key)
             selected.append(candidate)
-            if len(selected) >= limit:
+            if limit is not None and len(selected) >= limit:
                 break
 
         for rank, candidate in enumerate(selected, start=1):
