@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
+from services.futures_contract_selector_service import FuturesContractSelectorService
 from services.moex_index_universe_service import MoexIndexUniverseService
 from services.market_trading_universe_service import MarketTradingUniverseService
 
@@ -12,17 +13,20 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     """Scan IMOEX equities plus the configured macro markets."""
 
-    VERSION = "1.2"
+    VERSION = "1.3"
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
     DEEP_DIRECTION_LIMIT = 4
     MAX_CONTRACTS_PER_SPOT = 2
     MAX_DAYS_TO_EXPIRY = 3
 
-    def __init__(self, *args, index_universe_service=None, trading_universe_service=None, **kwargs):
+    def __init__(self, *args, index_universe_service=None, trading_universe_service=None, futures_contract_selector=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.index_universe_service = index_universe_service or MoexIndexUniverseService()
         self.trading_universe_service = trading_universe_service or MarketTradingUniverseService()
+        self.futures_contract_selector = futures_contract_selector or FuturesContractSelectorService(
+            api=getattr(self.mapping_service, "api", None)
+        )
 
     @staticmethod
     def _parse_expiry(value):
@@ -42,9 +46,10 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     def _select_current_contracts(cls, mappings):
         """Keep the nearest two eligible contracts for every underlying.
 
-        The final choice between these two is made later by the candidate
-        service using actual futures liquidity/turnover. Contracts with three
-        or fewer calendar days to expiry are excluded unconditionally.
+        The final choice between these two is made by the live contract
+        selector using actual quote, spread, order-book depth and recent
+        turnover. Contracts with three or fewer calendar days to expiry are
+        excluded unconditionally.
         """
         grouped = {}
         today = date.today()
@@ -94,9 +99,6 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         if not isinstance(mappings, list):
             return []
 
-        # First apply the dynamic IMOEX gate to equities only. Macro mappings
-        # are intentionally preserved and then classified by the unified
-        # trading-universe service.
         imoex = self.index_universe_service.filter_mappings(mappings)
 
         macro = []
@@ -127,16 +129,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return self.trading_universe_service.spot_group(mapping) in self.trading_universe_service.TARGET_GROUPS
 
     def _preliminary_one(self, spot_key):
-        """
-        FAST SCREEN.
-
-        The preliminary stage answers only:
-        "Where is money/activity appearing TODAY?"
-
-        Historical average turnover is used only as the denominator for
-        activity_ratio. It is NOT used as the primary ranking criterion.
-        Expensive RS/setup/futures confirmation remain in the DEEP stage.
-        """
+        """FAST screen: identify where current-session money/activity appears."""
         ticker, class_code = spot_key
 
         try:
@@ -144,53 +137,25 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             if base is None:
                 return spot_key, None
 
-            raw = base.calculate(
-                ticker=ticker,
-                class_code=class_code,
-            )
-
+            raw = base.calculate(ticker=ticker, class_code=class_code)
             if not isinstance(raw, dict):
                 return spot_key, None
 
-            daily = raw.get("daily")
-            if not isinstance(daily, dict):
-                daily = {}
+            daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
+            trend = daily.get("trend") if isinstance(daily.get("trend"), dict) else {}
+            money = raw.get("money") if isinstance(raw.get("money"), dict) else {}
 
-            trend = daily.get("trend")
-            if not isinstance(trend, dict):
-                trend = {}
+            direction = str(trend.get("direction", "NONE")).upper()
+            change_percent = float(trend.get("change_percent", 0) or 0)
+            average_daily_money = float(money.get("average_daily_money_volume", 0) or 0)
 
-            money = raw.get("money")
-            if not isinstance(money, dict):
-                money = {}
-
-            direction = str(
-                trend.get("direction", "NONE")
-            ).upper()
-
-            change_percent = float(
-                trend.get("change_percent", 0) or 0
-            )
-
-            average_daily_money = float(
-                money.get("average_daily_money_volume", 0) or 0
-            )
-
-            # Use the same current-session money source as the real
-            # FuturesMorningRadarService. This keeps FAST and DEEP
-            # based on exactly the same money/activity definition.
             session_money_service = self.session_money_service
             session_service = self.session_service
-
             if session_money_service is None or session_service is None:
-                return spot_key, {
-                    "status": "ERROR",
-                    "error": "Session money service unavailable",
-                }
+                return spot_key, {"status": "ERROR", "error": "Session money service unavailable"}
 
             trading_date = session_service.get_trading_day()
             session = session_service.get_session()
-
             session_money = session_money_service.calculate(
                 ticker,
                 class_code,
@@ -198,22 +163,13 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
                 timeframe_minutes=5,
                 session=session,
             )
-
             if not isinstance(session_money, dict):
                 session_money = {}
 
-            current_money = float(
-                session_money.get("money_volume", 0) or 0
-            )
-            elapsed_minutes = int(
-                session_money.get("elapsed_minutes", 0) or 0
-            )
-            expected_minutes = int(
-                session_money.get("expected_minutes", 0) or 0
-            )
-            money_per_minute = float(
-                session_money.get("money_per_minute", 0) or 0
-            )
+            current_money = float(session_money.get("money_volume", 0) or 0)
+            elapsed_minutes = int(session_money.get("elapsed_minutes", 0) or 0)
+            expected_minutes = int(session_money.get("expected_minutes", 0) or 0)
+            money_per_minute = float(session_money.get("money_per_minute", 0) or 0)
 
             activity_ratio = FuturesMorningRadarService._activity_ratio(
                 current_money,
@@ -222,37 +178,23 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
                 expected_minutes,
             )
 
-            # Directional movement is secondary to current money/activity.
             directional_change = (
-                change_percent
-                if direction == "LONG"
-                else -change_percent
-                if direction == "SHORT"
+                change_percent if direction == "LONG"
+                else -change_percent if direction == "SHORT"
                 else 0.0
             )
 
             return spot_key, {
                 "status": "OK",
                 "direction": direction,
-
-                # TODAY'S MONEY — primary FAST SCREEN factors
                 "spot_money_volume": current_money,
                 "spot_money_per_minute": money_per_minute,
                 "spot_session_activity_ratio": activity_ratio,
-
-                # Historical turnover is retained only for context /
-                # denominator, never as the main ranking factor.
                 "average_daily_money": average_daily_money,
-
-                # Secondary directional context.
                 "change_percent": change_percent,
                 "directional_change": directional_change,
-
                 "elapsed_minutes": elapsed_minutes,
                 "expected_minutes": expected_minutes,
-
-                # Compatibility score for preliminary diagnostics/tests.
-                # FAST ranking remains based on current-session money/activity.
                 "radar_score": round(
                     max(0.0, activity_ratio) * 100.0
                     + max(0.0, money_per_minute) / 1_000_000.0
@@ -262,10 +204,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             }
 
         except Exception as exc:
-            return spot_key, {
-                "status": "ERROR",
-                "error": str(exc),
-            }
+            return spot_key, {"status": "ERROR", "error": str(exc)}
 
     def _preliminary_scan(self, mappings):
         keys = sorted({
@@ -288,25 +227,10 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     @classmethod
     def _select_deep_keys(cls, preliminary):
-        """
-        Select finalists primarily by TODAY'S money/activity.
-
-        Priority:
-        1. unusual current-session activity;
-        2. money flow per minute;
-        3. absolute current-session money;
-        4. directional movement.
-
-        Historical average turnover is intentionally NOT a ranking factor.
-        It is already embedded in activity_ratio as the asset's own baseline.
-        """
+        """Select DEEP finalists primarily by today's money/activity."""
         valid = [
-            (key, value)
-            for key, value in preliminary.items()
-            if (
-                isinstance(value, dict)
-                and str(value.get("status", "")).upper() == "OK"
-            )
+            (key, value) for key, value in preliminary.items()
+            if isinstance(value, dict) and str(value.get("status", "")).upper() == "OK"
         ]
 
         def f(value, default=0.0):
@@ -326,30 +250,21 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             reverse=True,
         )
 
-        # Keep directional diversity where possible, but do NOT sacrifice
-        # a materially stronger money/activity leader just to fill LONG/SHORT.
         selected = []
-        selected_keys = set()
-
         for key, value in ranked:
             if len(selected) >= cls.DEEP_SPOT_LIMIT:
                 break
-
             activity = f(value.get("spot_session_activity_ratio"))
             money_per_minute = f(value.get("spot_money_per_minute"))
             money_volume = f(value.get("spot_money_volume"))
-
-            # Ignore instruments with no meaningful current-session flow.
             if activity <= 0 and money_per_minute <= 0 and money_volume <= 0:
                 continue
-
             selected.append(key)
-            selected_keys.add(key)
 
         return set(selected)
 
     def scan(self, mappings=None, limit=None):
-        """Fast unified-market pass, then deep SPOT analysis for finalists."""
+        """FAST SPOT screen -> DEEP SPOT -> one live-selected futures contract."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
@@ -362,22 +277,22 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
         preliminary = self._preliminary_scan(mappings)
         deep_keys = self._select_deep_keys(preliminary)
-
-        # Network failures in the FAST stage must not turn a read-only market
-        # scan into a false "NO FINAL CANDIDATES".  If FAST produced no usable
-        # finalists, fall back to the proven base radar over the prepared
-        # universe.  The base radar applies its normal liquidity, direction,
-        # RS, group and candidate filters; this changes resilience only, not
-        # trading criteria.
         if not deep_keys:
             return super().scan(mappings=mappings, limit=limit)
 
         deep_mappings = [
             item for item in mappings
-            if (str(item.get("spot_ticker") or "").strip().upper(), str(item.get("spot_class_code") or "").strip()) in deep_keys
+            if (
+                str(item.get("spot_ticker") or "").strip().upper(),
+                str(item.get("spot_class_code") or "").strip(),
+            ) in deep_keys
         ]
 
-        results = super().scan(mappings=deep_mappings, limit=limit)
+        selected_contracts = self.futures_contract_selector.select(deep_mappings)
+        if not selected_contracts:
+            return []
+
+        results = super().scan(mappings=selected_contracts, limit=limit)
         for item in results:
             item["scan_phase"] = "DEEP"
             group = self.trading_universe_service.spot_group(item)
