@@ -106,6 +106,18 @@ class TestFuturesTradeCandidateService:
         assert len(result) == 3
         assert [item["rank"] for item in result] == [1, 2, 3]
 
+    def test_rank_none_returns_full_deep_shortlist(self):
+        service = FuturesTradeCandidateService()
+        radars = [
+            self.radar("A1U6", "A", activity=3.0),
+            self.radar("B1U6", "B", activity=2.0),
+            self.radar("C1U6", "C", activity=1.5),
+            self.radar("D1U6", "D", activity=1.0),
+        ]
+        result = service.rank(radars, limit=None)
+        assert len(result) == 4
+        assert [item["spot_ticker"] for item in result] == ["A", "B", "C", "D"]
+
     def test_invalid_limit(self):
         try:
             FuturesTradeCandidateService().rank([], limit=-1)
@@ -118,6 +130,6 @@ if __name__ == "__main__":
     test = TestFuturesTradeCandidateService()
     for name in dir(test):
         if name.startswith("test_"):
-            getattr(test, name)()
+            fn = getattr(test, name)
+            fn()
             print("PASS", name)
-    print("ALL TESTS PASSED")
