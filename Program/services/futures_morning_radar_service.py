@@ -137,6 +137,21 @@ class FuturesMorningRadarService:
                 "futures_ticker":futures_ticker,
                 "futures_class_code":futures_class_code,
                 "futures_expiry":mapping.get("futures_expiry"),
+                "days_to_expiry":mapping.get("days_to_expiry"),
+                "selection_score":mapping.get("selection_score"),
+                "liquidity_score":mapping.get("liquidity_score"),
+                "spread_score":mapping.get("spread_score"),
+                "expiry_score":mapping.get("expiry_score"),
+                "spread_percent":mapping.get("spread_percent"),
+                "turnover_30m":mapping.get("turnover_30m"),
+                "trade_count_30m":mapping.get("trade_count_30m"),
+                "depth_notional":mapping.get("depth_notional"),
+                "bid":mapping.get("bid"),
+                "ask":mapping.get("ask"),
+                "last":mapping.get("last"),
+                "futures_selection_version":mapping.get("futures_selection_version"),
+                "futures_selection_reason":mapping.get("futures_selection_reason"),
+                "futures_selection_candidates":mapping.get("futures_selection_candidates"),
                 "spot_ticker":spot_ticker,
                 "spot_class_code":spot_class_code,
                 "spot_name":mapping.get("spot_name",""),
@@ -200,7 +215,7 @@ class FuturesMorningRadarService:
             candidate=dict(mapping); candidate["futures_expiry"]=expiry.isoformat(); grouped.setdefault(spot_ticker,[]).append(candidate)
         selected=[]
         for candidates in grouped.values():
-            candidates.sort(key=lambda item:(cls._parse_expiry(item.get("futures_expiry")) or date.max,str(item.get("futures_ticker") or "")))
+            candidates.sort(key=lambda item:(cls._parse_expiry(item.get("futures_expiry")) or date.max,str(item.get("futures_ticker")or "")))
             selected.extend(candidates[:cls.MAX_CONTRACTS_PER_SPOT])
         return sorted(selected,key=lambda item:(str(item.get("spot_ticker") or ""),cls._parse_expiry(item.get("futures_expiry")) or date.max,str(item.get("futures_ticker") or "")))
 
