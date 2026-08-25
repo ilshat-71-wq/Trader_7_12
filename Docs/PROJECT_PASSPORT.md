@@ -2,7 +2,7 @@
 
 **Дата актуализации:** 25.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Рабочая интеграционная ветка:** `refactor/top-opportunity-ranking`
+**Рабочая ветка:** `fix/candle-concurrency`
 
 ---
 
