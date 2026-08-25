@@ -15,12 +15,13 @@ from services.history_candle_service import HistoryCandleService
 from services.market_session_service import MarketSessionService
 from services.session_money_volume_service import SessionMoneyVolumeService
 from services.spot_first_pullback_service import SpotFirstPullbackService
+from services.moex_price_stability_service import MoexPriceStabilityService
 
 
 class FuturesMorningRadarService:
     """Build the current-session futures shortlist through the SPOT-first radar."""
 
-    VERSION = "0.8"
+    VERSION = "0.9"
     MAX_CONTRACTS_PER_SPOT = 2
     MAPPING_CACHE_SECONDS = 300
 
@@ -32,8 +33,10 @@ class FuturesMorningRadarService:
         self.session_service = session_service or MarketSessionService()
         self.session_money_service = session_money_service or SessionMoneyVolumeService(history_service=self.history_service, session_service=self.session_service)
         self.spot_setup_service = spot_setup_service or SpotFirstPullbackService(self.history_service, self.session_service)
+        self.price_stability_service = MoexPriceStabilityService(api=self.history_service.trade_service.api)
         self._mapping_cache = None
         self._mapping_cache_at = 0.0
+        self._price_stability_cache = {}
 
     @staticmethod
     def _activity_ratio(current_money, average_daily_money, elapsed_minutes, expected_minutes):
@@ -55,6 +58,28 @@ class FuturesMorningRadarService:
             self._mapping_cache=list(mappings)
             self._mapping_cache_at=now
         return mappings
+
+    def _price_stability(self, spot_ticker, spot_class_code, reference_close, trading_date):
+        key=(spot_ticker, spot_class_code, round(float(reference_close or 0), 8), str(trading_date))
+        if key in self._price_stability_cache:
+            return dict(self._price_stability_cache[key])
+        try:
+            result=self.price_stability_service.evaluate(
+                spot_ticker,
+                spot_class_code,
+                reference_close=reference_close,
+                trading_date=trading_date,
+                now=self.session_service.now(),
+            )
+        except Exception as exc:
+            result={
+                "moex_event_risk": False,
+                "moex_price_stability_state": "ERROR",
+                "moex_price_stability_reason": type(exc).__name__,
+                "moex_data_status": "ERROR",
+            }
+        self._price_stability_cache[key]=dict(result)
+        return dict(result)
 
     def scan(self, mappings=None, limit=None):
         """Run SPOT radar and attach current-session money, setup and activity."""
@@ -84,6 +109,8 @@ class FuturesMorningRadarService:
             if str(radar.get("status","")).upper()=="ERROR":
                 results.append({"version":self.VERSION,"status":"ERROR","error":radar.get("error","Radar analysis failed"),"futures_ticker":futures_ticker,"futures_class_code":futures_class_code,"futures_expiry":mapping.get("futures_expiry"),"spot_ticker":spot_ticker,"spot_class_code":spot_class_code,"spot_name":mapping.get("spot_name",""),"spot_type":mapping.get("spot_type",""),"mapping_method":mapping.get("mapping_method")})
                 continue
+
+            price_stability=self._price_stability(spot_ticker,spot_class_code,radar.get("last_close",0),trading_date)
 
             if radar_key not in setup_cache:
                 try:
@@ -123,6 +150,18 @@ class FuturesMorningRadarService:
                 "spot_money_per_minute":round(float(session_money.get("money_per_minute",0) or 0),2),
                 "session_elapsed_minutes":elapsed_minutes,
                 "session_expected_minutes":expected_minutes,
+                "moex_event_risk":bool(price_stability.get("moex_event_risk")),
+                "moex_da_trigger_inferred":bool(price_stability.get("moex_da_trigger_inferred")),
+                "moex_da_trigger_percent":float(price_stability.get("moex_da_trigger_percent",20.0) or 20.0),
+                "moex_da_window_minutes":int(price_stability.get("moex_da_window_minutes",10) or 10),
+                "moex_weekend_band_percent":float(price_stability.get("moex_weekend_band_percent",3.0) or 3.0),
+                "moex_weekend_band_near":bool(price_stability.get("moex_weekend_band_near")),
+                "moex_weekend_band_hit":bool(price_stability.get("moex_weekend_band_hit")),
+                "moex_max_abs_move_percent":float(price_stability.get("moex_max_abs_move_percent",0.0) or 0.0),
+                "moex_price_stability_state":price_stability.get("moex_price_stability_state","NORMAL"),
+                "moex_price_stability_reason":price_stability.get("moex_price_stability_reason",""),
+                "moex_candles_loaded":int(price_stability.get("moex_candles_loaded",0) or 0),
+                "moex_data_status":price_stability.get("moex_data_status","NO_DATA"),
                 "setup":spot_setup.get("setup",radar.get("setup","NONE")),
                 "setup_direction":spot_setup.get("setup_direction",radar.get("setup_direction",radar.get("direction","NONE"))),
                 "setup_state":spot_setup.get("setup_state",radar.get("setup_state","WAIT")),
@@ -194,4 +233,4 @@ class FuturesMorningRadarService:
         print("-"*160)
         for item in results:
             print(f"{item.get('rank','-'): <6}{item.get('futures_ticker','-'): <12}{item.get('spot_ticker','-'): <9}{float(item.get('spot_money_volume',0) or 0):>16,.0f}{float(item.get('spot_session_activity_ratio',0) or 0):>8.2f}{str(item.get('setup','-')):<17}{str(item.get('setup_state','-')):<12}{float(item.get('retracement_ratio',0) or 0):>7.2f}{float(item.get('setup_quality_score',0) or 0):>9.1f}{str(item.get('direction','-')):<8}{item.get('market_session','-')}")
-        print(); print("SPOT is the source of setup/market structure. FUTURES is the tradable instrument."); print("The service does not place orders or choose the user's exact entry."); print("="*160)
+        print(); print("SPOT is the source of setup/market structure. FUTURES is the tradable instrument."); print("MOEX-style price-instability fields are derived from authenticated BCS SPOT candles."); print("The service does not place orders or choose the user's exact entry."); print("="*160)

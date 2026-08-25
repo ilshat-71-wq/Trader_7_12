@@ -1,8 +1,8 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 19.08.2026  
+**Дата актуализации:** 25.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Каноническая ветка:** `main`
+**Рабочая ветка:** `fix/candle-concurrency`
 
 ---
 
@@ -33,7 +33,7 @@ SPOT RELATIVE STRENGTH / WEAKNESS vs IMOEX2 / IRUS2
   ↓
 SPOT H1 STRUCTURE + M5 SETUP
   ↓
-TOP 2–3 BASE ASSETS
+TOP 2–3 SPOT OPPORTUNITY WATCHLIST
   ↓
 USER SELECTS THE FUTURES CONTRACT
 ```
@@ -57,6 +57,8 @@ USER SELECTS THE FUTURES CONTRACT
 7. качественную SPOT-структуру;
 8. pullback/rebound или breakout setup;
 9. возможность продолжения движения.
+
+TOP-2/3 — это **watchlist возможностей**, а не список готовых входов. WAIT/WATCH могут оставаться в TOP, если базовый актив проходит обязательные SPOT eligibility-проверки.
 
 Если качественных кандидатов меньше трёх, TOP не заполняется искусственно.
 
@@ -124,10 +126,7 @@ USER SELECTS THE FUTURES CONTRACT
 
 `relative_strength = instrument_return - benchmark_return`
 
-То есть:
-
-- положительный RS = SPOT сильнее benchmark;
-- отрицательный RS = SPOT слабее benchmark.
+Положительный RS означает превосходство SPOT над benchmark; отрицательный — относительную слабость.
 
 Канонические сигналы:
 
@@ -146,14 +145,7 @@ Daily timeframe — базовый контекст.
 
 Предпочтительны 2–3 последовательных дня движения в одном направлении, но это не абсолютный запрет.
 
-Рабочие состояния:
-
-- `UPTREND`;
-- `WEAK_UPTREND`;
-- `DOWNTREND`;
-- `WEAK_DOWNTREND`.
-
-Для итогового ranking RS должен согласовываться с направлением:
+Для ranking RS должен согласовываться с направлением:
 
 - `LONG + STRONGER` — плюс;
 - `SHORT + WEAKER` — плюс;
@@ -180,11 +172,11 @@ SHORT:
 
 Состояния:
 
-- `WAIT`;
-- `WATCH`;
-- `CONFIRMED`.
+- `WAIT` — идея интересна, но setup ещё не сформирован;
+- `WATCH` — setup развивается и требует наблюдения;
+- `READY` / `CONFIRMED` — setup имеет фактическое подтверждение.
 
-Setup — фактор качества, а не автоматическая команда на вход.
+**Setup quality и opportunity score — разные измерения.** Высокий opportunity score не означает готовый вход.
 
 ---
 
@@ -192,9 +184,13 @@ Setup — фактор качества, а не автоматическая к
 
 Итоговый вопрос:
 
-> **Где сегодня одновременно есть деньги, активность, движение, сила/слабость и качественный SPOT setup?**
+> **Где сегодня одновременно есть деньги, активность, движение, сила/слабость и качественный SPOT context?**
 
-Приоритет:
+Итоговый `opportunity_score` формируется session-aware pipeline из существующего SPOT `candidate_score`, текущей активности и направленного движения.
+
+Setup quality выводится отдельно и не используется как обязательный финальный gate TOP-2/3.
+
+Приоритеты остаются:
 
 1. current SPOT money/activity;
 2. SPOT strength/weakness vs benchmark;
@@ -249,7 +245,7 @@ Mapping нужен только для справочной связи выбр�
 - setup quality;
 - detailed session money/activity.
 
-После этого группы объединяются и выбирается TOP 2–3.
+После этого группы объединяются и выбирается TOP 2–3 watchlist.
 
 Сетевые ошибки не должны превращать исправные данные в ложный `NO CANDIDATES`.
 
@@ -269,15 +265,15 @@ Mapping нужен только для справочной связи выбр�
 
 Интерфейс показывает только информацию о **базовом активе SPOT**:
 
-- название/тикер SPOT;
+- тикер SPOT;
 - направление;
+- opportunity/session score;
+- setup и setup state;
 - SPOT price;
 - SPOT money/activity;
 - RS;
-- daily trend;
-- setup;
-- уровни SPOT;
-- итоговый score.
+- daily context;
+- уровни SPOT.
 
 В пользовательском интерфейсе **не выводятся цена, сделки, оборот или движение фьючерса**.
 
@@ -329,13 +325,13 @@ Historical replay — `READ ONLY / NO ORDERS`.
 - `spot_first_pullback_service.py` — SPOT setup;
 - `two_phase_futures_morning_radar_service.py` — fast/deep pipeline;
 - `futures_trade_candidate_service.py` — ranking BASE ASSETS;
-- `morning_trading_pipeline_service.py` — итоговый pipeline;
+- `morning_trading_pipeline_service.py` — итоговый opportunity watchlist;
 - `ui.py` — read-only SPOT radar interface.
 
 ---
 
 ## 17. КАНОНИЧЕСКОЕ ПРАВИЛО ПРОЕКТА
 
-> **Сканер выбирает базовый актив по SPOT. Фьючерс не подтверждает идею и не влияет на выбор. Фьючерс выбирает пользователь самостоятельно.**
+> **Сканер выбирает базовый актив по SPOT. TOP-2/3 показывает лучшие возможности для наблюдения. SETUP STATE сообщает степень готовности, но не превращает watchlist в автоматический вход. Фьючерс выбирает пользователь самостоятельно.**
 
-Это правило имеет приоритет над старыми формулировками и не должно быть возвращено без отдельного решения пользователя.
+Это правило имеет приоритет над старыми формулировками.
