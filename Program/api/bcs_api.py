@@ -227,15 +227,27 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_order_book(self, ticker, class_code):
+        """Load the current Level-2 book through BCS's documented GET endpoint."""
         url = f"{self.market_url}/order-book"
-        payload = {"ticker": ticker, "classCode": class_code, "depth": 10}
-        r = RequestHelper.post(
-            url,
-            headers={**self.headers(), "Content-Type": "application/json"},
-            json=payload
-        )
+        params = {"ticker": ticker, "classCode": class_code, "depth": 10}
+        try:
+            r = RequestHelper.get(
+                url,
+                headers=self.headers(),
+                params=params,
+                timeout=self.METADATA_TIMEOUT,
+                max_retries=self.METADATA_RETRIES,
+            )
+        except Exception as exc:
+            print("⚠️ Order-book request failed:", ticker, class_code, type(exc).__name__)
+            return {}
         if r.status_code == 200:
-            return r.json()
+            try:
+                return r.json()
+            except ValueError:
+                print("⚠️ Order-book JSON parse failed:", ticker, class_code)
+                return {}
+        print("⚠️ Order-book HTTP:", ticker, class_code, r.status_code)
         return {}
 
     # ---------------------------------------------------------
