@@ -194,7 +194,7 @@ def test_production_scan_attaches_futures_only_after_ready_spot(monkeypatch):
     ranked = service.scan(mappings=mappings, limit=1)
     assert calls == ["mapped"]
     assert ranked[0]["futures_ticker"] == "RI_REFERENCE"
-    assert ranked[0]["futures_selection_reason"] == "WAITING_FOR_SPOT_READINESS"
+    assert ranked[0]["futures_selection_reason"] == "POST_SPOT_READINESS_MAPPING"
 
 
 def test_production_scan_event_risk_blocks_candidate_before_futures_mapping(monkeypatch):
