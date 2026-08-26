@@ -24,23 +24,21 @@ class SpotUniverseService:
     )
     CACHE_SECONDS = 300
     MAX_WORKERS = 2
-    _cache = {}
-    _cache_at = {}
 
     def __init__(self, api=None):
         self.api = api or BCSAPI()
+        self._cache = {}
+        self._cache_at = {}
 
-    @classmethod
-    def _cached(cls, instrument_type):
-        records = cls._cache.get(instrument_type)
-        if records is not None and time.monotonic() - cls._cache_at.get(instrument_type, 0.0) < cls.CACHE_SECONDS:
+    def _cached(self, instrument_type):
+        records = self._cache.get(instrument_type)
+        if records is not None and time.monotonic() - self._cache_at.get(instrument_type, 0.0) < self.CACHE_SECONDS:
             return list(records)
         return None
 
-    @classmethod
-    def _store(cls, instrument_type, records):
-        cls._cache[instrument_type] = list(records)
-        cls._cache_at[instrument_type] = time.monotonic()
+    def _store(self, instrument_type, records):
+        self._cache[instrument_type] = list(records)
+        self._cache_at[instrument_type] = time.monotonic()
 
     @staticmethod
     def _class_code(item):
