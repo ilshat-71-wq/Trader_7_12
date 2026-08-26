@@ -281,3 +281,26 @@ Futures confirmation **не является обязательным фильт
 - Futures mapping выполняется только после прохождения SPOT eligibility и наличия рабочего SPOT trigger/readiness.
 - Futures confirmation, turnover, price, spread и expiry не участвуют в SPOT eligibility или score.
 - Добавлены production regression tests для candidate-score ranking и запрета futures attachment до SPOT readiness.
+
+---
+
+## 14. FULL CI / AUDIT CHECKPOINT
+
+**Дата:** 26.08.2026  
+**Коммит:** `39ba4b328e449889675242a03558e14383e6ee37`  
+**GitHub Actions:** `SPOT-first validation` — **SUCCESS**
+
+Проверено полным CI:
+
+- Python 3.11;
+- `compileall` для `Program/services` и `Program/tests` — SUCCESS;
+- полный `Program/tests` — **14 passed**;
+- исправлена только инфраструктурная причина предыдущего падения CI: runner не устанавливал runtime-зависимость `requests`;
+- в production/historical SPOT ranking логике дополнительных функциональных изменений в рамках этого аудита не потребовалось;
+- `FuturesTradeCandidateService` использует только SPOT evidence для eligibility/score;
+- `FuturesMorningRadarService` выполняет SPOT eligibility до futures mapping;
+- historical ranker использует directional RS tie-break и не использует futures metrics;
+- единственный канонический паспорт проекта сохранён: `Docs/PROJECT_PASSPORT.md`;
+- рабочая ветка остаётся только `main`.
+
+**Аудиторский вывод:** на текущем checkpoint SPOT-first regression suite проходит полностью. Последний CI failure был dependency/configuration failure (`requests` отсутствовал в runner), а не функциональный regression проекта. После добавления `requests` в CI полный набор из 14 тестов прошёл успешно.
