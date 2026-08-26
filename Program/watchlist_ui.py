@@ -1,8 +1,4 @@
-"""Trader_7_12 Pro — canonical SPOT opportunity watchlist UI.
-
-The GUI exposes the complete read-only signal chain:
-SPOT direction -> SPOT setup -> trigger -> READY -> futures confirmation -> CONFIRMED.
-"""
+"""Trader_7_12 Pro — canonical SPOT opportunity watchlist UI."""
 
 from html import escape
 
@@ -11,7 +7,6 @@ from ui import (
     DIRECTION_LABELS,
     SETUP_LABELS,
     SETUP_STATE_LABELS,
-    RS_LABELS,
     SESSION_LABELS,
     _label,
     _money,
@@ -23,21 +18,20 @@ from ui import (
 
 SIGNAL_STATE_LABELS = {
     "WAIT": "ОЖИДАНИЕ",
-    "READY": "ГОТОВ — ЖДЁМ ПОДТВЕРЖДЕНИЕ",
-    "CONFIRMED": "ПОДТВЕРЖДЁН",
-    "BLOCKED": "ЗАБЛОКИРОВАН",
+    "READY": "ГОТОВ — ЖДЁМ ФАКТИЧЕСКОГО ПРОДОЛЖЕНИЯ",
+    "CONFIRMED": "ПОДТВЕРЖДЁН SPOT",
 }
 
 
 class WatchlistTraderWindow(TraderWindow):
-    """Read-only GUI bound to the SPOT opportunity watchlist contract."""
+    """Read-only GUI bound to the SPOT-first watchlist contract."""
 
-    VERSION = "1.1"
+    VERSION = "1.2"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
         self.setWindowTitle("Trader_7_12 Pro — SPOT opportunity watchlist")
-        self.subtitle.setText("SPOT • DIRECTION • SETUP • TRIGGER • FUTURES CONFIRMATION")
+        self.subtitle.setText("SPOT • DIRECTION • SETUP • TRIGGER • READINESS")
 
     def _scan_finished(self, results):
         self.scan_button.setEnabled(True)
@@ -56,12 +50,12 @@ class WatchlistTraderWindow(TraderWindow):
         lines = [
             "<pre style='font-family:Menlo,Monaco,monospace;font-size:14px;color:#dfe3e7'>",
             "═" * 86,
-            "TRADER_7_12 PRO — SPOT SIGNAL WATCHLIST",
+            "TRADER_7_12 PRO — SPOT OPPORTUNITY WATCHLIST",
             "═" * 86,
             "",
             f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
             "",
-            "ГДЕ ДЕНЬГИ • ГДЕ СИЛА/СЛАБОСТЬ • ГДЕ СФОРМИРОВАЛСЯ СИГНАЛ",
+            "ГДЕ ДЕНЬГИ • ГДЕ СИЛА/СЛАБОСТЬ • ГДЕ СФОРМИРОВАЛСЯ SPOT-СЦЕНАРИЙ",
             "",
         ]
 
@@ -76,7 +70,7 @@ class WatchlistTraderWindow(TraderWindow):
                 direction = _label(DIRECTION_LABELS, item.get("direction"))
                 setup = _label(SETUP_LABELS, item.get("setup"))
                 setup_state = _label(SETUP_STATE_LABELS, item.get("setup_state"))
-                signal_state = SIGNAL_STATE_LABELS.get(str(item.get("signal_state") or "WAIT").upper(), str(item.get("signal_state") or "ОЖИДАНИЕ"))
+                signal_state = SIGNAL_STATE_LABELS.get(str(item.get("signal_state") or "WAIT").upper(), "ОЖИДАНИЕ")
                 rs = _rs_label(item)
                 opportunity = item.get("opportunity_score", item.get("session_rank_score", 0))
                 lines.extend([
@@ -104,15 +98,13 @@ class WatchlistTraderWindow(TraderWindow):
                     f"ЛОКАЛЬНЫЙ МИНИМУМ:  {_number(item.get('previous_low'), 4)}",
                     f"ТРИГГЕР УРОВНЯ:     {_number(item.get('entry_trigger'), 4)}",
                     f"ТРИГГЕР АКТИВЕН:    {'ДА' if float(item.get('entry_trigger', 0) or 0) > 0 else 'НЕТ'}",
+                    f"SPOT READY:         {'ДА' if str(item.get('signal_state')).upper() == 'READY' else 'НЕТ'}",
+                    f"SPOT CONFIRMED:     {'ДА' if str(item.get('signal_state')).upper() == 'CONFIRMED' else 'НЕТ'}",
                     "",
-                    f"FUTURES:             {escape(str(item.get('futures_ticker') or '—'))}",
-                    f"FUTURES CONFIRM:     {escape(str(item.get('futures_confirmation') or 'NOT_CHECKED'))}",
-                    f"FUTURES STATUS:      {escape(str(item.get('futures_confirmation_status') or 'NOT_CHECKED'))}",
-                    f"FUTURES SCORE:       {_number(item.get('futures_confirmation_score'), 0)} / 100",
-                    f"FUTURES TRADES:      {_number(item.get('futures_trade_count'), 0)}",
-                    f"FUTURES ₽×V:         {_money(item.get('futures_money_volume'))}",
-                    f"FUTURES Δ:           {_number(item.get('futures_price_change_percent'), 2)}%",
-                    f"ПРИЧИНА:             {escape(str(item.get('futures_confirmation_reason') or item.get('signal_state_reason') or '—'))}",
+                    "FUTURES:             MAPPING ONLY",
+                    "FUTURES CONFIRM:     НЕ ИСПОЛЬЗУЕТСЯ",
+                    "FUTURES В RANKING:   НЕТ",
+                    f"ПРИЧИНА:             {escape(str(item.get('signal_state_reason') or '—'))}",
                     "",
                     "─" * 86,
                 ])
@@ -126,20 +118,20 @@ class WatchlistTraderWindow(TraderWindow):
                 f"SELECTED={diagnostics.get('selected', 0)}  "
                 f"READY={diagnostics.get('ready', 0)}  "
                 f"CONFIRMED={diagnostics.get('confirmed', 0)}  "
-                f"BLOCKED={diagnostics.get('blocked', 0)}  "
                 f"WATCH={diagnostics.get('watch', 0)}  "
                 f"WAIT={diagnostics.get('wait', 0)}",
             ])
 
         lines.extend([
             "",
-            "ЦЕПОЧКА: DIRECTION → SETUP → TRIGGER → READY → FUTURES → CONFIRMED",
+            "ЦЕПОЧКА: DIRECTION → SETUP → TRIGGER → READY/CONFIRMED → FUTURES",
             "",
             "DIRECTION определяется только по SPOT.",
             "SETUP и TRIGGER определяются только по SPOT-структуре.",
             "READY = SPOT-сетап сформирован и есть реальный trigger.",
-            "CONFIRMED = READY + выбранный фьючерс подтверждает то же направление.",
-            "Фьючерс не может изменить направление, setup или trigger.",
+            "CONFIRMED = SPOT-сценарий подтверждён собственной SPOT-структурой.",
+            "Futures — только справочный mapping; он не подтверждает и не блокирует SPOT.",
+            "Пользователь самостоятельно выбирает фьючерс, график, вход и риск.",
             "Это read-only радар: исполнение ордеров, SL/TP и position sizing отсутствуют.",
             "═" * 86,
             "</pre>",
