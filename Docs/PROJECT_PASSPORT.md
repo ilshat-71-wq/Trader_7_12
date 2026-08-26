@@ -304,3 +304,28 @@ Futures confirmation **не является обязательным фильт
 - рабочая ветка остаётся только `main`.
 
 **Аудиторский вывод:** на текущем checkpoint SPOT-first regression suite проходит полностью. Последний CI failure был dependency/configuration failure (`requests` отсутствовал в runner), а не функциональный regression проекта. После добавления `requests` в CI полный набор из 14 тестов прошёл успешно.
+
+---
+
+## 15. SPOT READINESS / FUTURES MAPPING BOUNDARY CHECKPOINT
+
+**Дата:** 26.08.2026  
+**Коммит с regression coverage:** `33c829789aad0453c5bfe2d8eebd8a0113b8a0b0`  
+**GitHub Actions:** `SPOT-first validation` run #20 — **SUCCESS**
+
+Добавлена production-level regression coverage границы `SPOT → FUTURES MAPPING`:
+
+- `READY` SPOT-кандидат с валидным trigger/readiness действительно может получить справочный futures mapping;
+- `WAIT` SPOT-кандидат не получает futures ticker даже при наличии готового mapping в исходных данных;
+- `moex_event_risk=True` блокирует candidate до futures mapping даже при сильных SPOT money/RS/setup сигналах;
+- тест проверяет не только конечный результат, но и сам факт вызова mapping только после SPOT readiness;
+- futures mapping остаётся reference-only и не меняет candidate eligibility или ranking.
+
+Полный CI после исправления тестового ожидания:
+
+- Python 3.11 — SUCCESS;
+- `compileall` — SUCCESS;
+- полный `Program/tests` — **16 passed**;
+- `SPOT-first validation` — **SUCCESS**.
+
+**Аудиторский вывод:** production pipeline теперь имеет regression coverage не только для запрета преждевременного futures attachment, но и для положительного пути `eligible SPOT + READY + trigger → post-readiness futures mapping`. Архитектурная граница подтверждена в обоих направлениях.
