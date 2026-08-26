@@ -191,6 +191,13 @@ class FuturesTradeCandidateService:
         )
         return candidates[:cls.MONEY_LEADER_SHORTLIST]
 
+    @classmethod
+    def _directional_rs_tiebreak(cls, item):
+        """Return RS in the candidate's trade direction for deterministic tie-breaking."""
+        direction = str(item.get("direction") or "").upper()
+        rs = cls._float(item.get("relative_strength"))
+        return rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
+
     def rank(self, radar_results, confirmations=None, limit=3):
         if not isinstance(radar_results, list):
             return []
@@ -211,7 +218,7 @@ class FuturesTradeCandidateService:
                 item["spot_session_activity_ratio"],
                 item["spot_money_per_minute"],
                 item["spot_money_volume"],
-                item["relative_strength"],
+                self._directional_rs_tiebreak(item),
                 item["setup_quality_score"],
                 item["spot_ticker"],
             ),
