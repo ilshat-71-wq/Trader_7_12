@@ -171,3 +171,36 @@ def test_historical_rank_tie_breaks_relative_strength_in_trade_direction():
     ranked = HistoricalCandidateRankerService.rank(rows, limit=2)
 
     assert [item["spot_ticker"] for item in ranked] == ["WEAK_B", "WEAK_A"]
+
+
+def test_production_candidate_rejects_missing_relative_strength():
+    radar = {
+        "direction": "LONG",
+        "spot_group": "MOEX_STOCK",
+        "relative_strength": 0.0,
+        "relative_strength_status": "UNAVAILABLE",
+        "spot_session_activity_ratio": 5.0,
+        "spot_money_per_minute": 50_000_000,
+        "spot_money_volume": 1_000_000_000,
+        "change_percent": 3.0,
+        "setup_quality_score": 100.0,
+    }
+
+    assert FuturesTradeCandidateService.build_candidate(radar) is None
+
+
+def test_production_candidate_rejects_event_risk_even_with_strong_spot_signal():
+    radar = {
+        "direction": "SHORT",
+        "spot_group": "MOEX_STOCK",
+        "relative_strength": -3.0,
+        "relative_strength_status": "OK",
+        "moex_event_risk": True,
+        "spot_session_activity_ratio": 5.0,
+        "spot_money_per_minute": 50_000_000,
+        "spot_money_volume": 1_000_000_000,
+        "change_percent": -3.0,
+        "setup_quality_score": 100.0,
+    }
+
+    assert FuturesTradeCandidateService.build_candidate(radar) is None

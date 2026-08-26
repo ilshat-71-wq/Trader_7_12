@@ -258,125 +258,15 @@ Futures confirmation **не является обязательным фильт
 
 После этого группы объединяются и выбирается TOP 2–3 watchlist.
 
-Сетевые ошибки не должны превращать исправные данные в ложный `NO CANDIDATES`.
-
 ---
 
-## 12. ВРЕМЯ
+## 12. ВАЛИДИРОВАННЫЙ CHECKPOINT
 
-Все торговые времена проекта — `Europe/Moscow`.
-
-Основное окно: **07:00–10:00 МСК**.
-
-Дополнительный мониторинг: **10:00–13:00 МСК**.
-
-Сканирование и оценка SPOT могут выполняться повторно в течение доступного торгового окна; session-aware логика должна учитывать текущую сессию.
-
----
-
-## 13. ИНТЕРФЕЙС
-
-Интерфейс показывает только информацию о **базовом активе SPOT**:
-
-- тикер SPOT;
-- направление;
-- opportunity/session score;
-- setup и setup state;
-- trigger/readiness;
-- SPOT price;
-- SPOT money/activity;
-- RS;
-- daily context;
-- уровни SPOT.
-
-В пользовательском интерфейсе **не выводятся цена, сделки, оборот или движение фьючерса**.
-
----
-
-## 14. ЧТО ПОЛЬЗОВАТЕЛЬ ДЕЛАЕТ САМ
-
-Пользователь самостоятельно:
-
-- выбирает фьючерсный контракт;
-- смотрит его график;
-- выбирает точку входа;
-- выбирает размер позиции;
-- определяет риск;
-- устанавливает SL/TP;
-- решает, совершать сделку или нет.
-
-Сканер только сокращает поиск.
-
----
-
-## 15. ЧТО ЗАПРЕЩЕНО
-
-Не добавлять:
-
-- автоматическое исполнение ордеров;
-- BUY/SELL команды;
-- автоматическую точку входа;
-- position sizing;
-- управление депозитом;
-- автоматический SL/TP;
-- portfolio management;
-- futures confirmation как обязательный фильтр;
-- использование фьючерса как источника торговой идеи.
-
-Historical replay — `READ ONLY / NO ORDERS`.
-
----
-
-## 16. ТЕХНИЧЕСКИЕ ОПОРЫ
-
-Ключевые сервисы:
-
-- `moex_index_universe_service.py` — IMOEX universe;
-- `market_trading_universe_service.py` — market groups;
-- `futures_spot_mapping_service.py` — справочный mapping;
-- `instrument_morning_radar_service.py` — SPOT radar и RS;
-- `relative_strength_service.py` — SPOT RS;
-- `session_money_volume_service.py` — SPOT session money/activity;
-- `spot_first_pullback_service.py` — SPOT setup;
-- `two_phase_futures_morning_radar_service.py` — fast/deep pipeline;
-- `futures_trade_candidate_service.py` — ranking BASE ASSETS;
-- `morning_trading_pipeline_service.py` — итоговый opportunity watchlist;
-- `ui.py` — read-only SPOT radar interface.
-
-Названия исторически сложившихся `futures_*` сервисов не меняют каноническое правило: они могут использоваться внутри pipeline, но **фьючерсные данные не должны становиться источником идеи или обязательным gate SPOT**.
-
----
-
-## 17. РАБОЧИЙ ПРОЦЕСС REPOSITORY
-
-Проект развивается в **одной главной рабочей ветке `main`**.
-
-Не плодить многочисленные рабочие ветки для отдельных этапов проекта.
-
-Изменения архитектуры и кода должны последовательно накапливаться в `main`, а Passport является актуальной канонической точкой отсчёта для дальнейшей разработки.
-
----
-
-## 18. КАНОНИЧЕСКОЕ ПРАВИЛО ПРОЕКТА
-
-> **Сканер выбирает базовый актив по SPOT. TOP-2/3 показывает лучшие возможности для наблюдения. Direction определяется по SPOT-контексту. Setup формируется по H1/M5 SPOT. Trigger/readiness и READY/CONFIRMED описывают степень готовности SPOT-сценария. Фьючерс не участвует в direction, RS, setup, readiness или ranking и выбирается пользователем самостоятельно.**
-
-Это правило имеет приоритет над старыми формулировками и старыми реализациями.
-
----
-
-## 19. КОНТРОЛЬНЫЙ CHECKPOINT — 26.08.2026
-
-Текущий этап закреплён в `main`:
-
-- historical replay/ranking переведён на канонический SPOT-only принцип;
-- production candidate ranking не использует futures confirmation/price/turnover в score;
-- добавлена регрессия на независимость score от futures-полей;
-- исправлен directional RS tie-break: для SHORT более отрицательный RS корректно считается сильнее при равенстве остальных ranking-показателей;
-- CI запускает compile + SPOT-first regression suite;
-- исправлен такой же directional RS tie-break в historical ranking, чтобы read-only replay и production ranking использовали одинаковое направление RS при равенстве;
-- добавлена отдельная historical regression-проверка SHORT RS tie-break;
-- лишние audit/state Markdown-файлы не создаются; канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`;
-- рабочая ветка проекта — только `main`.
-
-Следующий уровень разработки должен продолжать усиливать **SPOT eligibility → activity → direction/RS → H1/M5 setup → TOP-2/3**, не возвращая futures-данные в источник идеи или ranking.
+- Production и historical ranking используют одинаковый directional RS tie-break: для LONG выше положительный RS, для SHORT более отрицательный RS.
+- Futures turnover, futures price и futures confirmation остаются полностью вне SPOT score/ranking.
+- Production candidate не проходит без доступного положительного/отрицательного RS в соответствии с направлением.
+- `moex_event_risk` остаётся жёстким SPOT eligibility gate даже при сильных остальных сигналах.
+- Historical replay остаётся `READ ONLY / NO ORDERS`.
+- Регрессионный набор SPOT-first покрывает независимость от futures, readiness, production/historical directional RS tie-break, отсутствие RS и event-risk gate.
+- Канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`.
+- Рабочая ветка проекта — только `main`.
