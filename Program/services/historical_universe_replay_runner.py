@@ -13,9 +13,36 @@ DEFAULT_MIN_MONEY = 100_000_000
 DEFAULT_CHECKPOINTS = "07:15,07:30,08:00,08:30,09:00,09:30,10:00,10:30,11:00,12:00,13:00"
 
 
+def _normalize_spot_readiness(item):
+    """Make historical replay readiness explicitly SPOT-first.
+
+    The historical service still carries legacy futures confirmation fields for
+    forward-outcome analysis. They must never delay or redefine trade readiness.
+    """
+    ready_time = item.get("ready_time")
+    spot_setup_state = str(item.get("setup_state") or "WAIT").upper()
+    spot_trigger = float(item.get("entry_trigger", 0) or 0)
+
+    item["spot_ready_time"] = ready_time
+    item["spot_setup_state"] = spot_setup_state
+    item["spot_entry_trigger"] = spot_trigger
+
+    # Canonical historical trade readiness is the first valid SPOT setup.
+    item["trade_ready_time"] = ready_time
+    item["readiness_source"] = "SPOT"
+    item["readiness_confirmed_by_futures"] = bool(item.get("futures_confirmation"))
+
+    # Futures confirmation remains a secondary observation only.
+    item["futures_confirmation_time"] = item.get("confirmation_time")
+    item["futures_confirmation_status"] = str(
+        (item.get("futures_confirmation") or {}).get("status") or "NO_DATA"
+    ).upper()
+    return item
+
+
 def _forward_outcome(service, item, endpoint):
-    """Measure raw and directional move after confirmation; no risk/order logic."""
-    confirmation_time = item.get("confirmation_time")
+    """Measure raw and directional move after FUTURES confirmation; no order logic."""
+    confirmation_time = item.get("futures_confirmation_time")
     entry_price = float(item.get("futures_price", 0) or 0)
     direction = str(item.get("direction") or "").upper()
     ticker = str(item.get("futures_ticker") or "").strip().upper()
@@ -76,7 +103,7 @@ def _print_rows(rows, trading_date):
     print("=" * 220)
     print(
         f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} "
-        f"{'SCORE':>7} {'SETUP':<10} {'READY':<6} {'CONF':<6} "
+        f"{'SCORE':>7} {'SETUP':<10} {'READY':<6} {'FUT':<6} "
         f"{'RS':>7} {'STATE':<9} {'EXCESS %':>10} "
         f"{'10 RAW %':>9} {'10 DIR %':>9} {'10 MFE':>9} "
         f"{'13 RAW %':>9} {'13 DIR %':>9} {'13 MFE':>9}"
@@ -101,8 +128,8 @@ def _print_rows(rows, trading_date):
             f"{rank:>3} {str(item.get('futures_ticker', '-')):<8} "
             f"{str(item.get('spot_ticker', '-')):<7} {str(item.get('direction', '-')):<6} "
             f"{float(item.get('candidate_score', 0) or 0):>7.2f} "
-            f"{str(item.get('setup', '-')):<10} {str(item.get('ready_time', '-')):<6} "
-            f"{str(item.get('confirmation_time', '-')):<6} {rs:>7.2f} {rs_state:<9} "
+            f"{str(item.get('setup', '-')):<10} {str(item.get('trade_ready_time', '-')):<6} "
+            f"{str(item.get('futures_confirmation_time', '-')):<6} {rs:>7.2f} {rs_state:<9} "
             f"{float(rs_data.get('excess_change_percent', 0) or 0):>10.2f} "
             f"{float(out10.get('raw_return_percent', 0) or 0):>9.2f} "
             f"{float(out10.get('directional_return_percent', 0) or 0):>9.2f} "
@@ -121,7 +148,8 @@ def _save_replay_results(all_results, dates, min_money):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     payload = {
-        "version": 1,
+        "version": 2,
+        "readiness_model": "SPOT_FIRST",
         "dates": list(dates),
         "min_money": float(min_money),
         "results": [
@@ -183,11 +211,12 @@ def main():
             checkpoints=checkpoints,
             limit=None,
         )
-        rows = HistoricalCandidateRankerService.rank(rows, limit=args.limit)
+        rows = [HistoricalCandidateRankerService.rank([_normalize_spot_readiness(item) for item in rows], limit=args.limit)]
+        rows = rows[0]
         for item in rows:
             item["_trading_date"] = trading_date
             item["confirmation_window"] = service.confirmation_window(
-                item.get("confirmation_time")
+                item.get("futures_confirmation_time")
             )
             item["outcome_10_00"] = _forward_outcome(service, item, "10:00")
             item["outcome_13_00"] = _forward_outcome(service, item, "13:00")
@@ -266,6 +295,7 @@ def main():
                 )
 
         print("Historical replay is read-only and does not perform portfolio or order operations.")
+        print("Trade readiness is SPOT-first; futures confirmation is secondary outcome data only.")
 
 
 if __name__ == "__main__":
