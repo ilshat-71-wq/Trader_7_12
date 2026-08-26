@@ -57,7 +57,7 @@ class TestMorningTradingPipelineService:
             "relative_strength": rs,
             "relative_strength_status": "OK",
             "relative_strength_signal": "STRONGER" if rs > 0 else "WEAKER",
-            "setup": "FIRST_PULLBACK",
+            "setup": "FIRST_PULLBACK" if direction == "LONG" else "FIRST_REBOUND",
             "setup_direction": direction,
             "setup_state": setup_state,
             "setup_quality_score": 70.0 if setup_state != "WAIT" else 0.0,
@@ -89,17 +89,35 @@ class TestMorningTradingPipelineService:
         assert item["setup_state"] == "WAIT"
         assert item["signal_state"] == "WAIT"
         assert item["selection_role"] == "TOP_WATCHLIST"
-        assert item["pipeline_version"] == "1.1"
+        assert item["pipeline_version"] == "1.2"
         assert item["opportunity_score"] == item["session_rank_score"]
         assert item["setup_score"] == 0.0
+        assert item["futures_confirmation"] == "NOT_APPLICABLE"
+        assert item["futures_confirmation_status"] == "MAPPING_ONLY"
         assert item["rank"] == 1
 
-    def test_ready_candidate_remains_distinguishable(self):
+    def test_watch_with_real_trigger_becomes_ready(self):
+        candidates = self.service([self.radar(setup_state="WATCH")]).scan(limit=3)
+        assert len(candidates) == 1
+        item = candidates[0]
+        assert item["setup_state"] == "WATCH"
+        assert item["signal_state"] == "READY"
+        assert item["entry_trigger"] == 299.0
+        assert item["futures_confirmation"] == "NOT_APPLICABLE"
+
+    def test_ready_candidate_remains_ready(self):
         candidates = self.service([self.radar(setup_state="READY")]).scan(limit=3)
         assert len(candidates) == 1
         assert candidates[0]["setup_state"] == "READY"
         assert candidates[0]["signal_state"] == "READY"
         assert candidates[0]["setup_score"] == 70.0
+
+    def test_confirmed_spot_setup_becomes_confirmed_without_futures(self):
+        candidates = self.service([self.radar(setup_state="CONFIRMED")]).scan(limit=3)
+        assert len(candidates) == 1
+        assert candidates[0]["setup_state"] == "CONFIRMED"
+        assert candidates[0]["signal_state"] == "CONFIRMED"
+        assert candidates[0]["futures_confirmation"] == "NOT_APPLICABLE"
 
     def test_top_limit_is_three(self):
         radars = [
@@ -136,6 +154,7 @@ class TestMorningTradingPipelineService:
         assert diagnostics["candidates"] == 2
         assert diagnostics["selected"] == 2
         assert diagnostics["ready"] == 1
+        assert diagnostics["confirmed"] == 0
         assert diagnostics["wait"] == 1
 
 
