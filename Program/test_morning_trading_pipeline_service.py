@@ -87,8 +87,9 @@ class TestMorningTradingPipelineService:
         assert len(candidates) == 1
         item = candidates[0]
         assert item["setup_state"] == "WAIT"
+        assert item["signal_state"] == "WAIT"
         assert item["selection_role"] == "TOP_WATCHLIST"
-        assert item["pipeline_version"] == "1.0"
+        assert item["pipeline_version"] == "1.1"
         assert item["opportunity_score"] == item["session_rank_score"]
         assert item["setup_score"] == 0.0
         assert item["rank"] == 1
@@ -97,6 +98,7 @@ class TestMorningTradingPipelineService:
         candidates = self.service([self.radar(setup_state="READY")]).scan(limit=3)
         assert len(candidates) == 1
         assert candidates[0]["setup_state"] == "READY"
+        assert candidates[0]["signal_state"] == "READY"
         assert candidates[0]["setup_score"] == 70.0
 
     def test_top_limit_is_three(self):
