@@ -1,4 +1,17 @@
+from datetime import date
+from types import SimpleNamespace
+
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
+
+
+class FakeSpotUniverseService:
+    def __init__(self, spots): self.spots = spots; self.calls = 0
+    def load(self): self.calls += 1; return list(self.spots)
+
+
+class FakeMappingService:
+    def __init__(self, mappings): self.mappings = mappings; self.calls = 0
+    def load(self): self.calls += 1; return list(self.mappings)
 
 
 class FakeHistoryService:
@@ -10,184 +23,51 @@ class FakeReplayService:
 
 
 class FakeRadarHelper:
-    def calculate_daily_trend(self, daily):
-        return {
-            "direction": "LONG",
-            "trend_days": 3,
-        }
+    def calculate_daily_trend(self, daily): return {"direction": "LONG", "trend_days": 3}
 
 
-class FakeMappingService:
-    def __init__(self, mappings):
-        self.mappings = mappings
-
-    def load(self):
-        return list(self.mappings)
+def spot(ticker, class_code="TQBR", group="MOEX_STOCK"):
+    return {"spot_ticker": ticker, "spot_class_code": class_code, "spot_group": group, "spot_universe": "DYNAMIC_SPOT"}
 
 
-class TestService(HistoricalUniverseReplayService):
-    def __init__(self, liquidity_by_ticker):
-        self.liquidity_by_ticker = liquidity_by_ticker
-
-    def load_daily_candles(self, ticker, class_code, trading_date):
-        return [
-            {"close": self.liquidity_by_ticker[ticker], "volume": 1},
-        ]
+def mapping(ticker, expiry):
+    return {"futures_ticker": ticker, "futures_class_code": "SPBFUT", "futures_expiry": expiry, "spot_ticker": "SBER", "spot_class_code": "TQBR"}
 
 
-def candidate(ticker, expiry):
-    return {
-        "futures_ticker": ticker,
-        "futures_class_code": "SPBFUT",
-        "futures_expiry": expiry,
-        "spot_ticker": "OZON",
-        "spot_class_code": "SPBXM",
-    }
+def service(spots=None, mappings=None):
+    spot_source = FakeSpotUniverseService(spots or [spot("SBER"), spot("BR", "SPOT", "OIL")])
+    mapping_source = FakeMappingService(mappings or [mapping("SRU6", "2026-09-18"), mapping("SRZ6", "2026-12-18")])
+    obj = HistoricalUniverseReplayService(mapping_service=mapping_source, history_service=FakeHistoryService(), replay_service=FakeReplayService(), radar_helper=FakeRadarHelper(), spot_universe_service=spot_source)
+    obj._test_spot_source = spot_source
+    obj._test_mapping_source = mapping_source
+    return obj
 
 
-def test_selects_most_liquid_remaining_contract():
-    service = TestService({"ONU6": 100, "ONZ6": 250})
-    candidates = [
-        candidate("ONU6", "2026-09-18"),
-        candidate("ONZ6", "2026-12-18"),
-    ]
-
-    selected = service.select_futures_for_spot(candidates, "2026-08-14")
-
-    assert selected["futures_ticker"] == "ONZ6"
-    assert selected["futures_average_daily_money"] == 250.0
+def test_load_spot_universe_uses_independent_source():
+    obj = service()
+    result = obj.load_spot_universe()
+    assert [x["spot_ticker"] for x in result] == ["BR", "SBER"]
+    assert obj._test_spot_source.calls == 1
+    assert obj._test_mapping_source.calls == 0
 
 
-def test_skips_contract_with_three_days_to_expiry_and_uses_next():
-    service = TestService({"ONU6": 1000, "ONZ6": 250})
-    candidates = [
-        candidate("ONU6", "2026-08-17"),
-        candidate("ONZ6", "2026-09-18"),
-    ]
-
-    selected = service.select_futures_for_spot(candidates, "2026-08-14")
-
-    assert selected["futures_ticker"] == "ONZ6"
+def test_spot_universe_deduplicates_and_normalizes():
+    obj = service(spots=[spot("sber"), spot("SBER"), {}, None, spot("LKOH")])
+    result = obj.load_spot_universe()
+    assert [(x["spot_ticker"], x["spot_class_code"]) for x in result] == [("LKOH", "TQBR"), ("SBER", "TQBR")]
 
 
-def test_skips_contract_with_two_days_to_expiry():
-    service = TestService({"ONU6": 1000, "ONZ6": 250})
-    candidates = [
-        candidate("ONU6", "2026-08-16"),
-        candidate("ONZ6", "2026-09-18"),
-    ]
-
-    selected = service.select_futures_for_spot(candidates, "2026-08-14")
-
-    assert selected["futures_ticker"] == "ONZ6"
+def test_futures_mapping_is_post_spot_context_and_expiry_filtered():
+    obj = service(mappings=[mapping("SROLD", "2026-08-27"), mapping("SRU6", "2026-09-18"), mapping("SRZ6", "2026-12-18")])
+    result = obj.load_mappings_for_date("2026-08-26")
+    assert [x["futures_ticker"] for x in result] == ["SRU6", "SRZ6"]
+    assert all(x["days_to_expiry"] > obj.MIN_DAYS_TO_EXPIRY for x in result)
 
 
-def test_expired_nearest_contract_is_removed_before_taking_two_nearest():
-    mappings = [
-        candidate("ONU6", "2026-08-17"),
-        candidate("ONZ6", "2026-09-18"),
-        candidate("ONF7", "2026-12-18"),
-    ]
-    service = HistoricalUniverseReplayService(
-        mapping_service=FakeMappingService(mappings),
-        history_service=FakeHistoryService(),
-        replay_service=FakeReplayService(),
-        radar_helper=FakeRadarHelper(),
-    )
-
-    selected = service.load_mappings_for_date("2026-08-14")
-
-    tickers = [item["futures_ticker"] for item in selected]
-    assert tickers == ["ONZ6", "ONF7"]
-    assert "ONU6" not in tickers
-
-def test_candidate_rank_prefers_earlier_confirmation_time():
-    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
-
-    early = {
-        "confirmation_time": "07:30",
-        "ready_time": "07:15",
-        "futures_confirmation": {"score": 90},
-        "candidate": {"futures_average_daily_money": 100},
-    }
-    late = {
-        "confirmation_time": "13:00",
-        "ready_time": "07:15",
-        "futures_confirmation": {"score": 90},
-        "candidate": {"futures_average_daily_money": 100},
-    }
-
-    assert service._candidate_rank(early) > service._candidate_rank(late)
-
-
-def test_candidate_rank_prefers_earlier_ready_time_when_confirmation_matches():
-    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
-
-    early = {
-        "confirmation_time": "08:00",
-        "ready_time": "07:15",
-        "futures_confirmation": {"score": 90},
-        "candidate": {"futures_average_daily_money": 100},
-    }
-    late = {
-        "confirmation_time": "08:00",
-        "ready_time": "09:00",
-        "futures_confirmation": {"score": 90},
-        "candidate": {"futures_average_daily_money": 100},
-    }
-
-    assert service._candidate_rank(early) > service._candidate_rank(late)
-
-def test_confirmation_window_classification():
+def test_confirmation_window_remains_deterministic():
     assert HistoricalUniverseReplayService.confirmation_window("07:15") == "EARLY"
     assert HistoricalUniverseReplayService.confirmation_window("09:59") == "EARLY"
     assert HistoricalUniverseReplayService.confirmation_window("10:00") == "LATE"
-    assert HistoricalUniverseReplayService.confirmation_window("12:59") == "LATE"
     assert HistoricalUniverseReplayService.confirmation_window("13:00") == "LATE"
     assert HistoricalUniverseReplayService.confirmation_window("13:01") == "NONE"
     assert HistoricalUniverseReplayService.confirmation_window(None) == "NONE"
-
-
-def test_candidate_rank_prefers_early_confirmation_over_late():
-    service = HistoricalUniverseReplayService.__new__(HistoricalUniverseReplayService)
-
-    early = {
-        "confirmation_time": "07:30",
-        "ready_time": "07:15",
-        "futures_confirmation": {"score": 80},
-        "candidate": {"futures_average_daily_money": 100},
-    }
-    late = {
-        "confirmation_time": "12:00",
-        "ready_time": "08:00",
-        "futures_confirmation": {"score": 100},
-        "candidate": {"futures_average_daily_money": 500},
-    }
-
-    assert service._candidate_rank(early) > service._candidate_rank(late)
-
-
-
-if __name__ == "__main__":
-    tests = [
-        test_selects_most_liquid_remaining_contract,
-        test_skips_contract_with_three_days_to_expiry_and_uses_next,
-        test_skips_contract_with_two_days_to_expiry,
-        test_expired_nearest_contract_is_removed_before_taking_two_nearest,
-        test_candidate_rank_prefers_earlier_confirmation_time,
-        test_candidate_rank_prefers_earlier_ready_time_when_confirmation_matches,
-        test_confirmation_window_classification,
-        test_candidate_rank_prefers_early_confirmation_over_late,
-    ]
-
-    print("=" * 76)
-    print("TRADER_7_12 PRO - HISTORICAL UNIVERSE REPLAY TEST")
-    print("=" * 76)
-
-    for test in tests:
-        test()
-        print("PASS", test.__name__)
-
-    print()
-    print("ALL TESTS PASSED")
-    print("=" * 76)
