@@ -6,6 +6,31 @@ APP="$HOME/Applications/Trader_7_12 Pro.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+KEYCHAIN_SERVICE="Trader_7_12 BCS Refresh Token"
+
+# Keep the BCS refresh token outside Git and outside the app bundle.
+# Prefer the current shell environment, then the existing local credential file.
+TOKEN="${BCS_REFRESH_TOKEN:-}"
+if [[ -z "$TOKEN" && -f "$HOME/.trader_7_12_env" ]]; then
+    source "$HOME/.trader_7_12_env"
+    TOKEN="${BCS_REFRESH_TOKEN:-}"
+fi
+
+if [[ -z "$TOKEN" ]]; then
+    echo "ERROR: BCS_REFRESH_TOKEN is not available."
+    echo "Set it in the shell or in ~/.trader_7_12_env, then run this installer again."
+    exit 1
+fi
+
+# Store/update the credential in macOS Keychain. The token is never written to Git
+# and is never copied into the .app bundle.
+security add-generic-password \
+    -a "$USER" \
+    -s "$KEYCHAIN_SERVICE" \
+    -w "$TOKEN" \
+    -U >/dev/null
+
+unset TOKEN
 
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
@@ -14,14 +39,19 @@ cat > "$RESOURCES/launch_trader_7_12.sh" <<LAUNCHER
 #!/bin/zsh
 set -euo pipefail
 ROOT="$ROOT"
+KEYCHAIN_SERVICE="$KEYCHAIN_SERVICE"
 cd "\$ROOT"
 export PATH="/opt/homebrew/bin:/usr/local/bin:\$PATH"
 export PYTHONPATH="\$ROOT/Program"
 
-if [[ -z "\${BCS_REFRESH_TOKEN:-}" ]]; then
-    if [[ -f "\$HOME/.trader_7_12_env" ]]; then
-        source "\$HOME/.trader_7_12_env"
-    fi
+# Load the BCS refresh token from macOS Keychain for this process only.
+# It is intentionally not stored in the app bundle, Git repository, or plist.
+BCS_TOKEN="$(security find-generic-password -a "\$USER" -s "\$KEYCHAIN_SERVICE" -w 2>/dev/null || true)"
+if [[ -n "\$BCS_TOKEN" ]]; then
+    export BCS_REFRESH_TOKEN="\$BCS_TOKEN"
+    unset BCS_TOKEN
+else
+    echo "WARNING: BCS refresh token was not found in macOS Keychain." >&2
 fi
 
 exec /usr/bin/env python3 "\$ROOT/Program/main.py"
@@ -61,9 +91,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3</string>
+	<string>1.4</string>
 	<key>CFBundleVersion</key>
-	<string>1.3</string>
+	<string>1.4</string>
 	<key>LSUIElement</key>
 	<false/>
 	<key>NSHighResolutionCapable</key>
@@ -76,4 +106,5 @@ plutil -lint "$CONTENTS/Info.plist"
 
 echo "Installed: $APP"
 echo "Native macOS launcher: OK"
+echo "BCS credential: stored in macOS Keychain"
 echo "Launch Trader_7_12 Pro from Finder or Dock."
