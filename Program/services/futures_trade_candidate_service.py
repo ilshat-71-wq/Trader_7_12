@@ -1,20 +1,19 @@
-"""Spot-first candidate selection for Trader_7_12 Pro.
+"""SPOT-first candidate ranking for Trader_7_12 Pro.
 
-The scanner selects BASE ASSETS. Futures are only a mapped trading instrument
-shown to the user; futures trades, futures price movement and futures
-confirmation never determine eligibility, direction, RS or score.
+The service selects BASE ASSETS. Futures are reference mapping only and never
+participate in eligibility, direction, Relative Strength, setup or ranking.
 """
 
 from services.market_trading_universe_service import MarketTradingUniverseService
 
 
 class FuturesTradeCandidateService:
-    VERSION = "1.5"
-    MAX_DAYS_TO_EXPIRY = 3
+    VERSION = "2.0"
     MONEY_LEADER_SHORTLIST = 20
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
 
     def __init__(self, confirmation_service=None):
+        # Kept for backward-compatible construction; intentionally unused.
         self.confirmation_service = None
 
     @staticmethod
@@ -38,84 +37,85 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _spot_group(cls, item):
-        if not isinstance(item, dict):
-            return None
-        return MarketTradingUniverseService.spot_group(item)
+        return MarketTradingUniverseService.spot_group(item) if isinstance(item, dict) else None
 
     @classmethod
     def calculate_score(cls, radar, confirmation=None):
-        """Score only SPOT money/activity, direction, RS and setup context."""
+        """Calculate opportunity score from SPOT data only."""
         direction = cls._direction(radar)
         activity = max(0.0, cls._float(
             radar.get("spot_session_activity_ratio", radar.get("spot_money_ratio"))
         ))
-        money_score = min(activity / 3.0, 1.0) * 100.0
+        activity_score = min(activity / 3.0, 1.0) * 100.0
+
         money_per_minute = max(0.0, cls._float(radar.get("spot_money_per_minute")))
         money_volume = max(0.0, cls._float(radar.get("spot_money_volume")))
-        money_presence_bonus = min((money_per_minute / 50_000_000.0) * 5.0, 5.0)
-        absolute_money_bonus = min((money_volume / 1_000_000_000.0) * 5.0, 5.0)
+        money_presence_bonus = min(money_per_minute / 50_000_000.0 * 5.0, 5.0)
+        absolute_money_bonus = min(money_volume / 1_000_000_000.0 * 5.0, 5.0)
+
         rs = cls._float(radar.get("relative_strength"))
         directional_rs = rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
         rs_bonus = max(-10.0, min(10.0, directional_rs * 20.0))
+
         change = cls._float(radar.get("change_percent"))
         directional_change = change if direction == "LONG" else -change if direction == "SHORT" else 0.0
         movement_bonus = max(-5.0, min(5.0, directional_change * 5.0))
+
         setup_quality = max(0.0, min(100.0, cls._float(radar.get("setup_quality_score"))))
         setup_bonus = min(setup_quality * 0.03, 3.0)
-        setup_state = str(radar.get("setup_state") or "WAIT").upper()
-        if setup_state == "CONFIRMED":
-            setup_bonus += 1.0
-        elif setup_state == "WATCH":
-            setup_bonus += 0.5
-        score = money_score * 0.60 + money_presence_bonus + absolute_money_bonus + rs_bonus + movement_bonus + setup_bonus
+
+        score = (
+            activity_score * 0.60
+            + money_presence_bonus
+            + absolute_money_bonus
+            + rs_bonus
+            + movement_bonus
+            + setup_bonus
+        )
         return round(max(0.0, min(score, 100.0)), 2)
 
     @classmethod
     def build_candidate(cls, radar, confirmation=None):
         if not isinstance(radar, dict):
             return None
+
         direction = cls._direction(radar)
         if direction not in {"LONG", "SHORT"}:
             return None
         if bool(radar.get("moex_event_risk")):
+            return None
+
+        rs_status = str(radar.get("relative_strength_status") or "").upper()
+        if rs_status not in {"OK", "AVAILABLE"}:
             return None
         rs = cls._float(radar.get("relative_strength"))
         if direction == "LONG" and rs <= 0.0:
             return None
         if direction == "SHORT" and rs >= 0.0:
             return None
-        spot_group = cls._spot_group(radar)
-        if spot_group not in cls.TARGET_SPOT_GROUPS:
+
+        if cls._spot_group(radar) not in cls.TARGET_SPOT_GROUPS:
             return None
+
         setup_phase = str(radar.get("setup_phase") or "UNKNOWN").upper()
-        setup_error = radar.get("setup_error")
-        if setup_phase in {"NO_SESSION_CANDLES", "SETUP_ERROR"} or setup_error:
+        if setup_phase in {"NO_SESSION_CANDLES", "SETUP_ERROR"} or radar.get("setup_error"):
             return None
-        score = cls.calculate_score(radar)
+
+        setup_state = str(radar.get("setup_state") or "WAIT").upper()
+        if setup_state not in {"WAIT", "WATCH", "READY", "CONFIRMED"}:
+            setup_state = "WAIT"
+
         return {
             "version": cls.VERSION,
-            "status": "READY",
+            "status": "WATCHLIST",
             "direction": direction,
-            "spot_group": spot_group,
-            "market_group": spot_group,
+            "spot_group": cls._spot_group(radar),
+            "market_group": cls._spot_group(radar),
+            # Futures are reference-only mapping data.
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
             "futures_days_to_expiry": int(cls._float(radar.get("days_to_expiry"))),
-            "futures_selection_version": radar.get("futures_selection_version", "UNAVAILABLE"),
-            "futures_selection_score": cls._float(radar.get("selection_score")),
-            "futures_liquidity_score": cls._float(radar.get("liquidity_score")),
-            "futures_spread_score": cls._float(radar.get("spread_score")),
-            "futures_expiry_score": cls._float(radar.get("expiry_score")),
-            "futures_spread_percent": cls._float(radar.get("spread_percent")),
-            "futures_turnover_30m": cls._float(radar.get("turnover_30m")),
-            "futures_trade_count_30m": int(cls._float(radar.get("trade_count_30m"))),
-            "futures_depth_notional": cls._float(radar.get("depth_notional")),
-            "futures_bid": cls._float(radar.get("bid")),
-            "futures_ask": cls._float(radar.get("ask")),
-            "futures_last": cls._float(radar.get("last")),
-            "futures_selection_reason": radar.get("futures_selection_reason", ""),
-            "futures_selection_candidates": int(cls._float(radar.get("futures_selection_candidates"))),
             "spot_ticker": radar.get("spot_ticker"),
             "spot_class_code": radar.get("spot_class_code"),
             "spot_name": radar.get("spot_name", ""),
@@ -147,15 +147,11 @@ class FuturesTradeCandidateService:
             "relative_strength": rs,
             "relative_strength_score": cls._float(radar.get("relative_strength_score")),
             "relative_strength_signal": radar.get("relative_strength_signal", "UNAVAILABLE"),
-            "relative_strength_status": radar.get("relative_strength_status", "NO_DATA"),
+            "relative_strength_status": rs_status,
             "relative_strength_benchmark": radar.get("relative_strength_benchmark", "UNAVAILABLE"),
-            "confirmation_score": 0.0,
-            "money_volume": 0.0,
-            "trade_count": 0,
-            "price_change_percent": 0.0,
             "setup": radar.get("setup", "NONE"),
             "setup_direction": radar.get("setup_direction", direction),
-            "setup_state": radar.get("setup_state", "WAIT"),
+            "setup_state": setup_state,
             "setup_phase": setup_phase,
             "setup_quality_score": cls._float(radar.get("setup_quality_score")),
             "impulse_percent": cls._float(radar.get("impulse_percent")),
@@ -165,7 +161,15 @@ class FuturesTradeCandidateService:
             "entry_trigger": cls._float(radar.get("entry_trigger")),
             "previous_high": cls._float(radar.get("previous_high")),
             "previous_low": cls._float(radar.get("previous_low")),
-            "candidate_score": score,
+            "impulse_high": cls._float(radar.get("impulse_high")),
+            "impulse_low": cls._float(radar.get("impulse_low")),
+            "h1_support": cls._float(radar.get("h1_support")),
+            "h1_resistance": cls._float(radar.get("h1_resistance")),
+            "h1_nearest_level": cls._float(radar.get("h1_nearest_level")),
+            "h1_nearest_level_type": radar.get("h1_nearest_level_type", "NONE"),
+            "h1_level_distance_percent": cls._float(radar.get("h1_level_distance_percent")),
+            "h1_level_context": radar.get("h1_level_context", "UNAVAILABLE"),
+            "candidate_score": cls.calculate_score(radar),
         }
 
     @classmethod
@@ -174,22 +178,23 @@ class FuturesTradeCandidateService:
             item for item in radar_results
             if isinstance(item, dict) and cls._spot_group(item) in cls.TARGET_SPOT_GROUPS
         ]
-        candidates.sort(key=lambda item: (
-            cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
-            cls._float(item.get("spot_money_per_minute")),
-            cls._float(item.get("spot_money_volume")),
-            cls._float(item.get("relative_strength")),
-            cls._float(item.get("setup_quality_score")),
-            str(item.get("spot_ticker") or ""),
-        ), reverse=True)
+        candidates.sort(
+            key=lambda item: (
+                cls._float(item.get("spot_session_activity_ratio", item.get("spot_money_ratio"))),
+                cls._float(item.get("spot_money_per_minute")),
+                cls._float(item.get("spot_money_volume")),
+                abs(cls._float(item.get("relative_strength"))),
+                cls._float(item.get("setup_quality_score")),
+                str(item.get("spot_ticker") or ""),
+            ),
+            reverse=True,
+        )
         return candidates[:cls.MONEY_LEADER_SHORTLIST]
 
     def rank(self, radar_results, confirmations=None, limit=3):
         if not isinstance(radar_results, list):
             return []
-        if limit is None:
-            limit = None
-        else:
+        if limit is not None:
             limit = int(limit)
             if limit < 0:
                 raise ValueError("limit must be >= 0")
@@ -200,18 +205,21 @@ class FuturesTradeCandidateService:
             if candidate is not None:
                 candidates.append(candidate)
 
-        candidates.sort(key=lambda item: (
-            item["spot_session_activity_ratio"],
-            item["spot_money_per_minute"],
-            item["spot_money_volume"],
-            item["candidate_score"],
-            item["relative_strength"],
-            item["setup_quality_score"],
-            item["spot_ticker"],
-        ), reverse=True)
+        candidates.sort(
+            key=lambda item: (
+                item["candidate_score"],
+                item["spot_session_activity_ratio"],
+                item["spot_money_per_minute"],
+                item["spot_money_volume"],
+                item["relative_strength"],
+                item["setup_quality_score"],
+                item["spot_ticker"],
+            ),
+            reverse=True,
+        )
 
-        seen = set()
         selected = []
+        seen = set()
         for candidate in candidates:
             key = candidate.get("spot_ticker")
             if key in seen:
