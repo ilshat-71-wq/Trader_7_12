@@ -64,7 +64,7 @@ def test_spot_readiness_changes_historical_score():
 def test_production_candidate_score_ignores_futures_confirmation():
     base = {
         "direction": "SHORT",
-        "spot_group": "STOCKS",
+        "spot_group": "MOEX_STOCK",
         "relative_strength": -1.5,
         "relative_strength_status": "OK",
         "spot_session_activity_ratio": 2.0,
@@ -95,7 +95,7 @@ def test_production_rank_tie_breaks_relative_strength_in_trade_direction(monkeyp
     radars = [
         {
             "direction": "SHORT",
-            "spot_group": "STOCKS",
+            "spot_group": "MOEX_STOCK",
             "spot_ticker": "WEAK_A",
             "spot_session_activity_ratio": 2.0,
             "spot_money_per_minute": 20_000_000,
@@ -106,7 +106,7 @@ def test_production_rank_tie_breaks_relative_strength_in_trade_direction(monkeyp
         },
         {
             "direction": "SHORT",
-            "spot_group": "STOCKS",
+            "spot_group": "MOEX_STOCK",
             "spot_ticker": "WEAK_B",
             "spot_session_activity_ratio": 2.0,
             "spot_money_per_minute": 20_000_000,
