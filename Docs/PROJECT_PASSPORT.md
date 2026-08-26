@@ -374,6 +374,8 @@ Historical replay — `READ ONLY / NO ORDERS`.
 - добавлена регрессия на независимость score от futures-полей;
 - исправлен directional RS tie-break: для SHORT более отрицательный RS корректно считается сильнее при равенстве остальных ranking-показателей;
 - CI запускает compile + SPOT-first regression suite;
+- исправлен такой же directional RS tie-break в historical ranking, чтобы read-only replay и production ranking использовали одинаковое направление RS при равенстве;
+- добавлена отдельная historical regression-проверка SHORT RS tie-break;
 - лишние audit/state Markdown-файлы не создаются; канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`;
 - рабочая ветка проекта — только `main`.
 
