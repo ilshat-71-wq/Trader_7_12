@@ -13,7 +13,7 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     """Scan IMOEX equities plus the configured macro markets."""
 
-    VERSION = "1.3"
+    VERSION = "1.4"
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
     DEEP_DIRECTION_LIMIT = 4
@@ -44,12 +44,11 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
 
     @classmethod
     def _select_current_contracts(cls, mappings):
-        """Keep the nearest two eligible contracts for every underlying.
+        """Build the eligible futures reference set for post-readiness mapping.
 
-        The final choice between these two is made by the live contract
-        selector using actual quote, spread, order-book depth and recent
-        turnover. Contracts with three or fewer calendar days to expiry are
-        excluded unconditionally.
+        This method is deliberately NOT called before SPOT analysis. It is
+        invoked only after a SPOT candidate has a valid setup and trigger.
+        Contracts with three or fewer calendar days to expiry are excluded.
         """
         grouped = {}
         today = date.today()
@@ -93,6 +92,16 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
                 str(item.get("futures_ticker") or ""),
             ),
         )
+
+    def _select_futures_mapping(self, mappings):
+        """Select the live futures contract only after SPOT readiness."""
+        eligible = self._select_current_contracts(mappings)
+        if not eligible:
+            return None
+        selected = self.futures_contract_selector.select(eligible)
+        if isinstance(selected, list) and selected:
+            return selected[0]
+        return None
 
     def _prepare_universe(self, mappings):
         """Keep current IMOEX equities and OIL/GOLD/GAS/USDRUB mappings."""
@@ -264,13 +273,15 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return set(selected)
 
     def scan(self, mappings=None, limit=None):
-        """FAST SPOT screen -> DEEP SPOT -> one live-selected futures contract."""
+        """FAST SPOT screen -> DEEP SPOT -> SPOT readiness -> futures mapping."""
         if mappings is None:
             mappings = self._load_mappings_cached()
         if not isinstance(mappings, list):
             return []
 
-        mappings = self._select_current_contracts(mappings)
+        # IMPORTANT: do not select/expire futures before the SPOT screen.
+        # The same SPOT asset may remain valid while one futures contract is
+        # expiring. Futures selection is now deferred to _select_futures_mapping.
         mappings = self._prepare_universe(mappings)
         if not mappings:
             return []
@@ -278,21 +289,17 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         preliminary = self._preliminary_scan(mappings)
         deep_keys = self._select_deep_keys(preliminary)
         if not deep_keys:
-            return super().scan(mappings=mappings, limit=limit)
+            results = super().scan(mappings=mappings, limit=limit)
+        else:
+            deep_mappings = [
+                item for item in mappings
+                if (
+                    str(item.get("spot_ticker") or "").strip().upper(),
+                    str(item.get("spot_class_code") or "").strip(),
+                ) in deep_keys
+            ]
+            results = super().scan(mappings=deep_mappings, limit=limit)
 
-        deep_mappings = [
-            item for item in mappings
-            if (
-                str(item.get("spot_ticker") or "").strip().upper(),
-                str(item.get("spot_class_code") or "").strip(),
-            ) in deep_keys
-        ]
-
-        selected_contracts = self.futures_contract_selector.select(deep_mappings)
-        if not selected_contracts:
-            return []
-
-        results = super().scan(mappings=selected_contracts, limit=limit)
         for item in results:
             item["scan_phase"] = "DEEP"
             group = self.trading_universe_service.spot_group(item)
