@@ -1,299 +1,127 @@
-"""
-Trader_7_12 Pro
-
-Tests for FuturesMorningRadarService.
-
-The tests are offline and do not require BCS authorization.
-"""
-
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from services.futures_morning_radar_service import FuturesMorningRadarService
 
 
+class FakeAPI:
+    access_token = "test"
+
+
 class FakeMappingService:
-    def load(self):
-        return [
-            {
-                "futures_ticker": "SRU6",
-                "futures_class_code": "SPBFUT",
-                "futures_expiry": "2026-09-01",
-                "spot_ticker": "SBER",
-                "spot_class_code": "TQBR",
-                "spot_name": "Sberbank",
-                "mapping_method": "EXPLICIT",
-            },
-            {
-                "futures_ticker": "LKU6",
-                "futures_class_code": "SPBFUT",
-                "futures_expiry": "2026-09-01",
-                "spot_ticker": "LKOH",
-                "spot_class_code": "TQBR",
-                "spot_name": "LUKOIL",
-                "mapping_method": "EXPLICIT",
-            },
-        ]
+    def __init__(self, mappings): self.mappings = mappings
+    def load(self): return list(self.mappings)
 
 
 class FakeRadarService:
+    def __init__(self, errors=None): self.errors = set(errors or [])
     def analyze(self, ticker, class_code):
-        data = {
-            "SBER": {
-                "version": "0.3",
-                "status": "OK",
-                "direction": "LONG",
-                "radar_score": 78.0,
-                "relative_strength": 0.031,
-                "average_daily_money": 10_000_000_000,
-                "signal": "LONG_WATCH",
-            },
-            "LKOH": {
-                "version": "0.3",
-                "status": "OK",
-                "direction": "SHORT",
-                "radar_score": 61.0,
-                "relative_strength": -0.012,
-                "average_daily_money": 10_000_000_000,
-                "signal": "SHORT_WATCH",
-            },
+        if ticker in self.errors: raise RuntimeError("test radar failure")
+        long = ticker == "SBER"
+        return {
+            "status": "OK", "direction": "LONG" if long else "SHORT",
+            "radar_score": 78.0 if long else 61.0,
+            "relative_strength": 0.031 if long else -0.012,
+            "relative_strength_status": "OK", "average_daily_money": 10_000_000_000,
+            "change_percent": 1.2 if long else -0.8, "spot_price": 300.0 if long else 7000.0,
+            "spot_group": "MOEX_STOCK", "signal": "LONG_WATCH" if long else "SHORT_WATCH",
         }
-        return data[ticker]
-
 
 
 class FakeHistoryService:
-    """Offline history stub for FuturesMorningRadarService tests."""
-
+    MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+    def __init__(self): self.trade_service = SimpleNamespace(api=FakeAPI())
     def now(self):
-        return datetime(2026, 8, 17, 10, 0, 0)
-
-    def calculate_morning_money_volume(
-        self,
-        ticker,
-        class_code,
-        trading_date=None,
-        timeframe_minutes=5,
-    ):
-        return {
-            "SBER": 2_000_000_000,
-            "LKOH": 1_000_000_000,
-        }.get(ticker, 0.0)
+        from datetime import datetime
+        return datetime(2026, 8, 26, 12, 0, tzinfo=self.MOSCOW_TZ)
 
 
-def test_pipeline_maps_futures_to_spot_and_radar():
-    service = FuturesMorningRadarService(
-        mapping_service=FakeMappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    assert len(results) == 2
-    assert results[0]["futures_ticker"] == "SRU6"
-    assert results[0]["spot_ticker"] == "SBER"
-    assert results[0]["direction"] == "LONG"
-    assert results[0]["radar_score"] == 78.0
-    assert results[0]["mapping_method"] == "EXPLICIT"
+class FakeSessionService:
+    def get_session(self): return "MAIN"
+    def get_trading_day(self): return date(2026, 8, 26)
+    def now(self):
+        from datetime import datetime
+        return datetime(2026, 8, 26, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
 
 
-def test_pipeline_sorts_by_radar_score():
-    service = FuturesMorningRadarService(
-        mapping_service=FakeMappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    assert [item["radar_score"] for item in results] == [78.0, 61.0]
-    assert [item["rank"] for item in results] == [1, 2]
+class FakeMoneyService:
+    def calculate(self, ticker, class_code, **kwargs):
+        return {"session": "MAIN", "money_volume": 2_000_000_000 if ticker == "SBER" else 1_000_000_000,
+                "elapsed_minutes": 120, "expected_minutes": 540, "money_per_minute": 10_000_000}
 
 
-def test_pipeline_limit():
-    service = FuturesMorningRadarService(
-        mapping_service=FakeMappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan(limit=1)
-
-    assert len(results) == 1
-    assert results[0]["futures_ticker"] == "SRU6"
-
-
-def test_pipeline_skips_invalid_mapping():
-    class InvalidMappingService:
-        def load(self):
-            return [
-                None,
-                {},
-                {
-                    "futures_ticker": "SRU6",
-                    "futures_class_code": "SPBFUT",
-                    "spot_ticker": "SBER",
-                    "spot_class_code": "TQBR",
-                    "futures_expiry": "2026-09-01",
-                },
-            ]
-
-    service = FuturesMorningRadarService(
-        mapping_service=InvalidMappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    assert len(results) == 1
-    assert results[0]["futures_ticker"] == "SRU6"
+class FakeSetupService:
+    def __init__(self, state="READY"): self.state = state
+    def analyze(self, ticker, class_code, **kwargs):
+        direction = "LONG" if ticker == "SBER" else "SHORT"
+        return {"setup": "FIRST_PULLBACK" if direction == "LONG" else "FIRST_REBOUND",
+                "setup_direction": direction, "setup_state": self.state, "setup_phase": "SETUP_READY",
+                "setup_quality_score": 70.0, "entry_trigger": 301.0 if direction == "LONG" else 6999.0,
+                "previous_high": 301.0, "previous_low": 299.0, "impulse_percent": 1.0,
+                "retracement_percent": 50.0, "retracement_ratio": 0.5, "consolidation_candles": 2,
+                "impulse_high": 302.0, "impulse_low": 298.0}
 
 
-def test_pipeline_keeps_radar_errors_without_stopping_scan():
-    class ErrorRadarService:
-        def analyze(self, ticker, class_code):
-            if ticker == "SBER":
-                raise RuntimeError("test radar failure")
-            return FakeRadarService().analyze(ticker, class_code)
-
-    service = FuturesMorningRadarService(
-        mapping_service=FakeMappingService(),
-        radar_service=ErrorRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    assert len(results) == 2
-    assert results[0]["status"] == "OK"
-    assert results[0]["futures_ticker"] == "LKU6"
-    assert results[1]["status"] == "ERROR"
-    assert results[1]["futures_ticker"] == "SRU6"
+class FakePriceStabilityService:
+    def __init__(self, event_risk=False): self.event_risk = event_risk
+    def evaluate(self, *args, **kwargs):
+        return {"moex_event_risk": self.event_risk, "moex_price_stability_state": "NORMAL", "moex_data_status": "OK"}
 
 
-def test_pipeline_keeps_two_nearest_contracts_per_spot():
-    today = date.today()
-    nearest = today + timedelta(days=30)
-    second = today + timedelta(days=60)
-    third = today + timedelta(days=90)
-
-    mappings = [
-        {
-            "futures_ticker": "SRZ6",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": third.isoformat(),
-            "spot_ticker": "SBER",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
-        {
-            "futures_ticker": "SRX6",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": second.isoformat(),
-            "spot_ticker": "SBER",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
-        {
-            "futures_ticker": "SRU6",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": nearest.isoformat(),
-            "spot_ticker": "SBER",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
-        {
-            "futures_ticker": "LKU6",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": nearest.isoformat(),
-            "spot_ticker": "LKOH",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
+def mappings():
+    expiry = (date(2026, 8, 26) + timedelta(days=30)).isoformat()
+    return [
+        {"futures_ticker": "SRU6", "futures_class_code": "SPBFUT", "futures_expiry": expiry, "spot_ticker": "SBER", "spot_class_code": "TQBR", "spot_group": "MOEX_STOCK", "mapping_method": "EXPLICIT"},
+        {"futures_ticker": "LKU6", "futures_class_code": "SPBFUT", "futures_expiry": expiry, "spot_ticker": "LKOH", "spot_class_code": "TQBR", "spot_group": "MOEX_STOCK", "mapping_method": "EXPLICIT"},
     ]
 
-    class MappingService:
-        def load(self):
-            return mappings
 
-    service = FuturesMorningRadarService(
-        mapping_service=MappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    sber_results = [item for item in results if item["spot_ticker"] == "SBER"]
-
-    assert len(sber_results) == 2
-    assert [item["futures_ticker"] for item in sber_results] == ["SRU6", "SRX6"]
-    assert [item["futures_expiry"] for item in sber_results] == [
-        nearest.isoformat(),
-        second.isoformat(),
-    ]
-    assert all(item["futures_ticker"] != "SRZ6" for item in sber_results)
+def make_service(mapping_list=None, setup_state="READY", errors=None, event_risk=False):
+    service = FuturesMorningRadarService(api=FakeAPI(), mapping_service=FakeMappingService(mapping_list or mappings()),
+        radar_service=FakeRadarService(errors), history_service=FakeHistoryService(), session_service=FakeSessionService(),
+        session_money_service=FakeMoneyService(), spot_setup_service=FakeSetupService(setup_state))
+    service.price_stability_service = FakePriceStabilityService(event_risk)
+    return service
 
 
-def test_pipeline_skips_expired_contracts():
-    expired = date.today() - timedelta(days=1)
-    valid = date.today() + timedelta(days=30)
-
-    mappings = [
-        {
-            "futures_ticker": "SROLD",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": expired.isoformat(),
-            "spot_ticker": "SBER",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
-        {
-            "futures_ticker": "SRU6",
-            "futures_class_code": "SPBFUT",
-            "futures_expiry": valid.isoformat(),
-            "spot_ticker": "SBER",
-            "spot_class_code": "TQBR",
-            "mapping_method": "EXPLICIT",
-        },
-    ]
-
-    class MappingService:
-        def load(self):
-            return mappings
-
-    service = FuturesMorningRadarService(
-        mapping_service=MappingService(),
-        radar_service=FakeRadarService(),
-        history_service=FakeHistoryService(),
-    )
-
-    results = service.scan()
-
-    assert len(results) == 1
-    assert results[0]["futures_ticker"] == "SRU6"
+def test_ready_spot_gets_post_readiness_mapping():
+    result = make_service().scan()
+    assert [x["spot_ticker"] for x in result] == ["SBER", "LKOH"]
+    assert result[0]["futures_ticker"] == "SRU6"
+    assert result[0]["futures_selection_reason"] == "POST_SPOT_READINESS_MAPPING"
 
 
-if __name__ == "__main__":
-    tests = [
-        test_pipeline_maps_futures_to_spot_and_radar,
-        test_pipeline_sorts_by_radar_score,
-        test_pipeline_limit,
-        test_pipeline_skips_invalid_mapping,
-        test_pipeline_keeps_radar_errors_without_stopping_scan,
-        test_pipeline_keeps_two_nearest_contracts_per_spot,
-        test_pipeline_skips_expired_contracts,
-    ]
+def test_wait_spot_is_ranked_but_not_mapped():
+    result = make_service(setup_state="WAIT").scan()
+    assert len(result) == 2
+    assert all(x["futures_ticker"] == "" for x in result)
+    assert all(x["futures_selection_reason"] == "WAITING_FOR_SPOT_READINESS" for x in result)
 
-    print("=" * 76)
-    print("TRADER_7_12 PRO - FUTURES MORNING RADAR TEST")
-    print("=" * 76)
 
-    for test in tests:
-        test()
-        print("PASS", test.__name__)
+def test_event_risk_blocks_before_mapping():
+    assert make_service(event_risk=True).scan() == []
 
-    print()
-    print("ALL TESTS PASSED")
-    print("=" * 76)
+
+def test_radar_error_does_not_stop_remaining_spot_scan():
+    result = make_service(errors={"SBER"}).scan()
+    assert [x["spot_ticker"] for x in result] == ["LKOH"]
+
+
+def test_limit_is_applied_after_spot_ranking():
+    result = make_service().scan(limit=1)
+    assert len(result) == 1 and result[0]["spot_ticker"] == "SBER"
+
+
+def test_expiring_contract_is_not_attached():
+    data = mappings()
+    data[0]["futures_expiry"] = (date(2026, 8, 26) + timedelta(days=2)).isoformat()
+    result = make_service(data).scan()
+    sber = next(x for x in result if x["spot_ticker"] == "SBER")
+    assert sber["futures_ticker"] == ""
+
+
+def test_candidate_score_is_spot_derived():
+    result = make_service().scan()
+    assert all(isinstance(x["candidate_score"], float) for x in result)
+    assert result[0]["candidate_score"] >= result[1]["candidate_score"]
