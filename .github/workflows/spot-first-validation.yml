@@ -24,7 +24,7 @@ jobs:
       - name: Compile project Python
         run: python -m compileall -q Program/services Program/tests
 
-      - name: Run SPOT-first ranking regression tests
+      - name: Run SPOT-first regression suite
         env:
           PYTHONPATH: Program
-        run: python -m pytest -q Program/tests/test_historical_candidate_ranker_service.py
+        run: python -m pytest -q Program/tests
