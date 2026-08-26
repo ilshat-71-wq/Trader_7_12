@@ -362,3 +362,19 @@ Historical replay — `READ ONLY / NO ORDERS`.
 > **Сканер выбирает базовый актив по SPOT. TOP-2/3 показывает лучшие возможности для наблюдения. Direction определяется по SPOT-контексту. Setup формируется по H1/M5 SPOT. Trigger/readiness и READY/CONFIRMED описывают степень готовности SPOT-сценария. Фьючерс не участвует в direction, RS, setup, readiness или ranking и выбирается пользователем самостоятельно.**
 
 Это правило имеет приоритет над старыми формулировками и старыми реализациями.
+
+---
+
+## 19. КОНТРОЛЬНЫЙ CHECKPOINT — 26.08.2026
+
+Текущий этап закреплён в `main`:
+
+- historical replay/ranking переведён на канонический SPOT-only принцип;
+- production candidate ranking не использует futures confirmation/price/turnover в score;
+- добавлена регрессия на независимость score от futures-полей;
+- исправлен directional RS tie-break: для SHORT более отрицательный RS корректно считается сильнее при равенстве остальных ranking-показателей;
+- CI запускает compile + SPOT-first regression suite;
+- лишние audit/state Markdown-файлы не создаются; канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`;
+- рабочая ветка проекта — только `main`.
+
+Следующий уровень разработки должен продолжать усиливать **SPOT eligibility → activity → direction/RS → H1/M5 setup → TOP-2/3**, не возвращая futures-данные в источник идеи или ranking.
