@@ -1,8 +1,8 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 25.08.2026  
+**Дата актуализации:** 26.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Рабочая ветка:** `fix/candle-concurrency`
+**Главная и единственная рабочая ветка:** `main`
 
 ---
 
@@ -32,6 +32,8 @@ SPOT DIRECTION / DAILY TREND
 SPOT RELATIVE STRENGTH / WEAKNESS vs IMOEX2 / IRUS2
   ↓
 SPOT H1 STRUCTURE + M5 SETUP
+  ↓
+SETUP STATE / TRIGGER / READINESS
   ↓
 TOP 2–3 SPOT OPPORTUNITY WATCHLIST
   ↓
@@ -152,9 +154,11 @@ Daily timeframe — базовый контекст.
 - `LONG + WEAKER` — штраф;
 - `SHORT + STRONGER` — штраф.
 
+Direction является SPOT-свойством и может определяться в любой момент, когда доступны необходимые SPOT/daily данные; фьючерс не является источником direction.
+
 ---
 
-## 8. SPOT STRUCTURE / SETUP
+## 8. SPOT STRUCTURE / SETUP / READINESS
 
 Основной контекст — H1 SPOT.
 
@@ -174,7 +178,10 @@ SHORT:
 
 - `WAIT` — идея интересна, но setup ещё не сформирован;
 - `WATCH` — setup развивается и требует наблюдения;
-- `READY` / `CONFIRMED` — setup имеет фактическое подтверждение.
+- `READY` — setup сформирован и имеет фактический trigger/readiness;
+- `CONFIRMED` — подтверждение сценария по каноническим SPOT-условиям.
+
+`READY/CONFIRMED` не являются разрешением на автоматическую сделку. Они описывают степень готовности SPOT-сценария.
 
 **Setup quality и opportunity score — разные измерения.** Высокий opportunity score не означает готовый вход.
 
@@ -218,7 +225,10 @@ Mapping нужен только для справочной связи выбр�
 - RS;
 - score;
 - setup;
+- readiness;
 - TOP ranking.
+
+Futures confirmation **не является обязательным фильтром** и не должна превращаться в gate SPOT-сценария.
 
 ---
 
@@ -243,6 +253,7 @@ Mapping нужен только для справочной связи выбр�
 - M5 pullback/rebound;
 - volatility/potential;
 - setup quality;
+- trigger/readiness;
 - detailed session money/activity.
 
 После этого группы объединяются и выбирается TOP 2–3 watchlist.
@@ -259,6 +270,8 @@ Mapping нужен только для справочной связи выбр�
 
 Дополнительный мониторинг: **10:00–13:00 МСК**.
 
+Сканирование и оценка SPOT могут выполняться повторно в течение доступного торгового окна; session-aware логика должна учитывать текущую сессию.
+
 ---
 
 ## 13. ИНТЕРФЕЙС
@@ -269,6 +282,7 @@ Mapping нужен только для справочной связи выбр�
 - направление;
 - opportunity/session score;
 - setup и setup state;
+- trigger/readiness;
 - SPOT price;
 - SPOT money/activity;
 - RS;
@@ -306,7 +320,8 @@ Mapping нужен только для справочной связи выбр�
 - управление депозитом;
 - автоматический SL/TP;
 - portfolio management;
-- futures confirmation как обязательный фильтр.
+- futures confirmation как обязательный фильтр;
+- использование фьючерса как источника торговой идеи.
 
 Historical replay — `READ ONLY / NO ORDERS`.
 
@@ -328,10 +343,22 @@ Historical replay — `READ ONLY / NO ORDERS`.
 - `morning_trading_pipeline_service.py` — итоговый opportunity watchlist;
 - `ui.py` — read-only SPOT radar interface.
 
+Названия исторически сложившихся `futures_*` сервисов не меняют каноническое правило: они могут использоваться внутри pipeline, но **фьючерсные данные не должны становиться источником идеи или обязательным gate SPOT**.
+
 ---
 
-## 17. КАНОНИЧЕСКОЕ ПРАВИЛО ПРОЕКТА
+## 17. РАБОЧИЙ ПРОЦЕСС REPOSITORY
 
-> **Сканер выбирает базовый актив по SPOT. TOP-2/3 показывает лучшие возможности для наблюдения. SETUP STATE сообщает степень готовности, но не превращает watchlist в автоматический вход. Фьючерс выбирает пользователь самостоятельно.**
+Проект развивается в **одной главной рабочей ветке `main`**.
 
-Это правило имеет приоритет над старыми формулировками.
+Не плодить многочисленные рабочие ветки для отдельных этапов проекта.
+
+Изменения архитектуры и кода должны последовательно накапливаться в `main`, а Passport является актуальной канонической точкой отсчёта для дальнейшей разработки.
+
+---
+
+## 18. КАНОНИЧЕСКОЕ ПРАВИЛО ПРОЕКТА
+
+> **Сканер выбирает базовый актив по SPOT. TOP-2/3 показывает лучшие возможности для наблюдения. Direction определяется по SPOT-контексту. Setup формируется по H1/M5 SPOT. Trigger/readiness и READY/CONFIRMED описывают степень готовности SPOT-сценария. Фьючерс не участвует в direction, RS, setup, readiness или ranking и выбирается пользователем самостоятельно.**
+
+Это правило имеет приоритет над старыми формулировками и старыми реализациями.
