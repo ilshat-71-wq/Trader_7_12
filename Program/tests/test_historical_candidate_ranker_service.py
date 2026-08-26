@@ -171,3 +171,54 @@ def test_production_scan_never_attaches_futures_before_spot_readiness():
     ranked = service.scan(mappings=mappings, limit=1)
     assert ranked[0]["futures_ticker"] == ""
     assert ranked[0]["futures_selection_reason"] == "WAITING_FOR_SPOT_READINESS"
+
+
+def test_production_scan_attaches_futures_only_after_ready_spot(monkeypatch):
+    radars = {"READY": {"status": "OK", "direction": "LONG", "spot_group": "MOEX_STOCK", "relative_strength": 2.0,
+                         "relative_strength_status": "OK", "average_daily_money": 300_000_000, "last_close": 100.0, "change_percent": 1.0}}
+    setups = {"READY": {"setup": "FIRST_PULLBACK", "setup_state": "READY", "setup_phase": "TRIGGERED",
+                         "setup_quality_score": 75.0, "entry_trigger": 101.0}}
+    money = {"READY": {"money_volume": 700_000_000, "elapsed_minutes": 120, "expected_minutes": 420, "money_per_minute": 5_833_333}}
+    mappings = [{"spot_ticker": "READY", "spot_class_code": "TQBR", "spot_group": "MOEX_STOCK",
+                 "futures_ticker": "RI_REFERENCE", "futures_class_code": "SPBFUT", "futures_expiry": "2026-12-20"}]
+    service = FuturesMorningRadarService(mapping_service=object(), radar_service=_FakeRadarService(radars),
+                                         history_service=_FakeHistoryService(), session_service=_FakeSessionService(),
+                                         session_money_service=_FakeMoneyService(money), spot_setup_service=_FakeSetupService(setups))
+    service.price_stability_service = _FakeStabilityService()
+    calls = []
+    def select_mapping(spot_mappings):
+        calls.append("mapped")
+        return dict(spot_mappings[0])
+    monkeypatch.setattr(service, "_select_futures_mapping", select_mapping)
+
+    ranked = service.scan(mappings=mappings, limit=1)
+    assert calls == ["mapped"]
+    assert ranked[0]["futures_ticker"] == "RI_REFERENCE"
+    assert ranked[0]["futures_selection_reason"] == "WAITING_FOR_SPOT_READINESS"
+
+
+def test_production_scan_event_risk_blocks_candidate_before_futures_mapping(monkeypatch):
+    radars = {"RISK": {"status": "OK", "direction": "LONG", "spot_group": "MOEX_STOCK", "relative_strength": 3.0,
+                        "relative_strength_status": "OK", "average_daily_money": 300_000_000, "last_close": 100.0, "change_percent": 2.0}}
+    setups = {"RISK": {"setup": "FIRST_PULLBACK", "setup_state": "READY", "setup_phase": "TRIGGERED",
+                        "setup_quality_score": 100.0, "entry_trigger": 101.0}}
+    money = {"RISK": {"money_volume": 900_000_000, "elapsed_minutes": 120, "expected_minutes": 420, "money_per_minute": 7_500_000}}
+    mappings = [{"spot_ticker": "RISK", "spot_class_code": "TQBR", "spot_group": "MOEX_STOCK",
+                 "futures_ticker": "FUTURE_BLOCKED", "futures_class_code": "SPBFUT", "futures_expiry": "2026-12-20"}]
+
+    class _RiskStabilityService:
+        def evaluate(self, *args, **kwargs):
+            return {"moex_event_risk": True, "moex_data_status": "OK"}
+
+    service = FuturesMorningRadarService(mapping_service=object(), radar_service=_FakeRadarService(radars),
+                                         history_service=_FakeHistoryService(), session_service=_FakeSessionService(),
+                                         session_money_service=_FakeMoneyService(money), spot_setup_service=_FakeSetupService(setups))
+    service.price_stability_service = _RiskStabilityService()
+    calls = []
+    def select_mapping(spot_mappings):
+        calls.append("mapped")
+        return dict(spot_mappings[0])
+    monkeypatch.setattr(service, "_select_futures_mapping", select_mapping)
+
+    assert service.scan(mappings=mappings, limit=1) == []
+    assert calls == []
