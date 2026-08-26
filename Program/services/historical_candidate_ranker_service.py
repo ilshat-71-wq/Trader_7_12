@@ -6,7 +6,7 @@ import math
 class HistoricalCandidateRankerService:
     """Rank historical candidates with SPOT readiness as the primary signal."""
 
-    VERSION = "0.5"
+    VERSION = "0.6"
     RS_SCORE_CAP = 15.0
     RS_EXCESS_CAP_PERCENT = 8.0
 
@@ -48,6 +48,13 @@ class HistoricalCandidateRankerService:
         )
         capped = max(-cls.RS_EXCESS_CAP_PERCENT, min(cls.RS_EXCESS_CAP_PERCENT, directional_excess))
         return round((capped / cls.RS_EXCESS_CAP_PERCENT) * cls.RS_SCORE_CAP, 2)
+
+    @classmethod
+    def _directional_rs_tiebreak(cls, row):
+        """Use RS in trade direction for deterministic ranking ties."""
+        direction = str(row.get("direction") or "").upper()
+        rs = cls._float(row.get("relative_strength"))
+        return rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
 
     @classmethod
     def _spot_readiness_score(cls, row):
@@ -124,7 +131,7 @@ class HistoricalCandidateRankerService:
                 item.get("candidate_score", 0.0),
                 item.get("spot_ready_time", item.get("ready_time")) is not None,
                 item.get("spot_ready_time", item.get("ready_time")) or "99:99",
-                item.get("relative_strength", 0.0),
+                cls._directional_rs_tiebreak(item),
                 item.get("average_daily_money", 0.0),
             ),
             reverse=True,
