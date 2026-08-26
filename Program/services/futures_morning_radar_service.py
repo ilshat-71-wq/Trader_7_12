@@ -16,12 +16,13 @@ from services.market_session_service import MarketSessionService
 from services.session_money_volume_service import SessionMoneyVolumeService
 from services.spot_first_pullback_service import SpotFirstPullbackService
 from services.moex_price_stability_service import MoexPriceStabilityService
+from services.futures_trade_candidate_service import FuturesTradeCandidateService
 
 
 class FuturesMorningRadarService:
     """Build the current-session SPOT shortlist, then attach futures mapping."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
     MAX_CONTRACTS_PER_SPOT = 2
     MAPPING_CACHE_SECONDS = 300
 
@@ -159,7 +160,6 @@ class FuturesMorningRadarService:
             radar=radar_cache[radar_key]
             if not isinstance(radar,dict): continue
             if str(radar.get("status","")).upper()=="ERROR":
-                results.append({"version":self.VERSION,"status":"ERROR","error":radar.get("error","Radar analysis failed"),"spot_ticker":spot_ticker,"spot_class_code":spot_class_code,"spot_name":representative.get("spot_name",""),"spot_type":representative.get("spot_type","")})
                 continue
 
             price_stability=self._price_stability(spot_ticker,spot_class_code,radar.get("last_close",0),trading_date)
@@ -245,8 +245,16 @@ class FuturesMorningRadarService:
                 "impulse_low":float(spot_setup.get("impulse_low",0) or 0),
             })
 
+            # Canonical SPOT eligibility/ranking gate. This is deliberately
+            # evaluated before any futures mapping is attached.
+            candidate = FuturesTradeCandidateService.build_candidate(result)
+            if candidate is None:
+                continue
+            result["candidate_score"] = candidate["candidate_score"]
+
             # Critical architectural boundary: no futures lookup/selection is
-            # performed until SPOT setup and trigger are actually ready.
+            # performed until the SPOT candidate has passed eligibility and
+            # the SPOT setup has a usable trigger.
             if self._spot_ready_for_mapping(result):
                 selected=self._select_futures_mapping(spot_mappings)
                 if selected:
@@ -284,22 +292,24 @@ class FuturesMorningRadarService:
 
     @staticmethod
     def _sort_key(item):
-        status=str(item.get("status","ERROR")).upper()
-        try: money=float(item.get("spot_money_volume",0) or 0)
-        except (TypeError,ValueError): money=0.0
-        try: activity=float(item.get("spot_session_activity_ratio",0) or 0)
-        except (TypeError,ValueError): activity=0.0
-        try: setup=float(item.get("setup_quality_score",0) or 0)
-        except (TypeError,ValueError): setup=0.0
-        try: radar_score=float(item.get("radar_score",0) or 0)
-        except (TypeError,ValueError): radar_score=0.0
-        return (1,setup,activity,money,radar_score) if status=="OK" else (0,setup,activity,money,radar_score)
+        direction=str(item.get("direction") or "").upper()
+        rs=float(item.get("relative_strength",0) or 0)
+        directional_rs=rs if direction=="LONG" else -rs if direction=="SHORT" else 0.0
+        return (
+            float(item.get("candidate_score",0) or 0),
+            float(item.get("spot_session_activity_ratio",0) or 0),
+            float(item.get("spot_money_per_minute",0) or 0),
+            float(item.get("spot_money_volume",0) or 0),
+            directional_rs,
+            float(item.get("setup_quality_score",0) or 0),
+            str(item.get("spot_ticker") or ""),
+        )
 
     @staticmethod
     def print_results(results):
         print(); print("="*160); print("TRADER_7_12 PRO - SPOT IMPULSE -> FIRST PULLBACK/REBOUND -> FUTURES MAPPING"); print("="*160); print()
-        print(f"{'RANK':<6}{'FUTURES':<12}{'SPOT':<9}{'MONEY':>16}{'PACE':>8}{'SETUP':<17}{'STATE':<12}{'RETR':>7}{'QUALITY':>9}{'DIR':<8}{'SESSION'}")
+        print(f"{'RANK':<6}{'FUTURES':<12}{'SPOT':<9}{'SCORE':>8}{'MONEY':>16}{'PACE':>8}{'SETUP':<17}{'STATE':<12}{'RETR':>7}{'QUALITY':>9}{'DIR':<8}{'SESSION'}")
         print("-"*160)
         for item in results:
-            print(f"{item.get('rank','-'): <6}{item.get('futures_ticker','-'): <12}{item.get('spot_ticker','-'): <9}{float(item.get('spot_money_volume',0) or 0):>16,.0f}{float(item.get('spot_session_activity_ratio',0) or 0):>8.2f}{str(item.get('setup','-')):<17}{str(item.get('setup_state','-')):<12}{float(item.get('retracement_ratio',0) or 0):>7.2f}{float(item.get('setup_quality_score',0) or 0):>9.1f}{str(item.get('direction','-')):<8}{item.get('market_session','-')}")
-        print(); print("SPOT is the source of setup/market structure/readiness. FUTURES is attached only afterwards as the tradable instrument."); print("MOEX-style price-instability fields are derived from authenticated BCS SPOT candles."); print("The service does not place orders or choose the user's exact entry."); print("="*160)
+            print(f"{item.get('rank','-'): <6}{item.get('futures_ticker','-'): <12}{item.get('spot_ticker','-'): <9}{float(item.get('candidate_score',0) or 0):>8.2f}{float(item.get('spot_money_volume',0) or 0):>16,.0f}{float(item.get('spot_session_activity_ratio',0) or 0):>8.2f}{str(item.get('setup','-')):<17}{str(item.get('setup_state','-')):<12}{float(item.get('retracement_ratio',0) or 0):>7.2f}{float(item.get('setup_quality_score',0) or 0):>9.1f}{str(item.get('direction','-')):<8}{item.get('market_session','-')}")
+        print(); print("SPOT is the source of eligibility, score, setup/market structure/readiness. FUTURES is attached only afterwards as the tradable instrument."); print("MOEX-style price-instability fields are derived from authenticated BCS SPOT candles."); print("The service does not place orders or choose the user's exact entry."); print("="*160)
