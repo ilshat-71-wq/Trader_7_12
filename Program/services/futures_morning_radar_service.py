@@ -22,8 +22,9 @@ from services.futures_trade_candidate_service import FuturesTradeCandidateServic
 class FuturesMorningRadarService:
     """Build the current-session SPOT shortlist, then attach futures mapping."""
 
-    VERSION = "1.1"
+    VERSION = "1.2"
     MAX_CONTRACTS_PER_SPOT = 2
+    MAX_DAYS_TO_EXPIRY = 3
     MAPPING_CACHE_SECONDS = 300
 
     def __init__(self, api=None, mapping_service=None, radar_service=None, history_service=None, session_service=None, session_money_service=None, spot_setup_service=None):
@@ -97,27 +98,42 @@ class FuturesMorningRadarService:
 
     @classmethod
     def _spot_ready_for_mapping(cls, result):
+        """Allow futures mapping only for direction-consistent ready SPOT setups."""
         direction=str(result.get("direction") or "NONE").upper()
         setup=str(result.get("setup") or "NONE").upper()
+        setup_direction=str(result.get("setup_direction") or direction).upper()
         state=str(result.get("setup_state") or "WAIT").upper()
         try:
             trigger=float(result.get("entry_trigger",0) or 0)
             price=float(result.get("spot_price",result.get("last_close",0)) or 0)
         except (TypeError,ValueError):
             return False
-        return direction in {"LONG","SHORT"} and setup != "NONE" and state in {"WATCH","READY","CONFIRMED"} and trigger > 0 and price > 0
+        return (
+            direction in {"LONG","SHORT"}
+            and setup_direction == direction
+            and setup != "NONE"
+            and state in {"READY","CONFIRMED"}
+            and trigger > 0
+            and price > 0
+        )
 
     @classmethod
     def _select_current_contracts(cls,mappings):
-        """Return eligible contracts, but only for post-readiness mapping."""
+        """Return non-expiring contracts for post-readiness mapping only."""
         grouped={}
+        today=date.today()
         for mapping in mappings or []:
             if not isinstance(mapping,dict): continue
             spot_ticker=str(mapping.get("spot_ticker") or "").strip().upper()
             if not spot_ticker: continue
             expiry=cls._parse_expiry(mapping.get("futures_expiry"))
-            if expiry is None or expiry<date.today(): continue
-            candidate=dict(mapping); candidate["futures_expiry"]=expiry.isoformat(); grouped.setdefault(spot_ticker,[]).append(candidate)
+            if expiry is None: continue
+            days_to_expiry=(expiry-today).days
+            if days_to_expiry <= cls.MAX_DAYS_TO_EXPIRY: continue
+            candidate=dict(mapping)
+            candidate["futures_expiry"]=expiry.isoformat()
+            candidate["days_to_expiry"]=days_to_expiry
+            grouped.setdefault(spot_ticker,[]).append(candidate)
         selected=[]
         for candidates in grouped.values():
             candidates.sort(key=lambda item:(cls._parse_expiry(item.get("futures_expiry")) or date.max,str(item.get("futures_ticker")or "")))
@@ -254,7 +270,7 @@ class FuturesMorningRadarService:
 
             # Critical architectural boundary: no futures lookup/selection is
             # performed until the SPOT candidate has passed eligibility and
-            # the SPOT setup has a usable trigger.
+            # the SPOT setup is READY/CONFIRMED with a usable trigger.
             if self._spot_ready_for_mapping(result):
                 selected=self._select_futures_mapping(spot_mappings)
                 if selected:
