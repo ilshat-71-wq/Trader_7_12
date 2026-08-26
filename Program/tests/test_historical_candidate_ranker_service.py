@@ -222,3 +222,34 @@ def test_production_scan_event_risk_blocks_candidate_before_futures_mapping(monk
 
     assert service.scan(mappings=mappings, limit=1) == []
     assert calls == []
+
+
+def test_spot_mapping_requires_ready_state_and_matching_direction():
+    base = {
+        "direction": "LONG",
+        "setup": "FIRST_PULLBACK",
+        "setup_direction": "LONG",
+        "setup_state": "READY",
+        "entry_trigger": 101.0,
+        "spot_price": 100.0,
+    }
+    assert FuturesMorningRadarService._spot_ready_for_mapping(base) is True
+
+    waiting = dict(base, setup_state="WATCH")
+    assert FuturesMorningRadarService._spot_ready_for_mapping(waiting) is False
+
+    mismatched = dict(base, setup_direction="SHORT")
+    assert FuturesMorningRadarService._spot_ready_for_mapping(mismatched) is False
+
+
+def test_base_futures_mapping_excludes_contracts_expiring_within_three_days():
+    from datetime import date, timedelta
+
+    today = date.today()
+    mappings = [
+        {"spot_ticker": "SBER", "futures_ticker": "EXPIRING", "futures_expiry": (today + timedelta(days=3)).isoformat()},
+        {"spot_ticker": "SBER", "futures_ticker": "ELIGIBLE", "futures_expiry": (today + timedelta(days=8)).isoformat()},
+    ]
+    selected = FuturesMorningRadarService._select_current_contracts(mappings)
+    assert [item["futures_ticker"] for item in selected] == ["ELIGIBLE"]
+    assert selected[0]["days_to_expiry"] == 8
