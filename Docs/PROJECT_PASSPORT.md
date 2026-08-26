@@ -329,3 +329,22 @@ Futures confirmation **не является обязательным фильт
 - `SPOT-first validation` — **SUCCESS**.
 
 **Аудиторский вывод:** production pipeline теперь имеет regression coverage не только для запрета преждевременного futures attachment, но и для положительного пути `eligible SPOT + READY + trigger → post-readiness futures mapping`. Архитектурная граница подтверждена в обоих направлениях.
+
+---
+
+## 16. STRICT SPOT READINESS / CONTRACT EXPIRY CHECKPOINT
+
+**Дата:** 26.08.2026  
+**Код и regression coverage:** `ae4a5ae8be9971b3a6f33bca9dc171e3cc5b3812` / `e5ca518c43cb0749eac7c5a98f2056460fe3519b`
+
+Усилена граница `SPOT → FUTURES MAPPING` без изменения канонического принципа SPOT-first:
+
+- futures mapping теперь разрешён только для `READY` или `CONFIRMED` SPOT setup;
+- `WATCH + trigger` больше не считается достаточной готовностью для привязки фьючерса;
+- направление setup обязано совпадать с направлением SPOT-кандидата (`setup_direction == direction`);
+- базовый `FuturesMorningRadarService` исключает контракты с `3` и менее календарными днями до экспирации, синхронизируя это правило с двухфазным production pipeline;
+- `days_to_expiry` вычисляется и сохраняется явно для выбранного справочного контракта;
+- добавлены regression tests для строгого readiness gate, несовпадения направления и expiry safety;
+- SPOT eligibility, score, RS, setup и ranking по-прежнему не зависят от futures metrics.
+
+**Аудиторский вывод:** mapping boundary теперь формально закрыта с двух сторон: недостаточно просто иметь trigger — требуется каноническая `READY/CONFIRMED` готовность и согласованное направление; кроме того, технически непригодный контракт, находящийся в пределах трёх дней до экспирации, не может стать reference mapping.
