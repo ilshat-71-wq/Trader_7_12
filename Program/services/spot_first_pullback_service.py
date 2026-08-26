@@ -1,6 +1,7 @@
 """SPOT-first impulse -> H1 structure -> first pullback/rebound detector."""
 
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 
 class SpotFirstPullbackService:
@@ -51,8 +52,8 @@ class SpotFirstPullbackService:
             return []
         candles = self.history_service.load(
             ticker, class_code,
-            start_time=start_moscow.astimezone(timezone.utc),
-            end_time=end_moscow.astimezone(timezone.utc),
+            start_time=start_moscow.astimezone(ZoneInfo("UTC")),
+            end_time=end_moscow.astimezone(ZoneInfo("UTC")),
             timeframe_minutes=self.TIMEFRAME_MINUTES,
         )
         result = []
