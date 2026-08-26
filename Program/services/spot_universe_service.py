@@ -21,7 +21,6 @@ class SpotUniverseService:
         "COMMODITY",
         "COMMODITIES",
         "METALS",
-        "INDICES",
     )
     CACHE_SECONDS = 300
     MAX_WORKERS = 2
@@ -78,8 +77,6 @@ class SpotUniverseService:
             return "MOEX_CURRENCY"
         if kind in {"GOODS", "COMMODITY", "COMMODITIES", "METALS"}:
             return "MARKET_DRIVER"
-        if kind == "INDICES":
-            return "MARKET_INDEX"
         return "SPOT"
 
     def _load_one(self, instrument_type):
