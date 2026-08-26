@@ -10,7 +10,7 @@ RESOURCES="$CONTENTS/Resources"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 
-cat > "$MACOS/Trader_7_12 Pro" <<LAUNCHER
+cat > "$RESOURCES/launch_trader_7_12.sh" <<LAUNCHER
 #!/bin/zsh
 set -euo pipefail
 ROOT="$ROOT"
@@ -26,6 +26,21 @@ fi
 
 exec /usr/bin/env python3 "\$ROOT/Program/main.py"
 LAUNCHER
+chmod +x "$RESOURCES/launch_trader_7_12.sh"
+
+CLANG="/usr/bin/clang"
+if [[ ! -x "$CLANG" ]]; then
+    CLANG="$(xcrun --find clang 2>/dev/null || true)"
+fi
+if [[ -z "$CLANG" || ! -x "$CLANG" ]]; then
+    echo "ERROR: clang is required to build the native macOS launcher."
+    echo "Install Xcode Command Line Tools with: xcode-select --install"
+    exit 1
+fi
+
+"$CLANG" -O2 -Wall -Wextra \
+    "$ROOT/scripts/macos_app_launcher.c" \
+    -o "$MACOS/Trader_7_12 Pro"
 chmod +x "$MACOS/Trader_7_12 Pro"
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
@@ -46,11 +61,13 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2</string>
+	<string>1.3</string>
 	<key>CFBundleVersion</key>
-	<string>1.2</string>
+	<string>1.3</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>
 PLIST
@@ -58,4 +75,5 @@ PLIST
 plutil -lint "$CONTENTS/Info.plist"
 
 echo "Installed: $APP"
+echo "Native macOS launcher: OK"
 echo "Launch Trader_7_12 Pro from Finder or Dock."
