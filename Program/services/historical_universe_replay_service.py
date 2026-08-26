@@ -1,18 +1,18 @@
-"""Trader_7_12 Pro - Historical Universe Morning Replay."""
+"""Trader_7_12 Pro - Historical SPOT-first morning replay."""
 
 from datetime import date, datetime, timedelta, timezone, time
 
-from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.futures_confirmation_service import FuturesConfirmationService
+from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.history_candle_service import HistoryCandleService
 from services.morning_radar_service import MorningRadarService
 from services.morning_replay_service import MorningReplayService
 
 
 class HistoricalUniverseReplayService:
-    """Replay SPOT setup, market-relative strength and futures confirmation."""
+    """Replay the canonical SPOT pipeline; futures are secondary outcome data."""
 
-    VERSION = "0.9"
+    VERSION = "1.0"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
@@ -20,22 +20,16 @@ class HistoricalUniverseReplayService:
     RS_LOOKBACK_DAYS = 3
     RS_TICKERS = ("IMOEX2", "IRUS2")
 
-    def __init__(
-        self,
-        mapping_service=None,
-        history_service=None,
-        replay_service=None,
-        radar_helper=None,
-    ):
+    def __init__(self, mapping_service=None, history_service=None, replay_service=None, radar_helper=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
         self.history_service = history_service or HistoryCandleService()
-        self.replay_service = replay_service or MorningReplayService(
-            history_service=self.history_service
-        )
+        self.replay_service = replay_service or MorningReplayService(history_service=self.history_service)
         self.radar_helper = radar_helper or MorningRadarService()
 
     @staticmethod
     def _as_date(value):
+        if isinstance(value, datetime):
+            return value.date()
         if isinstance(value, date):
             return value
         return date.fromisoformat(str(value)[:10])
@@ -54,7 +48,36 @@ class HistoricalUniverseReplayService:
         expiry = cls._parse_expiry(expiry)
         return expiry is not None and (expiry - trading_date).days > cls.MIN_DAYS_TO_EXPIRY
 
+    @staticmethod
+    def _spot_key(item):
+        return (
+            str(item.get("spot_ticker") or item.get("ticker") or "").strip().upper(),
+            str(item.get("spot_class_code") or item.get("class_code") or item.get("classCode") or "").strip(),
+        )
+
+    def load_spot_universe(self):
+        """Return unique SPOT instruments without consulting futures expiry/liquidity."""
+        mappings = self.mapping_service.load()
+        if not isinstance(mappings, list):
+            return []
+        result, seen = [], set()
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            ticker, class_code = self._spot_key(mapping)
+            if not ticker or not class_code or (ticker, class_code) in seen:
+                continue
+            seen.add((ticker, class_code))
+            result.append({
+                "spot_ticker": ticker,
+                "spot_class_code": class_code,
+                "spot_group": mapping.get("spot_group"),
+                "spot_universe": mapping.get("spot_universe"),
+            })
+        return sorted(result, key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
+
     def load_mappings_for_date(self, trading_date):
+        """Load futures references only for post-SPOT mapping/outcome analysis."""
         trading_date = self._as_date(trading_date)
         mappings = self.mapping_service.load()
         if not isinstance(mappings, list):
@@ -67,334 +90,173 @@ class HistoricalUniverseReplayService:
             expiry = self._parse_expiry(mapping.get("futures_expiry"))
             if not spot or not self._expiry_is_usable(trading_date, expiry):
                 continue
-            candidate = dict(mapping)
-            candidate["futures_expiry"] = expiry.isoformat()
-            grouped.setdefault(spot, []).append(candidate)
+            item = dict(mapping)
+            item["futures_expiry"] = expiry.isoformat()
+            item["days_to_expiry"] = (expiry - trading_date).days
+            grouped.setdefault(spot, []).append(item)
         selected = []
         for candidates in grouped.values():
-            candidates.sort(key=lambda item: (
-                self._parse_expiry(item.get("futures_expiry")) or date.max,
-                str(item.get("futures_ticker") or ""),
-            ))
+            candidates.sort(key=lambda item: (self._parse_expiry(item.get("futures_expiry")) or date.max, str(item.get("futures_ticker") or "")))
             selected.extend(candidates[:self.MAX_CONTRACTS_PER_SPOT])
-        return sorted(selected, key=lambda item: (
-            str(item.get("spot_ticker") or ""),
-            self._parse_expiry(item.get("futures_expiry")) or date.max,
-            str(item.get("futures_ticker") or ""),
-        ))
+        return selected
 
     def load_daily_candles(self, ticker, class_code, trading_date):
         trading_date = self._as_date(trading_date)
         end_moscow = datetime.combine(trading_date, datetime.min.time()).replace(tzinfo=self.history_service.MOSCOW_TZ)
-        start_utc = end_moscow.astimezone(timezone.utc) - timedelta(days=12)
-        end_utc = end_moscow.astimezone(timezone.utc)
         try:
-            data = self.history_service.trade_service.api.get_candles(ticker, class_code, interval="D", start_time=start_utc, end_time=end_utc)
+            data = self.history_service.trade_service.api.get_candles(
+                ticker, class_code, interval="D",
+                start_time=(end_moscow.astimezone(timezone.utc) - timedelta(days=12)),
+                end_time=end_moscow.astimezone(timezone.utc),
+            )
         except Exception as exc:
             print(f"Historical candles unavailable: {ticker}/{class_code}: {type(exc).__name__}")
             return []
-        bars = data.get("bars", []) if isinstance(data, dict) else []
         result = []
-        for bar in bars:
+        for bar in (data.get("bars", []) if isinstance(data, dict) else []):
             if not isinstance(bar, dict):
                 continue
             candle_date = self.history_service.get_moscow_date(bar.get("time"))
             if candle_date is None or candle_date >= trading_date:
                 continue
             try:
-                close = float(bar.get("close") or 0)
-                volume = float(bar.get("volume") or 0)
+                close, volume = float(bar.get("close") or 0), float(bar.get("volume") or 0)
             except (TypeError, ValueError):
                 continue
             if close <= 0:
                 continue
-            result.append({
-                "time": bar.get("time"), "date": candle_date.isoformat(),
-                "open": float(bar.get("open") or 0), "high": float(bar.get("high") or 0),
-                "low": float(bar.get("low") or 0), "close": close, "volume": volume,
-            })
-        result.sort(key=lambda item: item["date"])
-        return result
+            result.append({"time": bar.get("time"), "date": candle_date.isoformat(), "open": float(bar.get("open") or 0), "high": float(bar.get("high") or 0), "low": float(bar.get("low") or 0), "close": close, "volume": volume})
+        return sorted(result, key=lambda item: item["date"])
 
     @staticmethod
     def _instrument_ticker(item):
-        if not isinstance(item, dict):
-            return ""
-        return str(
-            item.get("ticker")
-            or item.get("secCode")
-            or item.get("securityCode")
-            or ""
-        ).strip().upper()
+        return str(item.get("ticker") or item.get("secCode") or item.get("securityCode") or "").strip().upper() if isinstance(item, dict) else ""
 
     @staticmethod
     def _instrument_class_code(item):
         if not isinstance(item, dict):
             return ""
         for key in ("classCode", "class_code", "boardClassCode"):
-            value = item.get(key)
-            if value:
-                return str(value).strip()
+            if item.get(key):
+                return str(item[key]).strip()
         for board in item.get("boards") or []:
-            if not isinstance(board, dict):
-                continue
-            for key in ("classCode", "class_code"):
-                value = board.get(key)
-                if value:
-                    return str(value).strip()
+            if isinstance(board, dict) and (board.get("classCode") or board.get("class_code")):
+                return str(board.get("classCode") or board.get("class_code")).strip()
         return ""
 
     def load_market_benchmark(self):
-        """Resolve IMOEX2/IRUS2 dynamically from BCS full-return index metadata.
-
-        The historical replay must never guess a benchmark class code.  BCS
-        documents INDICES as a valid instrument type, but some sessions may
-        return an empty by-type result.  In that case retry resolution by the
-        exact benchmark tickers through the API's ticker lookup when available.
-        """
+        """Resolve IMOEX2/IRUS2 dynamically; never guess benchmark metadata."""
         api = self.history_service.trade_service.api
-        instruments = []
         try:
             instruments = api.get_instruments("INDICES")
         except Exception as exc:
             print(f"Historical RS benchmark metadata error: {type(exc).__name__}")
-
+            instruments = []
         if not isinstance(instruments, list):
             instruments = []
-
         def resolve(records):
             for preferred in self.RS_TICKERS:
                 for item in records:
-                    if self._instrument_ticker(item) != preferred:
-                        continue
-                    class_code = self._instrument_class_code(item)
-                    if class_code:
-                        return {"ticker": preferred, "class_code": class_code, "source": "by-type"}
+                    if self._instrument_ticker(item) == preferred:
+                        code = self._instrument_class_code(item)
+                        if code:
+                            return {"ticker": preferred, "class_code": code, "source": "metadata"}
             return None
-
         resolved = resolve(instruments)
         if resolved:
-            print(
-                f"Historical RS benchmark: {resolved['ticker']}/{resolved['class_code']} "
-                f"(dynamic INDICES metadata)"
-            )
             return resolved
-
         lookup = getattr(api, "get_instruments_by_tickers", None)
         if callable(lookup):
             try:
-                records = lookup(list(self.RS_TICKERS))
-            except Exception as exc:
-                print(f"Historical RS benchmark ticker lookup error: {type(exc).__name__}")
-                records = []
-            if isinstance(records, list):
-                resolved = resolve(records)
-                if resolved:
-                    resolved["source"] = "by-tickers"
-                    print(
-                        f"Historical RS benchmark: {resolved['ticker']}/{resolved['class_code']} "
-                        f"(dynamic ticker metadata)"
-                    )
-                    return resolved
-
-        print("Historical RS benchmark: UNAVAILABLE — no IMOEX2/IRUS2 metadata resolved")
+                resolved = resolve(lookup(list(self.RS_TICKERS)))
+            except Exception:
+                resolved = None
+            if resolved:
+                resolved["source"] = "ticker_lookup"
+                return resolved
         return None
 
     def calculate_relative_strength(self, candles, benchmark_candles, benchmark_name=None):
-        """Compare the same completed daily window against IMOEX2/IRUS2."""
-        selected = candles[-self.RS_LOOKBACK_DAYS:]
-        benchmark = benchmark_candles[-self.RS_LOOKBACK_DAYS:]
+        selected, benchmark = candles[-self.RS_LOOKBACK_DAYS:], benchmark_candles[-self.RS_LOOKBACK_DAYS:]
         if len(selected) < 2 or len(benchmark) < 2:
             return {"available": False, "score": 0.0, "asset_change_percent": 0.0, "market_change_percent": 0.0, "benchmark": benchmark_name}
         asset_change = (selected[-1]["close"] - selected[0]["close"]) / selected[0]["close"] * 100
         market_change = (benchmark[-1]["close"] - benchmark[0]["close"]) / benchmark[0]["close"] * 100
         excess = asset_change - market_change
-        return {
-            "available": True,
-            "score": round(max(-50.0, min(50.0, excess * 10.0)), 2),
-            "asset_change_percent": round(asset_change, 2),
-            "market_change_percent": round(market_change, 2),
-            "excess_change_percent": round(excess, 2),
-            "benchmark": benchmark_name,
-        }
+        return {"available": True, "score": round(max(-50.0, min(50.0, excess * 10.0)), 2), "asset_change_percent": round(asset_change, 2), "market_change_percent": round(market_change, 2), "excess_change_percent": round(excess, 2), "benchmark": benchmark_name}
 
     def historical_liquidity(self, candles, completed_days=None):
-        completed_days = completed_days or self.DEFAULT_AVERAGE_DAYS
-        selected = candles[-int(completed_days):]
+        selected = candles[-int(completed_days or self.DEFAULT_AVERAGE_DAYS):]
         turnovers = [float(item.get("close", 0) or 0) * float(item.get("volume", 0) or 0) for item in selected]
         turnovers = [value for value in turnovers if value > 0]
         return sum(turnovers) / len(turnovers) if turnovers else 0.0
-
-    def prepare_futures_candidates(self, candidates, trading_date):
-        trading_date = self._as_date(trading_date)
-        ranked = []
-        for candidate in candidates:
-            if not self._expiry_is_usable(trading_date, candidate.get("futures_expiry")):
-                continue
-            ticker = str(candidate.get("futures_ticker") or "").strip().upper()
-            class_code = str(candidate.get("futures_class_code") or "").strip()
-            if not ticker or not class_code:
-                continue
-            liquidity = self.historical_liquidity(self.load_daily_candles(ticker, class_code, trading_date))
-            if liquidity <= 0:
-                continue
-            selected = dict(candidate)
-            selected["futures_average_daily_money"] = liquidity
-            ranked.append(selected)
-        ranked.sort(key=lambda item: (float(item.get("futures_average_daily_money", 0) or 0), str(item.get("futures_ticker") or "")), reverse=True)
-        return ranked
-
-    def select_futures_for_spot(self, candidates, trading_date):
-        ranked = self.prepare_futures_candidates(candidates, trading_date)
-        return ranked[0] if ranked else None
 
     def load_futures_candles(self, ticker, class_code, trading_date, end_time):
         trading_date = self._as_date(trading_date)
         if isinstance(end_time, str):
             end_time = time.fromisoformat(end_time[:8])
-        start_moscow = datetime.combine(trading_date, time(7, 0), tzinfo=self.replay_service.MOSCOW_TZ)
-        end_moscow = datetime.combine(trading_date, end_time, tzinfo=self.replay_service.MOSCOW_TZ)
-        if end_moscow < start_moscow:
+        start = datetime.combine(trading_date, time(7, 0), tzinfo=self.replay_service.MOSCOW_TZ)
+        end = datetime.combine(trading_date, end_time, tzinfo=self.replay_service.MOSCOW_TZ)
+        if end < start:
             return []
         try:
-            data = self.history_service.trade_service.api.get_candles(ticker, class_code, interval="M5", start_time=start_moscow.astimezone(timezone.utc), end_time=end_moscow.astimezone(timezone.utc))
+            data = self.history_service.trade_service.api.get_candles(ticker, class_code, interval="M5", start_time=start.astimezone(timezone.utc), end_time=end.astimezone(timezone.utc))
         except Exception:
             return []
-        bars = data.get("bars", []) if isinstance(data, dict) else []
         result = []
-        for bar in bars:
+        for bar in (data.get("bars", []) if isinstance(data, dict) else []):
             if not isinstance(bar, dict):
-                continue
-            try:
-                open_price = float(bar.get("open") or 0)
-                close_price = float(bar.get("close") or 0)
-                volume = float(bar.get("volume") or 0)
-            except (TypeError, ValueError):
-                continue
-            if open_price <= 0 or close_price <= 0:
                 continue
             dt = self.history_service.to_moscow(bar.get("time"))
             if dt is None or dt.date() != trading_date or dt.time() < time(7, 0) or dt.time() > end_time:
                 continue
-            result.append({"time": bar.get("time"), "open": open_price, "high": float(bar.get("high") or 0), "low": float(bar.get("low") or 0), "close": close_price, "volume": volume})
-        result.sort(key=lambda item: str(item.get("time") or ""))
-        return result
+            try:
+                op, cl = float(bar.get("open") or 0), float(bar.get("close") or 0)
+            except (TypeError, ValueError):
+                continue
+            if op <= 0 or cl <= 0:
+                continue
+            result.append({"time": bar.get("time"), "open": op, "high": float(bar.get("high") or 0), "low": float(bar.get("low") or 0), "close": cl, "volume": float(bar.get("volume") or 0)})
+        return sorted(result, key=lambda item: str(item.get("time") or ""))
 
     def confirm_futures_at_checkpoint(self, ticker, class_code, direction, trading_date, checkpoint):
-        candles = self.load_futures_candles(ticker, class_code, trading_date, checkpoint)
-        return FuturesConfirmationService.analyze_candles(candles, direction)
-
-    def evaluate_futures_candidate(self, candidate, direction, trading_date, replay):
-        ticker = str(candidate.get("futures_ticker") or "").strip().upper()
-        class_code = str(candidate.get("futures_class_code") or "").strip()
-        timeline = []
-        first_ready = None
-        first_confirmed = None
-        for item in replay:
-            if str(item.get("setup_state") or "WAIT").upper() != "READY":
-                continue
-            checkpoint = item.get("checkpoint")
-            if first_ready is None:
-                first_ready = checkpoint
-            confirmation = self.confirm_futures_at_checkpoint(ticker, class_code, direction, trading_date, checkpoint)
-            timeline.append({"checkpoint": checkpoint, "setup": item.get("setup", "NONE"), "setup_state": item.get("setup_state", "WAIT"), "confirmation": confirmation})
-            if first_confirmed is None and confirmation.get("status") == "OK":
-                first_confirmed = {"checkpoint": checkpoint, "confirmation": confirmation, "setup": item.get("setup", "NONE"), "setup_state": item.get("setup_state", "WAIT"), "entry_trigger": item.get("entry_trigger", 0.0), "previous_high": item.get("previous_high", 0.0), "previous_low": item.get("previous_low", 0.0)}
-                break
-        return {"candidate": candidate, "ready_time": first_ready, "confirmation_time": first_confirmed.get("checkpoint") if first_confirmed else None, "futures_confirmation": first_confirmed.get("confirmation") if first_confirmed else None, "setup": first_confirmed.get("setup", "NONE") if first_confirmed else "NONE", "setup_state": first_confirmed.get("setup_state", "WAIT") if first_confirmed else "WAIT", "entry_trigger": first_confirmed.get("entry_trigger", 0.0) if first_confirmed else 0.0, "previous_high": first_confirmed.get("previous_high", 0.0) if first_confirmed else 0.0, "previous_low": first_confirmed.get("previous_low", 0.0) if first_confirmed else 0.0, "futures_price": float((first_confirmed.get("confirmation") or {}).get("last_price", 0) or 0) if first_confirmed else 0.0, "futures_confirmation_timeline": timeline}
-
-    @staticmethod
-    def _time_rank(value):
-        """Return a sortable key where an earlier Moscow checkpoint ranks higher."""
-        if not value:
-            return float("-inf")
-        try:
-            parts = str(value)[:8].split(":")
-            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
-            return -float(seconds)
-        except (TypeError, ValueError, IndexError):
-            return float("-inf")
+        return FuturesConfirmationService.analyze_candles(self.load_futures_candles(ticker, class_code, trading_date, checkpoint), direction)
 
     @staticmethod
     def confirmation_window(value):
-        """Classify confirmation by the project's primary morning trading window."""
         if not value:
             return "NONE"
         try:
-            parts = str(value)[:8].split(":")
-            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
+            p = str(value)[:8].split(":")
+            seconds = int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2] if len(p) > 2 else 0)
         except (TypeError, ValueError, IndexError):
             return "NONE"
-
-        morning_start = 7 * 3600
-        primary_end = 10 * 3600
-        late_end = 13 * 3600
-
-        if morning_start <= seconds < primary_end:
+        if 7 * 3600 <= seconds < 10 * 3600:
             return "EARLY"
-        if primary_end <= seconds <= late_end:
+        if 10 * 3600 <= seconds <= 13 * 3600:
             return "LATE"
         return "NONE"
 
-    def _candidate_rank(self, evaluation):
-        confirmation_time = evaluation.get("confirmation_time")
-        ready_time = evaluation.get("ready_time")
-        confirmation = evaluation.get("futures_confirmation") or {}
-        candidate = evaluation.get("candidate") or {}
-        window = self.confirmation_window(confirmation_time)
-
-        # EARLY is the primary trading window. LATE is useful only as
-        # secondary monitoring. NONE must never outrank a confirmed signal.
-        window_score = {
-            "EARLY": 2,
-            "LATE": 1,
-            "NONE": 0,
-        }.get(window, 0)
-
-        return (
-            window_score,
-            confirmation_time is not None,
-            self._time_rank(confirmation_time),
-            ready_time is not None,
-            self._time_rank(ready_time),
-            float(confirmation.get("score", 0) or 0),
-            float(candidate.get("futures_average_daily_money", 0) or 0),
-        )
+    @staticmethod
+    def _first_ready(replay):
+        for item in replay:
+            if str(item.get("setup_state") or "WAIT").upper() in {"READY", "CONFIRMED"} and float(item.get("entry_trigger", 0) or 0) > 0:
+                return item
+        return None
 
     def replay(self, trading_date, min_money=None, checkpoints=None, limit=None):
+        """Run historical SPOT eligibility/ranking inputs before any futures lookup."""
         trading_date = self._as_date(trading_date)
         min_money = self.DEFAULT_MIN_MONEY if min_money is None else float(min_money)
         benchmark_meta = self.load_market_benchmark()
         benchmark_candles = self.load_daily_candles(benchmark_meta["ticker"], benchmark_meta["class_code"], trading_date) if benchmark_meta else []
-        if benchmark_meta and len(benchmark_candles) < 2:
-            print(
-                f"Historical RS benchmark candles: UNAVAILABLE — "
-                f"{benchmark_meta['ticker']}/{benchmark_meta['class_code']} returned "
-                f"{len(benchmark_candles)} completed daily candles"
-            )
-            benchmark_meta = None
-            benchmark_candles = []
-        elif benchmark_meta:
-            print(
-                f"Historical RS benchmark candles: {len(benchmark_candles)} completed daily candles "
-                f"for {benchmark_meta['ticker']}/{benchmark_meta['class_code']}"
-            )
-        mappings = self.load_mappings_for_date(trading_date)
+        if len(benchmark_candles) < 2:
+            benchmark_meta, benchmark_candles = None, []
+
         rows = []
-        grouped = {}
-        for mapping in mappings:
-            spot = str(mapping.get("spot_ticker") or "").strip().upper()
-            if spot:
-                grouped.setdefault(spot, []).append(mapping)
-        for candidates in grouped.values():
-            prepared = self.prepare_futures_candidates(candidates, trading_date)
-            if not prepared:
-                continue
-            spot = str(prepared[0].get("spot_ticker") or "").strip().upper()
-            spot_class = str(prepared[0].get("spot_class_code") or "").strip()
-            if not spot or not spot_class:
-                continue
-            daily = self.load_daily_candles(spot, spot_class, trading_date)
+        for spot in self.load_spot_universe():
+            ticker, class_code = spot["spot_ticker"], spot["spot_class_code"]
+            daily = self.load_daily_candles(ticker, class_code, trading_date)
             if len(daily) < 3:
                 continue
             avg_money = self.historical_liquidity(daily)
@@ -404,39 +266,39 @@ class HistoricalUniverseReplayService:
             direction = trend.get("direction")
             if direction not in {"LONG", "SHORT"}:
                 continue
-            relative_strength = self.calculate_relative_strength(daily, benchmark_candles, benchmark_meta["ticker"] if benchmark_meta else None)
-            replay = self.replay_service.replay_setup(ticker=spot, class_code=spot_class, direction=direction, trading_date=trading_date, checkpoints=checkpoints)
-            evaluations = [self.evaluate_futures_candidate(candidate, direction, trading_date, replay) for candidate in prepared]
-            evaluations.sort(key=self._candidate_rank, reverse=True)
-            best = evaluations[0]
-            mapping = best["candidate"]
-            confirmation = best.get("futures_confirmation") or {}
-            setup_seen = next((item for item in replay if item.get("setup") != "NONE"), None)
+            rs = self.calculate_relative_strength(daily, benchmark_candles, benchmark_meta["ticker"] if benchmark_meta else None)
+            replay = self.replay_service.replay_setup(ticker=ticker, class_code=class_code, direction=direction, trading_date=trading_date, checkpoints=checkpoints)
+            ready = self._first_ready(replay)
+            selected = ready or (replay[-1] if replay else {})
             rows.append({
-                "futures_ticker": mapping.get("futures_ticker"), "futures_class_code": mapping.get("futures_class_code"), "futures_expiry": mapping.get("futures_expiry"), "futures_average_daily_money": mapping.get("futures_average_daily_money", 0.0), "futures_candidates_evaluated": len(evaluations),
-                "spot_ticker": spot, "spot_class_code": spot_class, "direction": direction, "trend_state": trend.get("state"), "trend_change_percent": trend.get("change_percent", 0.0), "average_daily_money": avg_money,
-                "relative_strength": relative_strength.get("score", 0.0), "relative_strength_data": relative_strength, "relative_strength_available": relative_strength.get("available", False),
-                "setup_first_seen": setup_seen.get("checkpoint") if setup_seen else None, "ready_time": best.get("ready_time"), "confirmation_time": best.get("confirmation_time"), "trade_ready_time": best.get("confirmation_time"), "futures_price": best.get("futures_price", 0.0), "setup": best.get("setup", "NONE"), "setup_state": best.get("setup_state", "WAIT"), "entry_trigger": best.get("entry_trigger", 0.0), "previous_high": best.get("previous_high", 0.0), "previous_low": best.get("previous_low", 0.0), "futures_confirmation": confirmation, "futures_confirmation_timeline": best.get("futures_confirmation_timeline", []), "replay": replay,
+                "futures_ticker": "", "futures_class_code": "", "futures_expiry": None, "days_to_expiry": None,
+                "futures_average_daily_money": 0.0, "futures_candidates_evaluated": 0,
+                "spot_ticker": ticker, "spot_class_code": class_code, "spot_group": spot.get("spot_group"), "spot_universe": spot.get("spot_universe"),
+                "direction": direction, "trend_state": trend.get("state"), "trend_change_percent": trend.get("change_percent", 0.0), "average_daily_money": avg_money,
+                "relative_strength": rs.get("score", 0.0), "relative_strength_data": rs, "relative_strength_available": rs.get("available", False),
+                "setup_first_seen": next((item.get("checkpoint") for item in replay if item.get("setup") != "NONE"), None),
+                "ready_time": ready.get("checkpoint") if ready else None, "trade_ready_time": ready.get("checkpoint") if ready else None,
+                "confirmation_time": None, "futures_price": 0.0, "setup": selected.get("setup", "NONE"), "setup_state": selected.get("setup_state", "WAIT"),
+                "entry_trigger": float(selected.get("entry_trigger", 0) or 0), "previous_high": float(selected.get("previous_high", 0) or 0), "previous_low": float(selected.get("previous_low", 0) or 0),
+                "futures_confirmation": {}, "futures_confirmation_timeline": [], "replay": replay,
+                "readiness_source": "SPOT", "readiness_confirmed_by_futures": False,
             })
-        rows.sort(key=lambda item: (item.get("trade_ready_time") is not None, item.get("trade_ready_time") or "99:99", item.get("ready_time") is not None, item.get("ready_time") or "99:99", item.get("average_daily_money", 0)), reverse=True)
-        if limit is not None:
-            rows = rows[:int(limit)]
-        return rows
+        return rows[:int(limit)] if limit is not None else rows
 
-    @staticmethod
-    def print_results(rows, trading_date, min_money):
-        print()
-        print("=" * 128)
-        print("TRADER_7_12 PRO — HISTORICAL TOP CANDIDATES")
-        print(f"DATE: {trading_date} | READ ONLY — NO ORDERS")
-        print("=" * 128)
-        print(f"{'#':>3} {'FUTURES':<8} {'SPOT':<7} {'DIR':<6} {'SCORE':>7} {'SETUP':<10} {'READY':<6} {'CONF':<6} {'RS':>7} {'SPOT MONEY':>15} {'FUT MONEY':>15}")
-        print("-" * 128)
-        for rank, item in enumerate(rows, start=1):
-            confirmation = item.get("futures_confirmation") or {}
-            print(f"{rank:>3} {str(item.get('futures_ticker', '-')):<8} {str(item.get('spot_ticker', '-')):<7} {str(item.get('direction', '-')):<6} {float(item.get('candidate_score', 0) or 0):>7.2f} {str(item.get('setup', '-')):<10} {str(item.get('ready_time', '-')):<6} {str(item.get('confirmation_time', '-')):<6} {float(item.get('relative_strength', 0) or 0):>7.2f}{float(item.get('average_daily_money', 0) or 0):>15,.0f} {float(item.get('futures_average_daily_money', 0) or 0):>15,.0f}")
-        print("=" * 128)
-        print(f"CANDIDATES AFTER LIQUIDITY FILTER: {len(rows)}")
-        print("Historical RS is calculated against the dynamically resolved IMOEX/IMOEX2 benchmark using completed daily candles only.")
-        print("Risk sizing, deposit, SL/TP, position sizing and order execution are not used.")
-        print("=" * 128)
+    def attach_futures_context(self, rows, trading_date):
+        """Attach optional futures mapping after SPOT ranking; never change SPOT evidence."""
+        mappings = self.load_mappings_for_date(trading_date)
+        by_spot = {}
+        for mapping in mappings:
+            by_spot.setdefault(str(mapping.get("spot_ticker") or "").strip().upper(), []).append(mapping)
+        result = []
+        for row in rows or []:
+            item = dict(row)
+            candidates = by_spot.get(str(item.get("spot_ticker") or "").strip().upper(), [])
+            mapping = candidates[0] if candidates else None
+            if mapping:
+                item.update({"futures_ticker": mapping.get("futures_ticker", ""), "futures_class_code": mapping.get("futures_class_code", ""), "futures_expiry": mapping.get("futures_expiry"), "days_to_expiry": mapping.get("days_to_expiry"), "futures_mapping_source": "POST_SPOT_RANKING"})
+            else:
+                item["futures_mapping_source"] = "UNAVAILABLE_AFTER_SPOT_RANKING"
+            result.append(item)
+        return result
