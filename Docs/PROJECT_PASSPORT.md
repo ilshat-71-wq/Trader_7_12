@@ -270,3 +270,14 @@ Futures confirmation **не является обязательным фильт
 - Регрессионный набор SPOT-first покрывает независимость от futures, readiness, production/historical directional RS tie-break, отсутствие RS и event-risk gate.
 - Канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`.
 - Рабочая ветка проекта — только `main`.
+
+---
+
+## 13. ПРОДАКШЕННЫЙ SPOT-RANKING CHECKPOINT
+
+- `FuturesMorningRadarService` теперь пропускает production radar через канонический `FuturesTradeCandidateService.build_candidate()` до ranking и до futures mapping.
+- Production `candidate_score` является первичным ключом ranking; `setup_quality_score` больше не может самостоятельно поднять слабый SPOT-кандидат выше более сильного opportunity.
+- Production tie-break по RS направлен относительно сделки: LONG → больший RS, SHORT → более отрицательный RS.
+- Futures mapping выполняется только после прохождения SPOT eligibility и наличия рабочего SPOT trigger/readiness.
+- Futures confirmation, turnover, price, spread и expiry не участвуют в SPOT eligibility или score.
+- Добавлены production regression tests для candidate-score ranking и запрета futures attachment до SPOT readiness.
