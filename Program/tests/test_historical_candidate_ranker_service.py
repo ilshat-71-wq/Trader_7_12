@@ -134,3 +134,40 @@ def test_production_rank_tie_breaks_relative_strength_in_trade_direction(monkeyp
     ranked = service.rank(radars, limit=2)
 
     assert [item["spot_ticker"] for item in ranked] == ["WEAK_B", "WEAK_A"]
+
+
+def test_historical_rank_tie_breaks_relative_strength_in_trade_direction():
+    rows = [
+        {
+            "direction": "SHORT",
+            "trend_state": "DOWNTREND",
+            "trend_change_percent": 2.0,
+            "relative_strength_available": True,
+            "relative_strength_data": {"excess_change_percent": 1.0},
+            "relative_strength": -1.0,
+            "setup": "FIRST_REBOUND",
+            "setup_state": "WATCH",
+            "entry_trigger": 0.0,
+            "average_daily_money": 300_000_000,
+            "spot_ready_time": "08:30:00",
+            "spot_ticker": "WEAK_A",
+        },
+        {
+            "direction": "SHORT",
+            "trend_state": "DOWNTREND",
+            "trend_change_percent": 2.0,
+            "relative_strength_available": True,
+            "relative_strength_data": {"excess_change_percent": 1.0},
+            "relative_strength": -3.0,
+            "setup": "FIRST_REBOUND",
+            "setup_state": "WATCH",
+            "entry_trigger": 0.0,
+            "average_daily_money": 300_000_000,
+            "spot_ready_time": "08:30:00",
+            "spot_ticker": "WEAK_B",
+        },
+    ]
+
+    ranked = HistoricalCandidateRankerService.rank(rows, limit=2)
+
+    assert [item["spot_ticker"] for item in ranked] == ["WEAK_B", "WEAK_A"]
