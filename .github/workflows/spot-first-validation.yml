@@ -1,0 +1,27 @@
+name: SPOT-first validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  spot-first-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile project Python
+        run: python -m compileall -q Program/services Program/tests
+
+      - name: Run SPOT-first ranking regression tests
+        env:
+          PYTHONPATH: Program
+        run: python -m pytest -q Program/tests/test_historical_candidate_ranker_service.py
