@@ -4,9 +4,9 @@ import math
 
 
 class HistoricalCandidateRankerService:
-    """Rank historical candidates without trade execution or risk sizing."""
+    """Rank historical candidates with SPOT readiness as the primary signal."""
 
-    VERSION = "0.3"
+    VERSION = "0.4"
     RS_SCORE_CAP = 15.0
     RS_EXCESS_CAP_PERCENT = 8.0
 
@@ -44,23 +44,38 @@ class HistoricalCandidateRankerService:
         return round((capped / cls.RS_EXCESS_CAP_PERCENT) * cls.RS_SCORE_CAP, 2)
 
     @classmethod
-    def score(cls, row):
-        confirmation = row.get("futures_confirmation") or {}
-        confirmation_score = max(0.0, min(100.0, cls._float(confirmation.get("score"))))
-        direction = str(row.get("direction") or "").upper()
+    def _spot_readiness_score(cls, row):
+        """Score readiness from SPOT setup state only; futures confirmation is not a gate."""
+        state = str(row.get("spot_setup_state") or row.get("setup_state") or "WAIT").upper()
+        trigger = cls._float(row.get("spot_entry_trigger", row.get("entry_trigger")))
+        ready_time = row.get("spot_ready_time", row.get("ready_time"))
 
+        if state == "CONFIRMED" and trigger > 0:
+            return 40.0
+        if state == "READY" and trigger > 0:
+            return 35.0
+        if state == "WATCH" and trigger > 0:
+            return 25.0
+        if ready_time and trigger > 0:
+            return 30.0
+        if state != "WAIT":
+            return 10.0
+        return 0.0
+
+    @classmethod
+    def score(cls, row):
+        direction = str(row.get("direction") or "").upper()
         trend_state = str(row.get("trend_state") or "").upper()
         trend_score = {"UPTREND": 12.0, "DOWNTREND": 12.0, "WEAK_UPTREND": 7.0, "WEAK_DOWNTREND": 7.0}.get(trend_state, 0.0)
         move_score = min(abs(cls._float(row.get("trend_change_percent"))) * 4.0, 10.0)
-
         rs_score = cls._directional_rs_score(row, direction)
-
+        readiness_score = cls._spot_readiness_score(row)
         setup = str(row.get("setup") or "NONE").upper()
-        setup_score = {"BREAKOUT": 13.0, "PULLBACK": 11.0, "REBOUND": 10.0}.get(setup, 4.0 if setup != "NONE" else 0.0)
+        setup_score = {"BREAKOUT": 13.0, "PULLBACK": 11.0, "REBOUND": 10.0, "FIRST_PULLBACK": 11.0, "FIRST_REBOUND": 10.0}.get(setup, 4.0 if setup != "NONE" else 0.0)
         spot_liquidity_score = cls._liquidity_score(row.get("average_daily_money"), weight=10.0)
         futures_liquidity_score = cls._liquidity_score(row.get("futures_average_daily_money"), weight=5.0)
 
-        score = confirmation_score * 0.40 + trend_score + move_score + rs_score + setup_score + spot_liquidity_score + futures_liquidity_score
+        score = readiness_score + trend_score + move_score + rs_score + setup_score + spot_liquidity_score + futures_liquidity_score
         return round(max(0.0, min(score, 100.0)), 2)
 
     @classmethod
@@ -77,9 +92,10 @@ class HistoricalCandidateRankerService:
 
         ranked.sort(key=lambda item: (
             item.get("candidate_score", 0.0),
+            item.get("spot_ready_time", item.get("ready_time")) is not None,
+            item.get("spot_ready_time", item.get("ready_time")) or "99:99",
             item.get("relative_strength", 0.0),
-            item.get("confirmation_time") is not None,
-            item.get("confirmation_time") or "99:99",
+            item.get("average_daily_money", 0.0),
         ), reverse=True)
 
         for rank, item in enumerate(ranked, start=1):
