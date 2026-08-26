@@ -7,6 +7,7 @@ from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.history_candle_service import HistoryCandleService
 from services.morning_radar_service import MorningRadarService
 from services.morning_replay_service import MorningReplayService
+from services.spot_universe_service import SpotUniverseService
 
 
 class HistoricalUniverseReplayService:
@@ -20,8 +21,9 @@ class HistoricalUniverseReplayService:
     RS_LOOKBACK_DAYS = 3
     RS_TICKERS = ("IMOEX2", "IRUS2")
 
-    def __init__(self, mapping_service=None, history_service=None, replay_service=None, radar_helper=None):
+    def __init__(self, mapping_service=None, history_service=None, replay_service=None, radar_helper=None, spot_universe_service=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
+        self.spot_universe_service = spot_universe_service or SpotUniverseService()
         self.history_service = history_service or HistoryCandleService()
         self.replay_service = replay_service or MorningReplayService(history_service=self.history_service)
         self.radar_helper = radar_helper or MorningRadarService()
@@ -48,31 +50,25 @@ class HistoricalUniverseReplayService:
         expiry = cls._parse_expiry(expiry)
         return expiry is not None and (expiry - trading_date).days > cls.MIN_DAYS_TO_EXPIRY
 
-    @staticmethod
-    def _spot_key(item):
-        return (
-            str(item.get("spot_ticker") or item.get("ticker") or "").strip().upper(),
-            str(item.get("spot_class_code") or item.get("class_code") or item.get("classCode") or "").strip(),
-        )
-
     def load_spot_universe(self):
-        """Return unique SPOT instruments without consulting futures expiry/liquidity."""
-        mappings = self.mapping_service.load()
-        if not isinstance(mappings, list):
+        """Return the independent SPOT universe; futures mapping is not consulted."""
+        spots = self.spot_universe_service.load()
+        if not isinstance(spots, list):
             return []
         result, seen = [], set()
-        for mapping in mappings:
-            if not isinstance(mapping, dict):
+        for spot in spots:
+            if not isinstance(spot, dict):
                 continue
-            ticker, class_code = self._spot_key(mapping)
+            ticker = str(spot.get("spot_ticker") or spot.get("ticker") or "").strip().upper()
+            class_code = str(spot.get("spot_class_code") or spot.get("class_code") or spot.get("classCode") or "").strip()
             if not ticker or not class_code or (ticker, class_code) in seen:
                 continue
             seen.add((ticker, class_code))
             result.append({
                 "spot_ticker": ticker,
                 "spot_class_code": class_code,
-                "spot_group": mapping.get("spot_group"),
-                "spot_universe": mapping.get("spot_universe"),
+                "spot_group": spot.get("spot_group"),
+                "spot_universe": spot.get("spot_universe", "DYNAMIC_SPOT"),
             })
         return sorted(result, key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
 
