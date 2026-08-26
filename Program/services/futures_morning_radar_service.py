@@ -35,7 +35,11 @@ class FuturesMorningRadarService:
         self.session_service = session_service or MarketSessionService()
         self.session_money_service = session_money_service or SessionMoneyVolumeService(history_service=self.history_service, session_service=self.session_service)
         self.spot_setup_service = spot_setup_service or SpotFirstPullbackService(self.history_service, self.session_service)
-        self.price_stability_service = MoexPriceStabilityService(api=self.history_service.trade_service.api)
+        stability_api = self.api
+        if stability_api is None:
+            trade_service = getattr(self.history_service, "trade_service", None)
+            stability_api = getattr(trade_service, "api", None)
+        self.price_stability_service = MoexPriceStabilityService(api=stability_api)
         self._mapping_cache = None
         self._mapping_cache_at = 0.0
         self._price_stability_cache = {}
