@@ -348,3 +348,28 @@ Futures confirmation **не является обязательным фильт
 - SPOT eligibility, score, RS, setup и ranking по-прежнему не зависят от futures metrics.
 
 **Аудиторский вывод:** mapping boundary теперь формально закрыта с двух сторон: недостаточно просто иметь trigger — требуется каноническая `READY/CONFIRMED` готовность и согласованное направление; кроме того, технически непригодный контракт, находящийся в пределах трёх дней до экспирации, не может стать reference mapping.
+
+---
+
+## 17. HISTORICAL REPLAY / PRODUCTION PARITY CHECKPOINT
+
+**Дата:** 26.08.2026  
+**Код:** `HistoricalUniverseReplayService 1.0` + обновлённый historical replay runner
+
+Исторический контур приведён к канонической границе SPOT-first:
+
+- historical replay формирует SPOT candidate universe и выполняет historical liquidity, daily direction, RS и M5/H1 setup analysis **до любого futures lookup**;
+- futures expiry и futures historical liquidity больше не могут исключить SPOT-кандидата из historical eligibility;
+- historical `candidate_score` рассчитывается на SPOT evidence тем же принципом, что и production ranking;
+- после SPOT ranking только итоговый shortlist получает optional futures mapping;
+- futures confirmation и forward outcome используются исключительно как вторичные исторические данные для оценки результата сценария;
+- отсутствие futures mapping/confirmation не удаляет уже прошедший SPOT candidate;
+- `readiness_source` фиксируется как `SPOT`, а `readiness_confirmed_by_futures` не влияет на ranking;
+- replay сохраняет `SPOT_FIRST_BEFORE_FUTURES_MAPPING` в историческом результате для аудита;
+- historical replay остаётся `READ ONLY / NO ORDERS`.
+
+**Ключевой parity invariant:**
+
+> **Если два одинаковых SPOT-кандидата имеют одинаковые SPOT evidence, изменение futures ticker, expiry, turnover, price или confirmation не должно менять их historical eligibility или SPOT ranking.**
+
+**Аудиторский вывод:** historical replay больше не использует futures как скрытый первичный фильтр. Futures-контур теперь начинается только после формирования и ranking SPOT shortlist, что соответствует production SPOT-first архитектуре и каноническому паспорту проекта.
