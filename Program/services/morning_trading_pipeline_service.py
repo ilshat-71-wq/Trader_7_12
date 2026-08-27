@@ -15,7 +15,7 @@ from services.spot_signal_contract import directional_rs, readiness_state, trigg
 class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
-    VERSION = "1.5"
+    VERSION = "1.4"
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -73,22 +73,15 @@ class MorningTradingPipelineService:
 
     @staticmethod
     def _directional_rs(candidate):
-        """Use the canonical directional RS rule shared by SPOT analysis."""
         return directional_rs(candidate.get("relative_strength", 0), candidate.get("direction"))
 
     @staticmethod
     def _trigger_present(candidate):
-        """Use the canonical SPOT trigger-presence rule."""
         return trigger_present(candidate.get("entry_trigger", 0))
 
     @staticmethod
     def _trigger_active(candidate):
-        """Use the canonical directional SPOT trigger-activation rule."""
-        return trigger_active(
-            candidate.get("direction"),
-            candidate.get("spot_price", candidate.get("last_close", 0)),
-            candidate.get("entry_trigger", 0),
-        )
+        return trigger_active(candidate.get("direction"), candidate.get("spot_price", candidate.get("last_close", 0)), candidate.get("entry_trigger", 0))
 
     @classmethod
     def _advance_signal_state(cls, candidate):
@@ -98,21 +91,13 @@ class MorningTradingPipelineService:
         direction = str(candidate.get("direction") or "NONE").upper()
         trigger_exists = cls._trigger_present(candidate)
         trigger_is_active = cls._trigger_active(candidate)
-
         candidate["trigger_present"] = trigger_exists
         candidate["trigger_active"] = trigger_is_active
-        candidate["signal_state"] = readiness_state(
-            setup_state,
-            direction,
-            setup,
-            candidate.get("entry_trigger", 0),
-            candidate.get("spot_price", candidate.get("last_close", 0)),
-        )
+        candidate["signal_state"] = readiness_state(setup_state, direction, setup, candidate.get("entry_trigger", 0), candidate.get("spot_price", candidate.get("last_close", 0)))
         candidate["futures_confirmation"] = "NOT_APPLICABLE"
         candidate["futures_confirmation_status"] = "MAPPING_ONLY"
         candidate["futures_confirmation_score"] = 0
         candidate["futures_confirmation_reason"] = "Futures are reference-only; confirmation is not part of the SPOT signal"
-
         if direction not in {"LONG", "SHORT"} or setup not in cls.VALID_SETUPS:
             candidate["signal_state_reason"] = "SPOT setup is not ready"
         elif not trigger_exists:
@@ -132,11 +117,9 @@ class MorningTradingPipelineService:
         if session not in {"MORNING", "MAIN", "EVENING"}:
             self._last_scan_diagnostics = {"session": session, "radar_results": 0, "candidates": 0, "selected": 0, "ready": 0, "confirmed": 0, "watch": 0, "wait": 0}
             return []
-
         radar_results = self.radar_service.scan(mappings=mappings)
         candidates = self.candidate_service.rank(radar_results, confirmations=confirmations, limit=None)
         profile = self.SESSION_PROFILES.get(session, self.SESSION_PROFILES["MAIN"])
-
         for candidate in candidates:
             candidate["market_session"] = session
             candidate["market_session_label"] = session_info.get("label", session)
@@ -150,33 +133,12 @@ class MorningTradingPipelineService:
             candidate["setup_state"] = self._setup_state(candidate)
             candidate["selection_role"] = "TOP_WATCHLIST"
             self._advance_signal_state(candidate)
-
-        candidates.sort(key=lambda item: (
-            item.get("opportunity_score", 0),
-            item.get("candidate_score", 0),
-            item.get("spot_session_activity_ratio", 0),
-            item.get("spot_money_per_minute", 0),
-            item.get("spot_money_volume", 0),
-            self._directional_rs(item),
-            item.get("setup_score", 0),
-            item.get("spot_ticker", ""),
-        ), reverse=True)
-
+        candidates.sort(key=lambda item: (item.get("opportunity_score", 0), item.get("candidate_score", 0), item.get("spot_session_activity_ratio", 0), item.get("spot_money_per_minute", 0), item.get("spot_money_volume", 0), self._directional_rs(item), item.get("setup_score", 0), item.get("spot_ticker", "")), reverse=True)
         selected = candidates[:max(0, int(limit or 0))]
         for rank, candidate in enumerate(selected, start=1):
             candidate["pipeline_version"] = self.VERSION
             candidate["rank"] = rank
-
-        self._last_scan_diagnostics = {
-            "session": session,
-            "radar_results": len(radar_results),
-            "candidates": len(candidates),
-            "selected": len(selected),
-            "ready": sum(1 for item in candidates if item.get("signal_state") == "READY"),
-            "confirmed": sum(1 for item in candidates if item.get("signal_state") == "CONFIRMED"),
-            "watch": sum(1 for item in candidates if self._setup_state(item) == "WATCH"),
-            "wait": sum(1 for item in candidates if self._setup_state(item) == "WAIT"),
-        }
+        self._last_scan_diagnostics = {"session": session, "radar_results": len(radar_results), "candidates": len(candidates), "selected": len(selected), "ready": sum(1 for item in candidates if item.get("signal_state") == "READY"), "confirmed": sum(1 for item in candidates if item.get("signal_state") == "CONFIRMED"), "watch": sum(1 for item in candidates if self._setup_state(item) == "WATCH"), "wait": sum(1 for item in candidates if self._setup_state(item) == "WAIT")}
         if selected:
             selected[0]["scan_diagnostics"] = dict(self._last_scan_diagnostics)
         return selected
@@ -191,11 +153,7 @@ class MorningTradingPipelineService:
         print(f"{'RANK':<6}{'SPOT':<12}{'DIR':<8}{'SIGNAL':<12}{'SETUP':<17}{'TRIGGER':>12}")
         print("-" * 128)
         for item in results:
-            print(
-                f"{item.get('rank', '-'): <6}{item.get('spot_ticker', '-'): <12}{item.get('direction', '-'): <8}"
-                f"{item.get('signal_state', 'WAIT'): <12}{str(item.get('setup', '-')):<17}"
-                f"{float(item.get('entry_trigger', 0) or 0):>12.4f}"
-            )
+            print(f"{item.get('rank', '-'): <6}{item.get('spot_ticker', '-'): <12}{item.get('direction', '-'): <8}{item.get('signal_state', 'WAIT'): <12}{str(item.get('setup', '-')):<17}{float(item.get('entry_trigger', 0) or 0):>12.4f}")
         if results:
             first = results[0]
             diagnostics = first.get("scan_diagnostics")
@@ -204,16 +162,7 @@ class MorningTradingPipelineService:
             print(f"TIME: {first.get('market_date', '-')} {first.get('market_time', '-')} MSK")
             print(f"STRATEGY: {first.get('session_strategy', '-')}")
             if diagnostics:
-                print(
-                    "DIAGNOSTICS: "
-                    f"RADAR={diagnostics.get('radar_results', 0)} "
-                    f"CANDIDATES={diagnostics.get('candidates', 0)} "
-                    f"SELECTED={diagnostics.get('selected', 0)} "
-                    f"READY={diagnostics.get('ready', 0)} "
-                    f"CONFIRMED={diagnostics.get('confirmed', 0)} "
-                    f"WATCH={diagnostics.get('watch', 0)} "
-                    f"WAIT={diagnostics.get('wait', 0)}"
-                )
+                print("DIAGNOSTICS: " + f"RADAR={diagnostics.get('radar_results', 0)} CANDIDATES={diagnostics.get('candidates', 0)} SELECTED={diagnostics.get('selected', 0)} READY={diagnostics.get('ready', 0)} CONFIRMED={diagnostics.get('confirmed', 0)} WATCH={diagnostics.get('watch', 0)} WAIT={diagnostics.get('wait', 0)}")
         else:
             print("NO WATCHLIST CANDIDATES")
         print()
