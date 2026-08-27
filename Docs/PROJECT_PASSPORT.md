@@ -290,3 +290,49 @@ Futures остаётся `MAPPING ONLY`.
 
 **Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`  
 **Единственная рабочая ветка:** `main`
+
+---
+
+## 15. CURRENT CHECKPOINT — HISTORICAL TRIGGER ACTIVATION PARITY
+
+**Дата:** 27.08.2026  
+**Services:** `HistoricalUniverseReplayService 1.1`, `MorningReplayService 0.5`
+
+Исторический replay теперь использует тот же принцип trigger activation, что и production pipeline.
+
+### Изменение
+
+Ранее historical `_first_ready()` считал любой `READY/CONFIRMED` checkpoint с положительным `entry_trigger` первым ready-событием, даже если историческая SPOT цена ещё не достигла trigger.
+
+Теперь replay хранит `spot_price` на каждом checkpoint и разрешает исторический `ready_time` только при directional activation:
+
+```text
+LONG  → spot_price >= entry_trigger
+SHORT → spot_price <= entry_trigger
+```
+
+Добавлены поля historical checkpoint:
+
+- `spot_price`;
+- `trigger_active` на уровне итогового historical candidate.
+
+### Regression coverage
+
+`Program/test_historical_universe_replay_service.py` дополнен проверками:
+
+- LONG active trigger;
+- LONG unreached trigger;
+- SHORT active trigger;
+- SHORT unreached trigger;
+- первый `READY` выбирается только после фактической activation;
+- если весь replay имеет неактивный trigger, `ready_time` не создаётся.
+
+### Инвариант parity
+
+> **Production и historical replay не могут считать один и тот же SPOT trigger активным по разным правилам.**
+
+Цепочка теперь едина:
+
+`SPOT PRICE → TRIGGER LEVEL → DIRECTIONAL ACTIVATION → READY → FUTURES MAPPING`
+
+Futures по-прежнему не участвует в определении исторической SPOT readiness.
