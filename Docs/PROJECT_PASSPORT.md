@@ -209,6 +209,14 @@ Historical trigger activation использует ту же directional мод�
 
 Historical replay сохраняет canonical lifecycle evidence, включая `signal_state_reason`, `trigger_crossed`, `trigger_invalidated` и stability fields. Compatibility helper `_spot_trigger_active()` остаётся только projection на canonical contract.
 
+### Historical anti-churn parity — 27.08.2026
+
+Historical replay теперь использует тот же двухнаблюдательный stability gate, что и live pipeline: `SIGNAL_STABILITY_OBSERVATIONS = 2`.
+
+Первое последовательное активное SPOT observation остаётся `ARMED`; второе переводит lifecycle в `READY`. Потеря trigger сбрасывает `stability_observations`. Обычный откат после `READY` не откатывает lifecycle назад.
+
+Таким образом одинаковая последовательность SPOT observations имеет одинаковую readiness boundary в live и historical слоях. `trigger_crossed`, `trigger_active`, stability counter, re-arm и terminal invalidation остаются раздельными canonical evidence.
+
 ---
 
 ## 12. TEST ARCHITECTURE
@@ -225,11 +233,17 @@ Quality parity regression дополнительно проверяет повт
 
 ### Anti-churn stability regression — 27.08.2026
 
-Live pipeline теперь требует **2 последовательных наблюдения с активным directional trigger** для перехода в `READY`.
+Live pipeline требует **2 последовательных наблюдения с активным directional trigger** для перехода в `READY`.
 
 Первое активное наблюдение остаётся `ARMED`; второе последовательное активное наблюдение переводит lifecycle в `READY`. Если trigger не активен, счётчик сбрасывается.
 
 Стабильность не меняет ranking, candidate score, RS, setup detection или futures mapping boundary. Это исключительно lifecycle anti-noise gate.
+
+### Historical/live stability parity regression — 27.08.2026
+
+Historical replay теперь тестирует ту же границу `ARMED → READY` по второму последовательному активному observation, reset counter при потере trigger и сохранение READY после transient trigger loss.
+
+Это закрывает parity-gap между live stateful scan и historical checkpoint replay на уровне lifecycle stability.
 
 ---
 
@@ -287,31 +301,39 @@ Futures metrics исключены из SPOT score/ranking.
 
 27.08.2026 live pipeline получил двухнаблюдательный stability gate. Единичный активный trigger больше не переводит новый setup непосредственно в READY; требуется второе последовательное активное наблюдение. Existing READY lifecycle не откатывается из-за временного шумового наблюдения.
 
+### Historical anti-churn parity
+
+27.08.2026 historical replay получил тот же двухнаблюдательный stability gate и regression coverage для `ARMED → READY`, counter reset и сохранения READY после transient trigger loss.
+
 ---
 
-## 14. CURRENT CHECKPOINT — ANTI-CHURN / STABILITY HARDENING
+## 14. CURRENT CHECKPOINT — HISTORICAL/LIVE STABILITY PARITY
 
 **Дата:** 27.08.2026  
-**Commit:** `723cfa9` + `ed17a5a`.
+**Live baseline:** `6c960f7`  
+**Parity implementation:** historical stability gate  
 
 ### Что сделано
 
-1. `MorningTradingPipelineService.SIGNAL_STABILITY_OBSERVATIONS` повышен с `1` до `2`.
-2. Первый активный trigger observation остаётся `ARMED`.
-3. Второе последовательное активное observation переводит setup в `READY`.
-4. Потеря trigger сбрасывает consecutive-active counter.
-5. Existing `READY` lifecycle защищён от обратного перехода из-за обычного price noise.
-6. Добавлена regression coverage для LONG/SHORT двухнаблюдательной активации.
-7. Добавлен anti-churn regression для сохранения READY после transient observations.
-8. SPOT ranking, quality и futures mapping semantics не изменены.
-9. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
-10. Публичный pipeline version остаётся `1.4`.
+1. `HistoricalUniverseReplayService.SIGNAL_STABILITY_OBSERVATIONS` установлен в `2`, синхронно с live pipeline.
+2. Historical `_canonical_lifecycle()` теперь ведёт реальный `consecutive_active` counter по последовательности checkpoints.
+3. Первое активное observation остаётся `ARMED`, второе последовательное активное observation даёт `READY`.
+4. Потеря trigger сбрасывает historical stability counter.
+5. `trigger_crossed` остаётся edge-aware и не смешивается со stability.
+6. `READY` сохраняется при transient trigger loss благодаря canonical monotonic lifecycle.
+7. `new_setup=True` явно отделяет новый lifecycle от предыдущего.
+8. Historical readiness по-прежнему вычисляется только через canonical `lifecycle_state()`.
+9. Futures не участвуют в lifecycle parity.
+10. Добавлена regression matrix для historical anti-churn parity.
+11. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
 
 ### Следующий обязательный уровень
 
-**End-to-end live ↔ historical parity audit.**
+**Ranking / candidate audit.**
 
-Нужно проверить, что одинаковая последовательность SPOT observations даёт одинаковый lifecycle в live pipeline и historical replay, включая stability counter, trigger crossing, re-arm и invalidation. После этого — ranking audit и финальный release audit.
+Нужно окончательно проверить, что `candidate_score`, `opportunity_score`, directional RS, activity и setup quality не учитывают один и тот же фактор скрыто или дважды; затем закрепить ranking invariants regression-тестами.
+
+После ranking audit остаётся **release audit**: полный offline regression, compile/import audit, futures mapping boundary, event-risk gate, clean-main verification и финальная документационная сверка.
 
 ---
 
@@ -333,11 +355,12 @@ Futures metrics исключены из SPOT score/ranking.
 
 ## 16. PROJECT COMPLETION ROADMAP
 
-Проект уже прошёл основную архитектурную фазу. До production-ready состояния остаются три инженерных блока:
+Проект уже прошёл основную архитектурную фазу. До production-ready состояния остаются два инженерных блока:
 
-1. **End-to-end parity** — финальная проверка live → historical на одинаковых входах без расхождений.
-2. **Ranking / candidate audit** — проверка отсутствия двойного учёта quality/RS/activity и финальный SPOT ranking audit.
-3. **Release audit** — полный offline regression, compile, dependency/import audit, futures mapping boundary, event-risk gate, documentation consistency и clean-main verification.
+1. **Ranking / candidate audit** — проверка отсутствия двойного учёта quality/RS/activity и финальный SPOT ranking audit.
+2. **Release audit** — полный offline regression, compile, dependency/import audit, futures mapping boundary, event-risk gate, documentation consistency и clean-main verification.
+
+End-to-end live ↔ historical lifecycle parity по stability/trigger/invalidation закрыт на canonical contract boundary.
 
 После этих блоков отдельный этап «архитектурной переделки» не планируется. Возможны только bug fixes и controlled calibration по фактическим данным.
 
