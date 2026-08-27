@@ -91,7 +91,7 @@ class TestMorningTradingPipelineService:
         assert item["setup_state"] == "WAIT"
         assert item["signal_state"] == "WAIT"
         assert item["selection_role"] == "TOP_WATCHLIST"
-        assert item["pipeline_version"] == "1.3"
+        assert item["pipeline_version"] == "1.4"
         assert item["opportunity_score"] == item["session_rank_score"]
         assert item["setup_score"] == 0.0
         assert item["futures_confirmation"] == "NOT_APPLICABLE"
@@ -186,6 +186,22 @@ class TestMorningTradingPipelineService:
         assert diagnostics["ready"] == 1
         assert diagnostics["confirmed"] == 0
         assert diagnostics["wait"] == 1
+
+    def test_short_directional_rs_tiebreak_prefers_more_negative_rs(self):
+        radars = [
+            self.radar("A1U6", "GAZP", direction="SHORT", rs=-1.0, spot_price=298.0, entry_trigger=299.0),
+            self.radar("B1U6", "ROSN", direction="SHORT", rs=-2.0, spot_price=298.0, entry_trigger=299.0),
+        ]
+        candidates = self.service(radars).scan(limit=2)
+        assert [item["spot_ticker"] for item in candidates] == ["ROSN", "GAZP"]
+
+    def test_long_directional_rs_tiebreak_prefers_more_positive_rs(self):
+        radars = [
+            self.radar("A1U6", "GAZP", direction="LONG", rs=1.0, spot_price=300.0, entry_trigger=299.0),
+            self.radar("B1U6", "ROSN", direction="LONG", rs=2.0, spot_price=300.0, entry_trigger=299.0),
+        ]
+        candidates = self.service(radars).scan(limit=2)
+        assert [item["spot_ticker"] for item in candidates] == ["ROSN", "GAZP"]
 
 
 if __name__ == "__main__":
