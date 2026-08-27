@@ -202,7 +202,7 @@ SHORT → spot_price <= entry_trigger
 
 Historical checkpoint хранит `spot_price` и `trigger_active`.
 
-Canonical lifecycle является network-free и предназначен для общего применения live/historical boundary; дальнейшая задача — заменить оставшиеся локальные historical readiness checks прямым использованием canonical lifecycle.
+Canonical lifecycle является network-free и предназначен для общего применения live/historical boundary; следующая задача — заменить оставшиеся локальные historical readiness checks прямым использованием canonical lifecycle.
 
 ---
 
@@ -217,12 +217,15 @@ Deterministic regression tests не должны зависеть от дейс�
 - trigger crossing;
 - invalid trigger;
 - WAIT/WATCH/ARMED/READY/CONFIRMED lifecycle;
+- WAIT setup не может стать READY только из-за активной цены;
 - stability requirement;
 - invalidation;
 - запрет возврата из INVALIDATED без нового setup;
 - anti-regression READY при шумовом наблюдении;
 - quality aggregation;
 - live/historical trigger parity.
+
+После lifecycle hardening тестовые ожидания pipeline приведены в соответствие с новой семантикой: `WATCH + trigger не достигнут = ARMED`, а `WAIT = WAIT`.
 
 ---
 
@@ -252,12 +255,16 @@ Futures metrics исключены из SPOT score/ranking. Production и histor
 
 27.08.2026 canonical contract расширен до строгой deterministic lifecycle-модели с `WATCH → ARMED → READY → CONFIRMED`, directional crossing, invalidation и explicit new-setup reset. Добавлена regression matrix для этих правил.
 
+### Lifecycle boundary correction
+
+27.08.2026 устранена ошибка, при которой `setup_state=WAIT` мог становиться `READY` только из-за активной цены. Теперь `WAIT` остаётся `WAIT`, а `WATCH` с неактивным trigger корректно отображается как `ARMED`.
+
 ---
 
 ## 14. CURRENT CHECKPOINT — CANONICAL SPOT LIFECYCLE HARDENED
 
 **Дата:** 27.08.2026  
-**Commits:** `fcca362`, `eb2fdee9`.
+**Commits:** `fcca362`, `eb2fdee`, `66ebf82`, `c4b204a`, `df6b60e`, `ae6f6af`.
 
 ### Что сделано
 
@@ -269,6 +276,8 @@ Futures metrics исключены из SPOT score/ranking. Production и histor
 6. Stability requirement остаётся отдельным параметром deterministic contract.
 7. Добавлена прозрачная bounded quality aggregation.
 8. Добавлена regression matrix для state machine, invalidation, crossing и anti-regression.
+9. Исправлена boundary-ошибка `WAIT → READY` при активной цене.
+10. Pipeline regression приведён в соответствие с canonical состояниями `WAIT / WATCH / ARMED / READY / CONFIRMED`.
 
 ### Архитектурный результат
 
