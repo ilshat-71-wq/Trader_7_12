@@ -68,6 +68,21 @@ class SetupEngineTests(unittest.TestCase):
         self.assertIn(result["setup"], {"PULLBACK", "BREAKOUT", "REBOUND", "NONE"})
         self.assertEqual(result["candle_count"], 4)
         self.assertEqual(len(result["candidates"]), 4)
+        self.assertIn("setup_quality_score", result)
+        self.assertIn("quality_components", result)
+        self.assertIn("setup_quality_reasons", result)
+
+    def test_quality_does_not_change_setup_state(self):
+        candles = [
+            candle(100.0, 99.0, 99.5),
+            candle(100.2, 99.2, 99.7),
+            candle(100.1, 99.1, 99.6),
+        ]
+        result = SetupEngine._pullback(candles, "LONG")
+        enriched = SetupEngine._with_quality(result, candles)
+        self.assertEqual(enriched["setup_state"], result["setup_state"])
+        self.assertGreaterEqual(enriched["setup_quality_score"], 0.0)
+        self.assertLessEqual(enriched["setup_quality_score"], 100.0)
 
     def test_invalid_direction(self):
         with self.assertRaises(ValueError):
