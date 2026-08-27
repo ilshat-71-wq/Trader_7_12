@@ -46,14 +46,17 @@ class TestMorningTradingPipelineService:
         assert item["setup_state"] == "WAIT" and item["signal_state"] == "WAIT" and item["selection_role"] == "TOP_WATCHLIST"
         assert item["pipeline_version"] == "1.4" and item["opportunity_score"] == item["session_rank_score"] and item["setup_score"] == 0.0
         assert item["futures_confirmation"] == "NOT_APPLICABLE" and item["futures_confirmation_status"] == "MAPPING_ONLY" and item["rank"] == 1
+        assert item["futures_ticker"] == "" and item["futures_selection_reason"] == "WAITING_FOR_CANONICAL_SPOT_READINESS"
 
     def test_watch_with_active_long_trigger_requires_two_observations(self):
         service = self.service([self.radar(setup_state="WATCH", direction="LONG", spot_price=300.0, entry_trigger=299.0)])
         first = service.scan(limit=3)[0]
         second = service.scan(limit=3)[0]
         assert first["trigger_active"] is True and first["signal_state"] == "ARMED"
+        assert first["futures_ticker"] == "" and first["futures_selection_reason"] == "WAITING_FOR_CANONICAL_SPOT_READINESS"
         assert second["trigger_active"] is True and second["signal_state"] == "READY"
         assert second["stability_observations"] == 2 and second["stability_required"] == 2
+        assert second["futures_ticker"] == "SRU6"
 
     def test_watch_with_unreached_long_trigger_is_armed(self):
         item = self.service([self.radar(setup_state="WATCH", direction="LONG", spot_price=298.5, entry_trigger=299.0)]).scan(limit=3)[0]
@@ -69,18 +72,22 @@ class TestMorningTradingPipelineService:
         first = service.scan(limit=3)[0]
         second = service.scan(limit=3)[0]
         assert first["trigger_active"] is True and first["signal_state"] == "ARMED"
+        assert first["futures_ticker"] == ""
         assert second["trigger_active"] is True and second["signal_state"] == "READY"
+        assert second["futures_ticker"] == "SRU6"
 
     def test_ready_candidate_remains_ready(self):
         service = self.service([self.radar(setup_state="READY")])
         first = service.scan(limit=3)[0]
         second = service.scan(limit=3)[0]
         assert first["setup_state"] == "READY" and first["signal_state"] == "ARMED"
-        assert second["signal_state"] == "READY" and second["setup_score"] == 70.0
+        assert first["futures_ticker"] == "" and first["futures_selection_reason"] == "WAITING_FOR_CANONICAL_SPOT_READINESS"
+        assert second["signal_state"] == "READY" and second["setup_score"] == 70.0 and second["futures_ticker"] == "SRU6"
 
-    def test_confirmed_spot_setup_becomes_confirmed_without_futures(self):
+    def test_confirmed_spot_setup_becomes_confirmed_without_futures_confirmation(self):
         item = self.service([self.radar(setup_state="CONFIRMED")]).scan(limit=3)[0]
         assert item["setup_state"] == "CONFIRMED" and item["signal_state"] == "CONFIRMED" and item["futures_confirmation"] == "NOT_APPLICABLE"
+        assert item["futures_ticker"] == "SRU6"
 
     def test_active_trigger_does_not_churn_after_ready_on_price_retreat(self):
         service = self.service([self.radar(setup_state="WATCH", spot_price=300.0, entry_trigger=299.0)])
@@ -88,6 +95,7 @@ class TestMorningTradingPipelineService:
         assert service.scan(limit=3)[0]["signal_state"] == "READY"
         item = service.scan(limit=3)[0]
         assert item["trigger_active"] is True and item["signal_state"] == "READY"
+        assert item["futures_ticker"] == "SRU6"
 
     def test_top_limit_is_three(self):
         radars = [self.radar("A1U6", "SBER", score=90, spot_session_activity_ratio=3.0), self.radar("B1U6", "LKOH", score=85, spot_session_activity_ratio=2.0), self.radar("C1U6", "GAZP", score=80, spot_session_activity_ratio=1.5), self.radar("D1U6", "YDEX", score=75, spot_session_activity_ratio=1.0)]
@@ -110,7 +118,7 @@ class TestMorningTradingPipelineService:
         candidates = self.service([self.radar(setup_state="WAIT"), self.radar("B1U6", "LKOH", setup_state="READY")]).scan(limit=2)
         diagnostics = candidates[0]["scan_diagnostics"]
         assert diagnostics["radar_results"] == 2 and diagnostics["candidates"] == 2 and diagnostics["selected"] == 2
-        assert diagnostics["ready"] == 0 and diagnostics["confirmed"] == 0 and diagnostics["wait"] == 1
+        assert diagnostics["ready"] == 1 and diagnostics["confirmed"] == 0 and diagnostics["wait"] == 1
 
     def test_short_directional_rs_tiebreak_prefers_more_negative_rs(self):
         radars = [self.radar("A1U6", "GAZP", direction="SHORT", rs=-1.0, spot_price=298.0, entry_trigger=299.0), self.radar("B1U6", "ROSN", direction="SHORT", rs=-2.0, spot_price=298.0, entry_trigger=299.0)]
