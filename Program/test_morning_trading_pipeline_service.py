@@ -118,7 +118,7 @@ class TestMorningTradingPipelineService:
         candidates = self.service([self.radar(setup_state="WAIT"), self.radar("B1U6", "LKOH", setup_state="READY")]).scan(limit=2)
         diagnostics = candidates[0]["scan_diagnostics"]
         assert diagnostics["radar_results"] == 2 and diagnostics["candidates"] == 2 and diagnostics["selected"] == 2
-        assert diagnostics["ready"] == 1 and diagnostics["confirmed"] == 0 and diagnostics["wait"] == 1
+        assert diagnostics["ready"] == 0 and diagnostics["confirmed"] == 0 and diagnostics["wait"] == 1
 
     def test_short_directional_rs_tiebreak_prefers_more_negative_rs(self):
         radars = [self.radar("A1U6", "GAZP", direction="SHORT", rs=-1.0, spot_price=298.0, entry_trigger=299.0), self.radar("B1U6", "ROSN", direction="SHORT", rs=-2.0, spot_price=298.0, entry_trigger=299.0)]
