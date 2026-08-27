@@ -14,7 +14,7 @@ from services.market_session_service import MarketSessionService
 class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
-    VERSION = "1.3"
+    VERSION = "1.4"
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -31,8 +31,7 @@ class MorningTradingPipelineService:
             if not api.authorize():
                 raise RuntimeError("BCS API authorization failed")
         self.radar_service = radar_service or TwoPhaseFuturesMorningRadarService(api=api)
-        # Kept only for backwards-compatible construction. It is deliberately
-        # not used: futures are mapping-only in the canonical architecture.
+        # Kept for backwards-compatible construction. Futures are mapping-only.
         self.confirmation_service = confirmation_service
         self.candidate_service = candidate_service or FuturesTradeCandidateService()
         self._last_scan_diagnostics = {}
@@ -75,6 +74,20 @@ class MorningTradingPipelineService:
         return state if state in MorningTradingPipelineService.VALID_STATES else "WAIT"
 
     @staticmethod
+    def _directional_rs(candidate):
+        """Normalize RS so a larger value always means more supportive of direction."""
+        try:
+            rs = float(candidate.get("relative_strength", 0) or 0)
+        except (TypeError, ValueError):
+            rs = 0.0
+        direction = str(candidate.get("direction") or "").upper()
+        if direction == "LONG":
+            return rs
+        if direction == "SHORT":
+            return -rs
+        return 0.0
+
+    @staticmethod
     def _trigger_present(candidate):
         """Return whether a valid SPOT trigger level exists."""
         try:
@@ -85,11 +98,7 @@ class MorningTradingPipelineService:
 
     @staticmethod
     def _trigger_active(candidate):
-        """Return whether current SPOT price has actually reached the trigger.
-
-        A trigger level being present is not the same as the trigger firing.
-        LONG activates at/above the trigger; SHORT activates at/below it.
-        """
+        """Return whether current SPOT price has actually reached the trigger."""
         try:
             trigger = float(candidate.get("entry_trigger", 0) or 0)
             price = float(candidate.get("spot_price", candidate.get("last_close", 0)) or 0)
@@ -108,13 +117,7 @@ class MorningTradingPipelineService:
 
     @classmethod
     def _advance_signal_state(cls, candidate):
-        """Derive readiness exclusively from SPOT setup and actual trigger activation.
-
-        A trigger level can be armed without being fired. READY is therefore
-        assigned only when the SPOT price has actually reached the directional
-        trigger. CONFIRMED additionally requires the SPOT setup to be confirmed.
-        No futures request is made here.
-        """
+        """Derive readiness exclusively from SPOT setup and actual trigger activation."""
         setup_state = cls._setup_state(candidate)
         setup = str(candidate.get("setup") or "NONE").upper()
         direction = str(candidate.get("direction") or "NONE").upper()
@@ -171,12 +174,18 @@ class MorningTradingPipelineService:
             candidate["selection_role"] = "TOP_WATCHLIST"
             self._advance_signal_state(candidate)
 
+        # Keep the ranking contract deterministic: opportunity/activity remain the
+        # primary order; directional RS is the explicit tie-break, so SHORT
+        # candidates with more negative RS outrank less-negative SHORT candidates.
         candidates.sort(key=lambda item: (
             item.get("opportunity_score", 0),
             item.get("candidate_score", 0),
             item.get("spot_session_activity_ratio", 0),
-            item.get("relative_strength", 0),
+            item.get("spot_money_per_minute", 0),
             item.get("spot_money_volume", 0),
+            self._directional_rs(item),
+            item.get("setup_score", 0),
+            item.get("spot_ticker", ""),
         ), reverse=True)
 
         selected = candidates[:max(0, int(limit or 0))]
