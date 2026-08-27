@@ -2,167 +2,89 @@
 
 **Дата актуализации:** 27.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Главная и единственная рабочая ветка:** `main`
+**Рабочая ветка:** `main`
 
 ---
 
-## 1. ГЛАВНАЯ ЦЕЛЬ
+## 1. ЦЕЛЬ ПРОЕКТА
 
-Trader_7_12 Pro — аналитический scanner/assistant для самостоятельной интрадей-торговли фьючерсами Московской биржи.
-
-Сканер **не сканирует фьючерсный рынок как источник идеи**. Он ищет 2–3 наиболее интересных **базовых актива (SPOT)**, в которых сегодня есть деньги, активность, движение и понятная сила/слабость.
+Trader_7_12 Pro — read-only аналитический scanner/assistant для самостоятельной intraday-торговли фьючерсами Московской биржи.
 
 Канонический принцип:
 
-> **Сканер находит ГДЕ смотреть. Пользователь самостоятельно выбирает фьючерс, график и точку входа.**
+> **Сканер находит ГДЕ смотреть. Пользователь самостоятельно выбирает фьючерс, график, вход и риск.**
 
-Приложение не исполняет сделки и не заменяет решение пользователя.
+Исполнение ордеров, SL/TP и position sizing отсутствуют.
 
 ---
 
-## 2. КАНОНИЧЕСКАЯ АРХИТЕКТУРА
+## 2. КАНОНИЧЕСКАЯ SPOT-FIRST АРХИТЕКТУРА
 
 ```text
 SPOT
-  ↓
-SPOT MONEY / ACTIVITY
-  ↓
-SPOT DIRECTION / DAILY TREND
-  ↓
-SPOT RELATIVE STRENGTH / WEAKNESS vs IMOEX2 / IRUS2
-  ↓
-SPOT H1 STRUCTURE + M5 SETUP
-  ↓
-SETUP STATE / TRIGGER / READINESS
-  ↓
-TOP 2–3 SPOT OPPORTUNITY WATCHLIST
-  ↓
-USER SELECTS THE FUTURES CONTRACT
+ ↓
+MONEY / ACTIVITY
+ ↓
+DIRECTION / DAILY TREND
+ ↓
+RS vs IMOEX2 / IRUS2
+ ↓
+H1 STRUCTURE + M5 SETUP
+ ↓
+TRIGGER LEVEL
+ ↓
+TRIGGER ACTIVE
+ ↓
+READY / CONFIRMED
+ ↓
+TOP 2–3 SPOT WATCHLIST
+ ↓
+FUTURES MAPPING ONLY
 ```
 
-**Ключевое правило:** данные, ликвидность, движение и подтверждение фьючерса **не участвуют** в eligibility, direction, RS, setup или ranking базового актива.
-
-Фьючерсный mapping может существовать только как справочная связь `BASE ASSET → соответствующий контракт`, чтобы пользователь понимал, чем потенциально торговать.
+Фьючерс не определяет direction, RS, eligibility, setup, trigger, readiness или ranking.
 
 ---
 
-## 3. ЧТО ИЩЕМ
+## 3. SPOT MONEY / ACTIVITY
 
-Кандидат должен иметь как можно больше следующих признаков:
+Основная метрика — `price × volume`.
 
-1. `price × volume` / money;
-2. необычную текущую активность относительно собственной нормы;
-3. достаточную SPOT ликвидность;
-4. полезную волатильность и потенциал;
-5. направленность и дневный контекст;
-6. относительную силу или слабость относительно рынка;
-7. качественную SPOT-структуру;
-8. pullback/rebound или breakout setup;
-9. возможность продолжения движения.
-
-TOP-2/3 — это **watchlist возможностей**, а не список готовых входов. WAIT/WATCH могут оставаться в TOP, если базовый актив проходит обязательные SPOT eligibility-проверки.
-
-Если качественных кандидатов меньше трёх, TOP не заполняется искусственно.
-
----
-
-## 4. UNIVERSE
-
-Общий universe:
-
-`IMOEX stocks + OIL + GOLD + GAS + USDRUB`
-
-Состав IMOEX загружается динамически через MOEX ISS.
-
-Отдельные market drivers OIL/GOLD/GAS/USDRUB анализируются как самостоятельные SPOT-активы и конкурируют с IMOEX-акциями за общий TOP 2–3.
-
-Нельзя заранее резервировать места по группам.
-
----
-
-## 5. SPOT MONEY / ACTIVITY
-
-Каноническая метрика:
-
-`money_volume = price × volume`
-
-Учитываются:
+Используются:
 
 - текущий SPOT money volume;
-- средний оборот завершённых торговых дней;
+- средний оборот завершённых дней;
 - текущий session money volume;
-- money volume в единицу времени;
-- текущая активность относительно ожидаемой активности.
+- money per minute;
+- activity ratio относительно ожидаемой активности к текущему моменту.
 
-Ключевой показатель:
-
-`activity_ratio = current_session_money / expected_money_to_now`
-
-Абсолютный оборот не должен автоматически делать актив лидером: важна аномальность текущей активности относительно собственной нормы.
+Абсолютный оборот сам по себе не делает инструмент лидером: важна активность относительно собственной нормы.
 
 ---
 
-## 6. MARKET BENCHMARK — IMOEX2 / IRUS2
+## 4. MARKET BENCHMARK / RS
 
-Главный benchmark российского рынка — `IMOEX2 / IRUS2`.
+Основной benchmark российского рынка — `IMOEX2 / IRUS2`.
 
-Он используется для market context и Relative Strength.
+`relative_strength = instrument_return - benchmark_return`.
 
-### Сильный SPOT-актив
-
-Для LONG предпочтителен актив, который:
-
-- растёт быстрее рынка при росте рынка;
-- падает медленнее рынка при снижении рынка;
-- сохраняет относительное превосходство после отката.
-
-### Слабый SPOT-актив
-
-Для SHORT предпочтителен актив, который:
-
-- падает быстрее рынка при снижении рынка;
-- растёт хуже рынка при росте рынка;
-- сохраняет относительную слабость после отскока.
-
-Формула:
-
-`relative_strength = instrument_return - benchmark_return`
-
-Положительный RS означает превосходство SPOT над benchmark; отрицательный — относительную слабость.
-
-Канонические сигналы:
-
-- `STRONGER` — RS ≥ 0.20 п.п.;
-- `WEAKER` — RS ≤ -0.20 п.п.;
+- `STRONGER` — RS ≥ +0.20 п.п.;
+- `WEAKER` — RS ≤ −0.20 п.п.;
 - `NEUTRAL` — промежуточная зона;
-- `RS_UNAVAILABLE` — обязательные данные benchmark отсутствуют.
+- `RS_UNAVAILABLE` — обязательные benchmark data отсутствуют.
+
+Direction и RS должны быть согласованы для качественного кандидата:
+
+- LONG + STRONGER;
+- SHORT + WEAKER.
 
 Фиктивный RS запрещён.
 
 ---
 
-## 7. DIRECTION / DAILY TREND
+## 5. SETUP / READINESS
 
-Daily timeframe — базовый контекст.
-
-Предпочтительны 2–3 последовательных дня движения в одном направлении, но это не абсолютный запрет.
-
-Для ranking RS должен согласовываться с направлением:
-
-- `LONG + STRONGER` — плюс;
-- `SHORT + WEAKER` — плюс;
-- `LONG + WEAKER` — штраф;
-- `SHORT + STRONGER` — штраф.
-
-Direction является SPOT-свойством и может определяться в любой момент, когда доступны необходимые SPOT/daily данные; фьючерс не является источником direction.
-
----
-
-## 8. SPOT STRUCTURE / SETUP / READINESS
-
-Основной контекст — H1 SPOT.
-
-Формирование текущего сценария — M5 SPOT.
+Основной контекст — H1 SPOT. Формирование сценария — M5 SPOT.
 
 LONG:
 
@@ -172,284 +94,199 @@ SHORT:
 
 `H1 down → impulse → first rebound → stabilization → continuation`
 
-Рабочая зона retracement ориентировочно 35–75% импульса, с ориентиром около 50%.
-
 Состояния:
 
-- `WAIT` — идея интересна, но setup ещё не сформирован;
-- `WATCH` — setup развивается и требует наблюдения;
-- `READY` — setup сформирован и имеет фактический trigger/readiness;
-- `CONFIRMED` — подтверждение сценария по каноническим SPOT-условиям.
+- `WAIT` — setup ещё не сформирован;
+- `WATCH` — setup развивается;
+- `READY` — setup сформирован и trigger фактически активирован;
+- `CONFIRMED` — подтверждённый SPOT-сценарий.
 
-`READY/CONFIRMED` не являются разрешением на автоматическую сделку. Они описывают степень готовности SPOT-сценария.
-
-**Setup quality и opportunity score — разные измерения.** Высокий opportunity score не означает готовый вход.
+`READY/CONFIRMED` не являются торговой командой.
 
 ---
 
-## 9. RANKING
+## 6. TRIGGER INVARIANT
 
-Итоговый вопрос:
+Ключевой invariant проекта:
+
+> **Наличие trigger level ≠ trigger activation.**
+
+Directional activation:
+
+- LONG → `spot_price >= entry_trigger`;
+- SHORT → `spot_price <= entry_trigger`.
+
+Таким образом, цена, находящаяся до trigger, не может считаться фактически активировавшей сценарий.
+
+---
+
+## 7. RANKING
+
+Итоговый ranking отвечает на вопрос:
 
 > **Где сегодня одновременно есть деньги, активность, движение, сила/слабость и качественный SPOT context?**
 
-Итоговый `opportunity_score` формируется session-aware pipeline из существующего SPOT `candidate_score`, текущей активности и направленного движения.
+`candidate_score` является основным ranking score. Setup quality выводится отдельно и не заменяет opportunity score.
 
-Setup quality выводится отдельно и не используется как обязательный финальный gate TOP-2/3.
+Directional RS используется как tie-break:
 
-Приоритеты остаются:
+- LONG → больший RS выше;
+- SHORT → более отрицательный RS выше.
 
-1. current SPOT money/activity;
-2. SPOT strength/weakness vs benchmark;
-3. SPOT liquidity/volume;
-4. volatility/potential;
-5. direction/daily trend;
-6. SPOT setup quality;
-7. data quality/freshness.
+Futures turnover, price, spread, confirmation и expiry не входят в SPOT ranking.
 
-**Фьючерсные trades, futures price movement, futures turnover и futures confirmation не входят в ranking.**
+TOP ограничен тремя кандидатами и не заполняется искусственно.
 
 ---
 
-## 10. FUTURES MAPPING
+## 8. FUTURES MAPPING BOUNDARY
 
-Mapping нужен только для справочной связи выбранного базового актива с торговым инструментом пользователя.
+Futures — только reference mapping выбранного SPOT-актива.
 
-Каноническое правило:
+Mapping разрешён только после прохождения всех SPOT eligibility gates и при одновременном выполнении:
 
-> **Сначала выбирается BASE ASSET. Только после этого пользователь самостоятельно выбирает подходящий фьючерсный контракт.**
+1. `setup_state ∈ {READY, CONFIRMED}`;
+2. `setup_direction == direction`;
+3. trigger существует;
+4. trigger фактически активирован по направлению.
 
-Фьючерсный mapping не должен менять:
+`WAIT`, `WATCH` или `READY` с ещё не достигнутым trigger не могут вызвать futures mapping.
 
-- направление;
-- RS;
-- score;
-- setup;
+Контракты с `days_to_expiry <= 3` исключаются из reference mapping.
+
+---
+
+## 9. EVENT-RISK GATE
+
+`moex_event_risk` остаётся жёстким SPOT eligibility gate.
+
+Сильные money/activity/RS/setup данные не могут обойти event-risk rejection.
+
+---
+
+## 10. HISTORICAL REPLAY
+
+Historical replay остаётся `READ ONLY / NO ORDERS`.
+
+Исторический SPOT candidate формируется и ранжируется до futures lookup. Futures не могут скрыто изменить historical SPOT eligibility или ranking.
+
+Parity invariant:
+
+> Если два SPOT-кандидата имеют одинаковые SPOT evidence, изменение futures ticker, expiry, turnover, price или confirmation не должно менять их SPOT ranking.
+
+---
+
+## 11. TEST ARCHITECTURE
+
+Детерминированные unit regression не должны зависеть от действующего BCS refresh token, сети или live market-data.
+
+Runtime BCS authorization относится только к production/live-data контуру.
+
+Проверяемые области:
+
+- SPOT pipeline;
+- instrument radar;
+- candidate score;
+- directional RS tie-break;
+- event-risk gate;
 - readiness;
-- TOP ranking.
-
-Futures confirmation **не является обязательным фильтром** и не должна превращаться в gate SPOT-сценария.
-
----
-
-## 11. ДВУХФАЗНЫЙ PIPELINE
-
-### FAST SCREEN
-
-Для universe используются дешёвые SPOT-признаки:
-
-- daily trend;
-- average money;
-- current SPOT change/momentum;
-- preliminary activity;
-- preliminary radar score.
-
-### DEEP ANALYSIS
-
-Только лучшие кандидаты получают:
-
-- SPOT RS;
-- H1 structure;
-- M5 pullback/rebound;
-- volatility/potential;
-- setup quality;
-- trigger/readiness;
-- detailed session money/activity.
-
-После этого группы объединяются и выбирается TOP 2–3 watchlist.
+- trigger activation;
+- futures mapping boundary;
+- expiry safety;
+- historical/production parity.
 
 ---
 
-## 12. ВАЛИДИРОВАННЫЙ CHECKPOINT
+## 12. ВАЛИДИРОВАННЫЕ CHECKPOINTS
 
-- Production и historical ranking используют одинаковый directional RS tie-break: для LONG выше положительный RS, для SHORT более отрицательный RS.
-- Futures turnover, futures price и futures confirmation остаются полностью вне SPOT score/ranking.
-- Production candidate не проходит без доступного положительного/отрицательного RS в соответствии с направлением.
-- `moex_event_risk` остаётся жёстким SPOT eligibility gate даже при сильных остальных сигналах.
-- Historical replay остаётся `READ ONLY / NO ORDERS`.
-- Регрессионный набор SPOT-first покрывает независимость от futures, readiness, production/historical directional RS tie-break, отсутствие RS и event-risk gate.
-- Канонический документ проекта — только `Docs/PROJECT_PASSPORT.md`.
-- Рабочая ветка проекта — только `main`.
+### SPOT-first ranking
 
----
+- Futures metrics исключены из SPOT score/ranking.
+- Production candidate проходит через канонический `FuturesTradeCandidateService.build_candidate()` до futures mapping.
+- Directional RS tie-break синхронизирован production/historical.
 
-## 13. ПРОДАКШЕННЫЙ SPOT-RANKING CHECKPOINT
+### Readiness boundary
 
-- `FuturesMorningRadarService` теперь пропускает production radar через канонический `FuturesTradeCandidateService.build_candidate()` до ranking и до futures mapping.
-- Production `candidate_score` является первичным ключом ranking; `setup_quality_score` больше не может самостоятельно поднять слабый SPOT-кандидат выше более сильного opportunity.
-- Production tie-break по RS направлен относительно сделки: LONG → больший RS, SHORT → более отрицательный RS.
-- Futures mapping выполняется только после прохождения SPOT eligibility и наличия рабочего SPOT trigger/readiness.
-- Futures confirmation, turnover, price, spread и expiry не участвуют в SPOT eligibility или score.
-- Добавлены production regression tests для candidate-score ranking и запрета futures attachment до SPOT readiness.
+- Futures mapping выполняется только после SPOT readiness.
+- `WATCH + trigger` не является достаточным условием mapping.
+- Direction mismatch блокирует mapping.
+- Контракты с ≤3 днями до expiry исключаются.
 
----
+### Trigger activation
 
-## 14. FULL CI / AUDIT CHECKPOINT
+27.08.2026 исправлено различие между `trigger level` и `trigger active`:
 
-**Дата:** 26.08.2026  
-**Коммит:** `39ba4b328e449889675242a03558e14383e6ee37`  
-**GitHub Actions:** `SPOT-first validation` — **SUCCESS**
+- LONG активируется при `price >= trigger`;
+- SHORT активируется при `price <= trigger`;
+- `READY` требует активного направленного trigger;
+- UI разделяет trigger level, trigger state и SPOT READY;
+- futures не участвует в trigger decision.
 
-Проверено полным CI:
+### Offline regression isolation
 
-- Python 3.11;
-- `compileall` для `Program/services` и `Program/tests` — SUCCESS;
-- полный `Program/tests` — **14 passed**;
-- исправлена только инфраструктурная причина предыдущего падения CI: runner не устанавливал runtime-зависимость `requests`;
-- в production/historical SPOT ranking логике дополнительных функциональных изменений в рамках этого аудита не потребовалось;
-- `FuturesTradeCandidateService` использует только SPOT evidence для eligibility/score;
-- `FuturesMorningRadarService` выполняет SPOT eligibility до futures mapping;
-- historical ranker использует directional RS tie-break и не использует futures metrics;
-- единственный канонический паспорт проекта сохранён: `Docs/PROJECT_PASSPORT.md`;
-- рабочая ветка остаётся только `main`.
-
-**Аудиторский вывод:** на текущем checkpoint SPOT-first regression suite проходит полностью. Последний CI failure был dependency/configuration failure (`requests` отсутствовал в runner), а не функциональный regression проекта. После добавления `requests` в CI полный набор из 14 тестов прошёл успешно.
+27.08.2026 unit-тесты instrument radar изолированы от BCS authorization: deterministic tests не требуют live refresh token.
 
 ---
 
-## 15. SPOT READINESS / FUTURES MAPPING BOUNDARY CHECKPOINT
-
-**Дата:** 26.08.2026  
-**Коммит с regression coverage:** `33c829789aad0453c5bfe2d8eebd8a0113b8a0b0`  
-**GitHub Actions:** `SPOT-first validation` run #20 — **SUCCESS**
-
-Добавлена production-level regression coverage границы `SPOT → FUTURES MAPPING`:
-
-- `READY` SPOT-кандидат с валидным trigger/readiness действительно может получить справочный futures mapping;
-- `WAIT` SPOT-кандидат не получает futures ticker даже при наличии готового mapping в исходных данных;
-- `moex_event_risk=True` блокирует candidate до futures mapping даже при сильных SPOT money/RS/setup сигналах;
-- тест проверяет не только конечный результат, но и сам факт вызова mapping только после SPOT readiness;
-- futures mapping остаётся reference-only и не меняет candidate eligibility или ranking.
-
-Полный CI после исправления тестового ожидания:
-
-- Python 3.11 — SUCCESS;
-- `compileall` — SUCCESS;
-- полный `Program/tests` — **16 passed**;
-- `SPOT-first validation` — **SUCCESS**.
-
-**Аудиторский вывод:** production pipeline теперь имеет regression coverage не только для запрета преждевременного futures attachment, но и для положительного пути `eligible SPOT + READY + trigger → post-readiness futures mapping`. Архитектурная граница подтверждена в обоих направлениях.
-
----
-
-## 16. STRICT SPOT READINESS / CONTRACT EXPIRY CHECKPOINT
-
-**Дата:** 26.08.2026  
-**Код и regression coverage:** `ae4a5ae8be9971b3a6f33bca9dc171e3cc5b3812` / `e5ca518c43cb0749eac7c5a98f2056460fe3519b`
-
-Усилена граница `SPOT → FUTURES MAPPING` без изменения канонического принципа SPOT-first:
-
-- futures mapping теперь разрешён только для `READY` или `CONFIRMED` SPOT setup;
-- `WATCH + trigger` больше не считается достаточной готовностью для привязки фьючерса;
-- направление setup обязано совпадать с направлением SPOT-кандидата (`setup_direction == direction`);
-- базовый `FuturesMorningRadarService` исключает контракты с `3` и менее календарными днями до экспирации, синхронизируя это правило с двухфазным production pipeline;
-- `days_to_expiry` вычисляется и сохраняется явно для выбранного справочного контракта;
-- добавлены regression tests для строгого readiness gate, несовпадения направления и expiry safety;
-- SPOT eligibility, score, RS, setup и ranking по-прежнему не зависят от futures metrics.
-
-**Аудиторский вывод:** mapping boundary теперь формально закрыта с двух сторон: недостаточно просто иметь trigger — требуется каноническая `READY/CONFIRMED` готовность и согласованное направление; кроме того, технически непригодный контракт, находящийся в пределах трёх дней до экспирации, не может стать reference mapping.
-
----
-
-## 17. HISTORICAL REPLAY / PRODUCTION PARITY CHECKPOINT
-
-**Дата:** 26.08.2026  
-**Код:** `HistoricalUniverseReplayService 1.0` + обновлённый historical replay runner
-
-Исторический контур приведён к канонической границе SPOT-first:
-
-- historical replay формирует SPOT candidate universe и выполняет historical liquidity, daily direction, RS и M5/H1 setup analysis **до любого futures lookup**;
-- futures expiry и futures historical liquidity больше не могут исключить SPOT-кандидата из historical eligibility;
-- historical `candidate_score` рассчитывается на SPOT evidence тем же принципом, что и production ranking;
-- после SPOT ranking только итоговый shortlist получает optional futures mapping;
-- futures confirmation и forward outcome используются исключительно как вторичные исторические данные для оценки результата сценария;
-- отсутствие futures mapping/confirmation не удаляет уже прошедший SPOT candidate;
-- `readiness_source` фиксируется как `SPOT`, а `readiness_confirmed_by_futures` не влияет на ranking;
-- replay сохраняет `SPOT_FIRST_BEFORE_FUTURES_MAPPING` в историческом результате для аудита;
-- historical replay остаётся `READ ONLY / NO ORDERS`.
-
-**Ключевой parity invariant:**
-
-> **Если два одинаковых SPOT-кандидата имеют одинаковые SPOT evidence, изменение futures ticker, expiry, turnover, price или confirmation не должно менять их historical eligibility или SPOT ranking.**
-
-**Аудиторский вывод:** historical replay больше не использует futures как скрытый первичный фильтр. Futures-контур теперь начинается только после формирования и ranking SPOT shortlist, что соответствует production SPOT-first архитектуре и каноническому паспорту проекта.
-
----
-
-## 18. SPOT TRIGGER ACTIVATION / SIGNAL QUALITY CHECKPOINT
+## 13. CURRENT CHECKPOINT — ACTIVE SPOT TRIGGER BEFORE FUTURES MAPPING
 
 **Дата:** 27.08.2026  
-**Код:** `MorningTradingPipelineService 1.3`, `WatchlistTraderWindow 1.3`  
-**Regression coverage:** directional trigger activation tests
+**Service:** `FuturesMorningRadarService 1.3`  
+**Commit:** `e8bdf0a518d36247259bec523f0d6a550fddc41c`
 
-Выполнено важное ужесточение качества SPOT readiness после реального утреннего сканирования 27.08.2026.
+Усилена production boundary между SPOT readiness и futures mapping.
 
-Обнаруженная проблема:
+### Изменение
 
-- наличие `entry_trigger` ошибочно трактовалось как уже активированный trigger;
-- поэтому SHORT-кандидат с текущей ценой **выше** trigger мог отображаться как `TRIGGER АКТИВЕН = ДА` и одновременно как `SPOT READY = ДА`;
-- это создавало ложное ощущение фактически сработавшего сценария.
+Ранее `_spot_ready_for_mapping()` проверял наличие положительного `entry_trigger` и состояние `READY/CONFIRMED`, но не проверял, достигла ли текущая SPOT цена этого уровня.
 
-Исправлено:
+Теперь mapping допускается только при фактической directional activation:
 
-- `trigger_present` означает только наличие валидного уровня trigger;
-- `trigger_active` вычисляется отдельно по направлению:
-  - LONG → `spot_price >= entry_trigger`;
-  - SHORT → `spot_price <= entry_trigger`;
-- `READY` теперь выставляется только при реально активированном направленном SPOT trigger;
-- если setup находится в `WATCH`, но цена ещё не достигла trigger, кандидат остаётся в watchlist, однако `signal_state = WAIT` с явной причиной ожидания trigger;
-- `CONFIRMED` также требует активного направленного trigger и подтверждённого SPOT setup;
-- Futures по-прежнему полностью исключён из этого решения.
+```text
+LONG  → spot_price >= entry_trigger
+SHORT → spot_price <= entry_trigger
+```
 
-UI разделяет теперь три разных понятия:
+Добавлен отдельный pure helper:
 
-1. `ТРИГГЕР УРОВНЯ` — какой уровень должен быть достигнут;
-2. `ТРИГГЕР` — `АКТИВЕН` или `ОЖИДАЕТ`;
-3. `SPOT READY` — фактическая готовность сценария после активации trigger.
+`FuturesMorningRadarService._spot_trigger_active()`
 
-Добавлены regression tests для:
+`_spot_ready_for_mapping()` использует его как обязательный gate.
 
-- LONG с активным trigger;
-- LONG с не достигнутым trigger;
-- SHORT с не достигнутым trigger;
-- SHORT с активным trigger;
-- сохранения CONFIRMED без участия futures;
-- сохранения event-risk / RS / setup eligibility gates;
-- сохранения TOP-3 ranking и diagnostics.
+### Regression coverage
 
-**Новый invariant:**
+`Program/test_futures_morning_radar_service.py` дополнен проверками:
 
-> **Наличие trigger level ≠ trigger activation. READY возникает только после фактического достижения направленного SPOT trigger.**
+- LONG active trigger;
+- LONG unreached trigger;
+- SHORT active trigger;
+- SHORT unreached trigger;
+- `READY + unreached trigger → no futures mapping`;
+- `READY + active trigger → mapping allowed`;
+- проверка отсутствия самого вызова mapping при unreached trigger.
 
-Это делает отображаемую цепочку ближе к реальному торговому сценарию:
+### Инвариант
 
-`DIRECTION → SETUP → TRIGGER LEVEL → TRIGGER ACTIVE → READY → CONFIRMED`
+> **SPOT READY + trigger level без фактической activation не может запустить futures mapping.**
 
-Futures остаётся исключительно `MAPPING ONLY`.
+Это закрывает архитектурную цепочку:
+
+`DIRECTION → SETUP → TRIGGER LEVEL → TRIGGER ACTIVE → READY → FUTURES MAPPING`
+
+Futures остаётся `MAPPING ONLY`.
 
 ---
 
-## 19. OFFLINE REGRESSION ISOLATION CHECKPOINT
+## 14. RELEASE / WORKFLOW RULE
 
-**Дата:** 27.08.2026  
-**Основание:** локальный regression run после checkpoint `11f97dc`.
+После каждого законченного уровня проекта:
 
-При локальном запуске `Program/test_instrument_morning_radar.py` функциональные unit-проверки начали зависеть от внешнего BCS authorization: конструктор `InstrumentMorningRadarService()` создавал `TradeService`, который пытался авторизоваться по refresh token. Локальный запуск показал `invalid_grant`, после чего один из детерминированных тестов падал на сетевой зависимости.
+1. изменения делаются в GitHub `main`;
+2. commit сохраняется в GitHub;
+3. `main` синхронизируется;
+4. `PROJECT_PASSPORT.md` обновляется;
+5. проходят compile/regression checks;
+6. пользователю выдаётся одна команда для локального `git pull` и reinstall/validation при необходимости.
 
-Это не является дефектом торговой логики. Это нарушение изоляции unit-test слоя.
-
-Исправление следующего уровня:
-
-- `Program/test_instrument_morning_radar.py` больше не запускает live-конструктор `InstrumentMorningRadarService` для детерминированных helper-тестов;
-- тест создаёт экземпляр через `__new__` и вручную подставляет только необходимые pure-service dependencies;
-- `RelativeStrengthService` используется напрямую без BCS;
-- benchmark metadata фиксируется локально как `IMOEX2/IRUS2`;
-- live market-data / BCS authorization остаются отдельным runtime-контуром и не являются prerequisite для unit regression.
-
-**Новый тестовый invariant:**
-
-> **Детерминированный unit regression не должен требовать действующего BCS refresh token, сети или внешнего market-data сервиса.**
-
-Текущий checkpoint требует локальной повторной проверки после `git pull`: `compileall`, pipeline regression и `Program/test_instrument_morning_radar.py`. До этой проверки статус полного локального regression набора считается **PENDING VALIDATION**, а не SUCCESS.
-
-Архитектура production SPOT-first при этом не изменяется.
+**Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`  
+**Единственная рабочая ветка:** `main`
