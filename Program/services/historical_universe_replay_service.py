@@ -261,8 +261,11 @@ class HistoricalUniverseReplayService:
                 )
             except (TypeError, ValueError):
                 active_now = False
-            consecutive_active = consecutive_active + 1 if active_now else 0
             new_setup = bool(item.get("new_setup", False))
+            if new_setup:
+                consecutive_active = 1 if active_now else 0
+            else:
+                consecutive_active = consecutive_active + 1 if active_now else 0
             lifecycle = lifecycle_state(
                 setup_state=item.get("setup_state", "WAIT"),
                 direction=item.get("direction"),
