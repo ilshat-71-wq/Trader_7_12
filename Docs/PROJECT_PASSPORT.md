@@ -1,6 +1,6 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 27.08.2026  
+**Дата актуализации:** 28.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main`  
 **Назначение:** read-only SPOT-first opportunity scanner для самостоятельной intraday-торговли фьючерсами Московской биржи.
@@ -240,32 +240,225 @@ Legacy nested tests migrated into the canonical `Program/test_*.py` inventory, s
 
 ---
 
-## 15. CURRENT CHECKPOINT
+## 15. RC UI / RUNTIME CHECKPOINT — 28.08.2026
 
-**Checkpoint:** Full repository deterministic audit / Release Candidate preparation  
-**Дата:** 27.08.2026  
-**Рабочая ветка:** `main`
+### Git / source checkpoint
 
-### Текущий статус
+Подтверждено на локальном iMac:
 
-До cleanup полный repository inventory показывал **163 collected tests**, из них **161 passed / 2 failed / 1 warning**. Два failure были не production regression, а stale historical fixtures, которые противоречили canonical directional trigger boundary. Оба fixture исправлены и перенесены в canonical root inventory.
+```text
+branch: main
+HEAD: c495a93
+origin/main: c495a93
+working tree: clean
+Python compile: OK
+```
 
-После cleanup необходимо локально подтвердить новый полный inventory. Ожидаемый результат — отсутствие `Program/tests`, отсутствие collection warning и полный зелёный repository regression.
+Commit `c495a93` — `Finalize Russian SPOT radar UI for RC`.
 
-### Следующий обязательный уровень
+### Russian SPOT radar UI
 
-**Release Candidate validation:**
+Канонический UI `Program/watchlist_ui.py` содержит русские пользовательские формулировки:
 
-1. `git pull --ff-only`;
-2. compile всего `Program`;
-3. полный `PYTHONPATH=Program python3 -m pytest -q Program`;
-4. убедиться, что legacy `Program/tests` отсутствует;
-5. проверить отсутствие warnings/errors;
-6. если всё зелёное — зафиксировать RC checkpoint и перейти к финальной эксплуатационной проверке launch/UI/data path.
+- `SPOT-РАДАР ВОЗМОЖНОСТЕЙ`;
+- `ОЦЕНКА ВОЗМОЖНОСТИ`;
+- `СИЛА СЦЕНАРИЯ`;
+- `РЕКОМЕНДАЦИЯ`;
+- `ДЕНЬГИ И АКТИВНОСТЬ`;
+- `ОТНОСИТЕЛЬНАЯ СИЛА`;
+- `СЕТАП И ТРИГГЕР`;
+- русские состояния готовности/подтверждения.
+
+Отдельно зафиксировано важное ограничение: `ОЦЕНКА ВОЗМОЖНОСТИ` является детерминированным рейтингом модели, **а не статистической вероятностью исхода**. Нельзя представлять score как доказанную вероятность роста/падения без отдельной статистической валидации.
+
+### SPOT money / activity отображение
+
+UI показывает:
+
+- SPOT цену;
+- средний дневной оборот `₽×V`;
+- текущий session `₽×V`;
+- `₽×V/мин`;
+- изменение цены;
+- RS и RS score;
+- локальные high/low;
+- trigger level и trigger state.
+
+Таким образом, оборот `price × volume` и относительная активность являются частью действующего SPOT radar contract и отображаются пользователю.
 
 ---
 
-## 16. RELEASE / WORKFLOW RULE
+## 16. INSTALLED `.APP` ARCHITECTURE AUDIT — 28.08.2026
+
+Установленный bundle:
+
+```text
+/Users/ilshatmac/Applications/Trader_7_12 Pro.app
+```
+
+Подтверждено:
+
+```text
+CFBundleName:                 Trader_7_12 Pro
+CFBundleShortVersionString:  1.4
+CFBundleVersion:             1.4
+CFBundleIdentifier:          com.trader712.pro
+CFBundleExecutable:          Trader_7_12 Pro
+CFBundleDevelopmentRegion:  ru
+Architecture:                Mach-O 64-bit x86_64
+```
+
+Дата изменения установленного `.app` на момент аудита: `2026-08-27 08:38:23`.
+
+### Критически важная архитектура `.app`
+
+`.app` не содержит отдельную копию Python-проекта. Bundle содержит launcher, который непосредственно обращается к каноническому рабочему каталогу:
+
+```text
+ROOT="/Users/ilshatmac/Documents/Trader_7_12"
+export PYTHONPATH="$ROOT/Program"
+exec /usr/bin/env python3 "$ROOT/Program/main.py"
+```
+
+Следовательно, `.app` и терминальный запуск используют **один и тот же исходный `Program` и один и тот же `Program/main.py`**, при условии запуска на этом iMac.
+
+### BCS credentials path
+
+Launcher использует macOS Keychain:
+
+```text
+macOS Keychain
+ ↓
+Trader_7_12 BCS Refresh Token
+ ↓
+BCS_REFRESH_TOKEN
+ ↓
+Program/main.py
+ ↓
+BCS
+```
+
+Ключ/refresh token не хранится в app bundle, Git repository или `Info.plist`.
+
+Это является каноническим способом передачи BCS credential для `.app`.
+
+### Что доказано и что ещё требует runtime-проверки
+
+**Доказано:**
+
+- `.app` существует;
+- `.app` вызывает launcher;
+- launcher использует `/Users/ilshatmac/Documents/Trader_7_12`;
+- launcher выставляет `PYTHONPATH` на текущий `Program`;
+- launcher запускает текущий `Program/main.py`;
+- launcher извлекает BCS refresh token из macOS Keychain;
+- source Git и `origin/main` совпадали на `c495a93`;
+- `Program` успешно проходит Python compile.
+
+**Отдельно требуется эксплуатационно подтвердить:**
+
+- успешную авторизацию БКС именно при запуске `.app`;
+- успешное получение live market data через `.app`;
+- соответствие фактического результата `.app` терминальному запуску при открытом рынке.
+
+Рынок 27.08.2026 на момент соответствующей проверки уже был закрыт, поэтому отсутствие live scan результата в `.app` в этот момент не является доказательством неисправности.
+
+### Code signing
+
+На момент аудита `codesign -dv --verbose=2` сообщил:
+
+```text
+code object is not signed at all
+```
+
+Это не является функциональным дефектом текущего внутреннего RC и не меняет Python/BCS/data-path архитектуру. Подписание bundle является отдельным release/distribution hardening уровнем.
+
+---
+
+## 17. RC RUNTIME DATA CONTRACT
+
+Канонический runtime data path:
+
+```text
+`.app` / terminal
+ ↓
+Keychain / BCS_REFRESH_TOKEN
+ ↓
+BCS authorization
+ ↓
+BCS instruments / market data
+ ↓
+SPOT universe
+ ↓
+SPOT price + volume
+ ↓
+price × volume / activity
+ ↓
+market benchmark
+ ↓
+RS
+ ↓
+H1 / M5 structure
+ ↓
+setup
+ ↓
+trigger
+ ↓
+stability
+ ↓
+SPOT opportunity score
+ ↓
+TOP SPOT watchlist
+ ↓
+futures mapping only
+```
+
+Runtime логика не должна подменять отсутствующие обязательные market-data фиктивными значениями. В частности, `RS_UNAVAILABLE` должен оставаться недоступным состоянием, а отсутствие trigger/levels должно отображаться как отсутствие уровня, а не как искусственный trigger.
+
+Цель эксплуатации: показывать пользователю прежде всего инструменты, в которых одновременно наблюдаются существенный `price × volume`, повышенная относительно нормы активность, направленное движение и значимое отклонение от benchmark. Такой инструмент является более интересным кандидатом для дальнейшего самостоятельного анализа, но сам radar не утверждает гарантированный исход.
+
+---
+
+## 18. CURRENT RC STATUS
+
+**Статус:** Release Candidate / эксплуатационная валидация продолжается.
+
+### Уже пройдено
+
+- canonical SPOT-first architecture;
+- money/activity layer;
+- directional trend;
+- RS vs market benchmark;
+- H1/M5 setup;
+- trigger semantics;
+- anti-churn stability;
+- readiness/confirmation lifecycle;
+- setup quality;
+- deterministic ranking;
+- event-risk gate;
+- historical replay parity;
+- futures mapping boundary;
+- repository cleanup;
+- deterministic test architecture;
+- Russian RC UI;
+- Git/GitHub synchronization;
+- `.app` launcher architecture audit;
+- Keychain credential architecture audit.
+
+### Осталось для финального эксплуатационного RC sign-off
+
+1. На открытом рынке запустить `.app` и подтвердить успешную авторизацию БКС.
+2. Выполнить live scan через `.app`.
+3. Подтвердить, что получаются реальные данные БКС.
+4. Сверить ключевые поля `.app` с терминальным запуском на том же market snapshot.
+5. Выполнить полный repository regression command после последнего RC commit.
+6. При необходимости отдельно проверить/подготовить code signing для распространяемого macOS bundle.
+
+До прохождения этих пунктов `.app` считается **архитектурно подтверждённым, но runtime live-data path ещё не полностью подписан как финально validated**.
+
+---
+
+## 19. RELEASE / WORKFLOW RULE
 
 После каждого законченного уровня:
 
@@ -276,6 +469,6 @@ Legacy nested tests migrated into the canonical `Program/test_*.py` inventory, s
 5. пользователь делает один `git pull --ff-only`;
 6. reinstall требуется только если изменены app bundle/launcher/icon или другой локально собираемый компонент.
 
-**Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`.
-**Рабочая ветка:** только `main`.
+**Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`.  
+**Рабочая ветка:** только `main`.  
 **Дополнительные ветки:** не создаём.
