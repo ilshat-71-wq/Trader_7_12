@@ -1,6 +1,6 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 26.08.2026  
+**Дата актуализации:** 27.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Главная и единственная рабочая ветка:** `main`
 
@@ -373,3 +373,56 @@ Futures confirmation **не является обязательным фильт
 > **Если два одинаковых SPOT-кандидата имеют одинаковые SPOT evidence, изменение futures ticker, expiry, turnover, price или confirmation не должно менять их historical eligibility или SPOT ranking.**
 
 **Аудиторский вывод:** historical replay больше не использует futures как скрытый первичный фильтр. Futures-контур теперь начинается только после формирования и ranking SPOT shortlist, что соответствует production SPOT-first архитектуре и каноническому паспорту проекта.
+
+---
+
+## 18. SPOT TRIGGER ACTIVATION / SIGNAL QUALITY CHECKPOINT
+
+**Дата:** 27.08.2026  
+**Код:** `MorningTradingPipelineService 1.3`, `WatchlistTraderWindow 1.3`  
+**Regression coverage:** directional trigger activation tests
+
+Выполнено важное ужесточение качества SPOT readiness после реального утреннего сканирования 27.08.2026.
+
+Обнаруженная проблема:
+
+- наличие `entry_trigger` ошибочно трактовалось как уже активированный trigger;
+- поэтому SHORT-кандидат с текущей ценой **выше** trigger мог отображаться как `TRIGGER АКТИВЕН = ДА` и одновременно как `SPOT READY = ДА`;
+- это создавало ложное ощущение фактически сработавшего сценария.
+
+Исправлено:
+
+- `trigger_present` означает только наличие валидного уровня trigger;
+- `trigger_active` вычисляется отдельно по направлению:
+  - LONG → `spot_price >= entry_trigger`;
+  - SHORT → `spot_price <= entry_trigger`;
+- `READY` теперь выставляется только при реально активированном направленном SPOT trigger;
+- если setup находится в `WATCH`, но цена ещё не достигла trigger, кандидат остаётся в watchlist, однако `signal_state = WAIT` с явной причиной ожидания trigger;
+- `CONFIRMED` также требует активного направленного trigger и подтверждённого SPOT setup;
+- Futures по-прежнему полностью исключён из этого решения.
+
+UI разделяет теперь три разных понятия:
+
+1. `ТРИГГЕР УРОВНЯ` — какой уровень должен быть достигнут;
+2. `ТРИГГЕР` — `АКТИВЕН` или `ОЖИДАЕТ`;
+3. `SPOT READY` — фактическая готовность сценария после активации trigger.
+
+Добавлены regression tests для:
+
+- LONG с активным trigger;
+- LONG с не достигнутым trigger;
+- SHORT с не достигнутым trigger;
+- SHORT с активным trigger;
+- сохранения CONFIRMED без участия futures;
+- сохранения event-risk / RS / setup eligibility gates;
+- сохранения TOP-3 ranking и diagnostics.
+
+**Новый invariant:**
+
+> **Наличие trigger level ≠ trigger activation. READY возникает только после фактического достижения направленного SPOT trigger.**
+
+Это делает отображаемую цепочку ближе к реальному торговому сценарию:
+
+`DIRECTION → SETUP → TRIGGER LEVEL → TRIGGER ACTIVE → READY → CONFIRMED`
+
+Futures остаётся исключительно `MAPPING ONLY`.
