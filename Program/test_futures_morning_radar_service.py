@@ -52,12 +52,19 @@ class FakeMoneyService:
 
 
 class FakeSetupService:
-    def __init__(self, state="READY"): self.state = state
+    def __init__(self, state="READY", trigger_active=True):
+        self.state = state
+        self.trigger_active = trigger_active
+
     def analyze(self, ticker, class_code, **kwargs):
         direction = "LONG" if ticker == "SBER" else "SHORT"
+        if self.trigger_active:
+            trigger = 300.0 if direction == "LONG" else 7000.0
+        else:
+            trigger = 301.0 if direction == "LONG" else 6999.0
         return {"setup": "FIRST_PULLBACK" if direction == "LONG" else "FIRST_REBOUND",
                 "setup_direction": direction, "setup_state": self.state, "setup_phase": "SETUP_READY",
-                "setup_quality_score": 70.0, "entry_trigger": 301.0 if direction == "LONG" else 6999.0,
+                "setup_quality_score": 70.0, "entry_trigger": trigger,
                 "previous_high": 301.0, "previous_low": 299.0, "impulse_percent": 1.0,
                 "retracement_percent": 50.0, "retracement_ratio": 0.5, "consolidation_candles": 2,
                 "impulse_high": 302.0, "impulse_low": 298.0}
@@ -77,10 +84,10 @@ def mappings():
     ]
 
 
-def make_service(mapping_list=None, setup_state="READY", errors=None, event_risk=False):
+def make_service(mapping_list=None, setup_state="READY", trigger_active=True, errors=None, event_risk=False):
     service = FuturesMorningRadarService(api=FakeAPI(), mapping_service=FakeMappingService(mapping_list or mappings()),
         radar_service=FakeRadarService(errors), history_service=FakeHistoryService(), session_service=FakeSessionService(),
-        session_money_service=FakeMoneyService(), spot_setup_service=FakeSetupService(setup_state))
+        session_money_service=FakeMoneyService(), spot_setup_service=FakeSetupService(setup_state, trigger_active))
     service.price_stability_service = FakePriceStabilityService(event_risk)
     return service
 
@@ -90,6 +97,40 @@ def test_ready_spot_gets_post_readiness_mapping():
     assert [x["spot_ticker"] for x in result] == ["SBER", "LKOH"]
     assert result[0]["futures_ticker"] == "SRU6"
     assert result[0]["futures_selection_reason"] == "POST_SPOT_READINESS_MAPPING"
+
+
+def test_ready_unreached_trigger_stays_unmapped():
+    result = make_service(trigger_active=False).scan()
+    assert len(result) == 2
+    assert all(x["setup_state"] == "READY" for x in result)
+    assert all(x["futures_ticker"] == "" for x in result)
+    assert all(x["futures_selection_reason"] == "WAITING_FOR_SPOT_READINESS" for x in result)
+
+
+def test_active_trigger_boundary_is_directional():
+    assert FuturesMorningRadarService._spot_trigger_active({"direction": "LONG", "spot_price": 101.0, "entry_trigger": 101.0}) is True
+    assert FuturesMorningRadarService._spot_trigger_active({"direction": "LONG", "spot_price": 100.9, "entry_trigger": 101.0}) is False
+    assert FuturesMorningRadarService._spot_trigger_active({"direction": "SHORT", "spot_price": 99.0, "entry_trigger": 100.0}) is True
+    assert FuturesMorningRadarService._spot_trigger_active({"direction": "SHORT", "spot_price": 100.1, "entry_trigger": 100.0}) is False
+
+
+def test_ready_unreached_trigger_does_not_call_mapping(monkeypatch):
+    service = make_service(trigger_active=False)
+    calls = []
+    monkeypatch.setattr(service, "_select_futures_mapping", lambda spot_mappings: calls.append("mapped") or spot_mappings[0])
+    result = service.scan()
+    assert len(result) == 2
+    assert calls == []
+
+
+def test_active_trigger_allows_mapping_after_spot_readiness(monkeypatch):
+    service = make_service(trigger_active=True)
+    calls = []
+    monkeypatch.setattr(service, "_select_futures_mapping", lambda spot_mappings: calls.append("mapped") or spot_mappings[0])
+    result = service.scan()
+    assert len(result) == 2
+    assert calls == ["mapped", "mapped"]
+    assert all(x["futures_selection_reason"] == "POST_SPOT_READINESS_MAPPING" for x in result)
 
 
 def test_wait_spot_is_ranked_but_not_mapped():
