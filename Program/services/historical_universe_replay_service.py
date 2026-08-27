@@ -13,7 +13,7 @@ from services.spot_universe_service import SpotUniverseService
 class HistoricalUniverseReplayService:
     """Replay the canonical SPOT pipeline; futures are secondary outcome data."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
     DEFAULT_MIN_MONEY = 100_000_000.0
     DEFAULT_AVERAGE_DAYS = 5
     MAX_CONTRACTS_PER_SPOT = 2
@@ -234,9 +234,31 @@ class HistoricalUniverseReplayService:
         return "NONE"
 
     @staticmethod
-    def _first_ready(replay):
+    def _spot_trigger_active(item):
+        """Return True only when the historical SPOT close reached its trigger."""
+        direction = str(item.get("direction") or "").upper()
+        try:
+            trigger = float(item.get("entry_trigger", 0) or 0)
+            price = float(item.get("spot_price", item.get("close", 0)) or 0)
+        except (TypeError, ValueError):
+            return False
+        if trigger <= 0 or price <= 0:
+            return False
+        if direction == "LONG":
+            return price >= trigger
+        if direction == "SHORT":
+            return price <= trigger
+        return False
+
+    @classmethod
+    def _first_ready(cls, replay):
+        """First checkpoint where SPOT is ready AND its directional trigger is active."""
         for item in replay:
-            if str(item.get("setup_state") or "WAIT").upper() in {"READY", "CONFIRMED"} and float(item.get("entry_trigger", 0) or 0) > 0:
+            if (
+                str(item.get("setup_state") or "WAIT").upper() in {"READY", "CONFIRMED"}
+                and float(item.get("entry_trigger", 0) or 0) > 0
+                and cls._spot_trigger_active(item)
+            ):
                 return item
         return None
 
@@ -276,6 +298,8 @@ class HistoricalUniverseReplayService:
                 "ready_time": ready.get("checkpoint") if ready else None, "trade_ready_time": ready.get("checkpoint") if ready else None,
                 "confirmation_time": None, "futures_price": 0.0, "setup": selected.get("setup", "NONE"), "setup_state": selected.get("setup_state", "WAIT"),
                 "entry_trigger": float(selected.get("entry_trigger", 0) or 0), "previous_high": float(selected.get("previous_high", 0) or 0), "previous_low": float(selected.get("previous_low", 0) or 0),
+                "spot_price": float(selected.get("spot_price", selected.get("close", 0)) or 0),
+                "trigger_active": self._spot_trigger_active(selected),
                 "futures_confirmation": {}, "futures_confirmation_timeline": [], "replay": replay,
                 "readiness_source": "SPOT", "readiness_confirmed_by_futures": False,
             })
