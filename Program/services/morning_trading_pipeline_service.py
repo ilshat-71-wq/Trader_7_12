@@ -9,12 +9,13 @@ from api.bcs_api import BCSAPI
 from services.two_phase_futures_morning_radar_service import TwoPhaseFuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
 from services.market_session_service import MarketSessionService
+from services.spot_signal_contract import directional_rs, readiness_state, trigger_active, trigger_present
 
 
 class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
-    VERSION = "1.4"
+    VERSION = "1.5"
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -31,7 +32,6 @@ class MorningTradingPipelineService:
             if not api.authorize():
                 raise RuntimeError("BCS API authorization failed")
         self.radar_service = radar_service or TwoPhaseFuturesMorningRadarService(api=api)
-        # Kept for backwards-compatible construction. Futures are mapping-only.
         self.confirmation_service = confirmation_service
         self.candidate_service = candidate_service or FuturesTradeCandidateService()
         self._last_scan_diagnostics = {}
@@ -39,13 +39,11 @@ class MorningTradingPipelineService:
     @classmethod
     def _session_rank_score(cls, candidate, session):
         profile = cls.SESSION_PROFILES.get(session, cls.SESSION_PROFILES["MAIN"])
-
         def bounded(key):
             try:
                 return max(0.0, min(100.0, float(candidate.get(key, 0) or 0)))
             except (TypeError, ValueError):
                 return 0.0
-
         candidate_score = bounded("candidate_score")
         try:
             activity_ratio = max(0.0, float(candidate.get("spot_session_activity_ratio", 0) or 0))
@@ -75,79 +73,58 @@ class MorningTradingPipelineService:
 
     @staticmethod
     def _directional_rs(candidate):
-        """Normalize RS so a larger value always means more supportive of direction."""
-        try:
-            rs = float(candidate.get("relative_strength", 0) or 0)
-        except (TypeError, ValueError):
-            rs = 0.0
-        direction = str(candidate.get("direction") or "").upper()
-        if direction == "LONG":
-            return rs
-        if direction == "SHORT":
-            return -rs
-        return 0.0
+        """Use the canonical directional RS rule shared by SPOT analysis."""
+        return directional_rs(candidate.get("relative_strength", 0), candidate.get("direction"))
 
     @staticmethod
     def _trigger_present(candidate):
-        """Return whether a valid SPOT trigger level exists."""
-        try:
-            trigger = float(candidate.get("entry_trigger", 0) or 0)
-        except (TypeError, ValueError):
-            return False
-        return trigger > 0
+        """Use the canonical SPOT trigger-presence rule."""
+        return trigger_present(candidate.get("entry_trigger", 0))
 
     @staticmethod
     def _trigger_active(candidate):
-        """Return whether current SPOT price has actually reached the trigger."""
-        try:
-            trigger = float(candidate.get("entry_trigger", 0) or 0)
-            price = float(candidate.get("spot_price", candidate.get("last_close", 0)) or 0)
-        except (TypeError, ValueError):
-            return False
-
-        if trigger <= 0 or price <= 0:
-            return False
-
-        direction = str(candidate.get("direction") or "").upper()
-        if direction == "LONG":
-            return price >= trigger
-        if direction == "SHORT":
-            return price <= trigger
-        return False
+        """Use the canonical directional SPOT trigger-activation rule."""
+        return trigger_active(
+            candidate.get("direction"),
+            candidate.get("spot_price", candidate.get("last_close", 0)),
+            candidate.get("entry_trigger", 0),
+        )
 
     @classmethod
     def _advance_signal_state(cls, candidate):
-        """Derive readiness exclusively from SPOT setup and actual trigger activation."""
+        """Derive readiness from the canonical SPOT signal contract only."""
         setup_state = cls._setup_state(candidate)
         setup = str(candidate.get("setup") or "NONE").upper()
         direction = str(candidate.get("direction") or "NONE").upper()
-        trigger_present = cls._trigger_present(candidate)
-        trigger_active = cls._trigger_active(candidate)
+        trigger_exists = cls._trigger_present(candidate)
+        trigger_is_active = cls._trigger_active(candidate)
 
-        candidate["trigger_present"] = trigger_present
-        candidate["trigger_active"] = trigger_active
-        candidate["signal_state"] = "WAIT"
-        candidate["signal_state_reason"] = "SPOT setup is not ready"
+        candidate["trigger_present"] = trigger_exists
+        candidate["trigger_active"] = trigger_is_active
+        candidate["signal_state"] = readiness_state(
+            setup_state,
+            direction,
+            setup,
+            candidate.get("entry_trigger", 0),
+            candidate.get("spot_price", candidate.get("last_close", 0)),
+        )
         candidate["futures_confirmation"] = "NOT_APPLICABLE"
         candidate["futures_confirmation_status"] = "MAPPING_ONLY"
         candidate["futures_confirmation_score"] = 0
         candidate["futures_confirmation_reason"] = "Futures are reference-only; confirmation is not part of the SPOT signal"
 
         if direction not in {"LONG", "SHORT"} or setup not in cls.VALID_SETUPS:
-            return
-        if not trigger_present:
+            candidate["signal_state_reason"] = "SPOT setup is not ready"
+        elif not trigger_exists:
             candidate["signal_state_reason"] = "SPOT setup has no valid trigger level"
-            return
-        if not trigger_active:
+        elif not trigger_is_active:
             candidate["signal_state_reason"] = "SPOT setup is armed; waiting for the directional trigger"
-            return
-
-        if setup_state == "CONFIRMED":
-            candidate["signal_state"] = "CONFIRMED"
+        elif candidate["signal_state"] == "CONFIRMED":
             candidate["signal_state_reason"] = "SPOT setup and directional trigger are confirmed by SPOT price structure"
-        elif setup_state in {"WATCH", "READY"}:
-            candidate["signal_state"] = "READY"
+        elif candidate["signal_state"] == "READY":
             candidate["signal_state_reason"] = "SPOT setup is armed and the directional trigger is active"
+        else:
+            candidate["signal_state_reason"] = "SPOT setup is not ready"
 
     def scan(self, mappings=None, confirmations=None, limit=3):
         session_info = self.session_service.get_session_info()
@@ -174,9 +151,6 @@ class MorningTradingPipelineService:
             candidate["selection_role"] = "TOP_WATCHLIST"
             self._advance_signal_state(candidate)
 
-        # Keep the ranking contract deterministic: opportunity/activity remain the
-        # primary order; directional RS is the explicit tie-break, so SHORT
-        # candidates with more negative RS outrank less-negative SHORT candidates.
         candidates.sort(key=lambda item: (
             item.get("opportunity_score", 0),
             item.get("candidate_score", 0),
