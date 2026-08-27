@@ -43,6 +43,8 @@ class TestMorningTradingPipelineService:
         spot_session_activity_ratio=2.0,
         setup_state="WAIT",
         rs=0.8,
+        spot_price=300.0,
+        entry_trigger=299.0,
     ):
         return {
             "status": "OK",
@@ -52,7 +54,7 @@ class TestMorningTradingPipelineService:
             "futures_expiry": "2026-09-15",
             "spot_ticker": spot,
             "spot_class_code": "TQBR",
-            "spot_price": 300.0,
+            "spot_price": spot_price,
             "radar_score": score,
             "relative_strength": rs,
             "relative_strength_status": "OK",
@@ -62,7 +64,7 @@ class TestMorningTradingPipelineService:
             "setup_state": setup_state,
             "setup_quality_score": 70.0 if setup_state != "WAIT" else 0.0,
             "setup_phase": "SETUP_READY" if setup_state != "WAIT" else "SETUP_SCAN",
-            "entry_trigger": 299.0,
+            "entry_trigger": entry_trigger,
             "previous_high": 305.0,
             "previous_low": 295.0,
             "spot_money_volume": spot_money_volume,
@@ -89,21 +91,49 @@ class TestMorningTradingPipelineService:
         assert item["setup_state"] == "WAIT"
         assert item["signal_state"] == "WAIT"
         assert item["selection_role"] == "TOP_WATCHLIST"
-        assert item["pipeline_version"] == "1.2"
+        assert item["pipeline_version"] == "1.3"
         assert item["opportunity_score"] == item["session_rank_score"]
         assert item["setup_score"] == 0.0
         assert item["futures_confirmation"] == "NOT_APPLICABLE"
         assert item["futures_confirmation_status"] == "MAPPING_ONLY"
         assert item["rank"] == 1
 
-    def test_watch_with_real_trigger_becomes_ready(self):
-        candidates = self.service([self.radar(setup_state="WATCH")]).scan(limit=3)
-        assert len(candidates) == 1
+    def test_watch_with_active_long_trigger_becomes_ready(self):
+        candidates = self.service([
+            self.radar(setup_state="WATCH", direction="LONG", spot_price=300.0, entry_trigger=299.0)
+        ]).scan(limit=3)
         item = candidates[0]
         assert item["setup_state"] == "WATCH"
+        assert item["trigger_present"] is True
+        assert item["trigger_active"] is True
         assert item["signal_state"] == "READY"
-        assert item["entry_trigger"] == 299.0
-        assert item["futures_confirmation"] == "NOT_APPLICABLE"
+
+    def test_watch_with_unreached_long_trigger_stays_waiting(self):
+        candidates = self.service([
+            self.radar(setup_state="WATCH", direction="LONG", spot_price=298.5, entry_trigger=299.0)
+        ]).scan(limit=3)
+        item = candidates[0]
+        assert item["trigger_present"] is True
+        assert item["trigger_active"] is False
+        assert item["signal_state"] == "WAIT"
+        assert "waiting for the directional trigger" in item["signal_state_reason"]
+
+    def test_watch_with_unreached_short_trigger_stays_waiting(self):
+        candidates = self.service([
+            self.radar(setup_state="WATCH", direction="SHORT", spot_price=300.0, entry_trigger=299.0, rs=-0.8)
+        ]).scan(limit=3)
+        item = candidates[0]
+        assert item["trigger_present"] is True
+        assert item["trigger_active"] is False
+        assert item["signal_state"] == "WAIT"
+
+    def test_watch_with_active_short_trigger_becomes_ready(self):
+        candidates = self.service([
+            self.radar(setup_state="WATCH", direction="SHORT", spot_price=298.5, entry_trigger=299.0, rs=-0.8)
+        ]).scan(limit=3)
+        item = candidates[0]
+        assert item["trigger_active"] is True
+        assert item["signal_state"] == "READY"
 
     def test_ready_candidate_remains_ready(self):
         candidates = self.service([self.radar(setup_state="READY")]).scan(limit=3)
