@@ -228,6 +228,8 @@ Regression tests deterministic и не зависят от BCS refresh token, с
 - directional RS tie-break;
 - сохранение SPOT ranking независимо от futures reference data.
 
+CI должен проверять фактический repository test inventory через `pytest -q Program`, а не несуществующий каталог `Program/tests`.
+
 ---
 
 ## 13. VALIDATED CHECKPOINTS — 27.08.2026
@@ -266,35 +268,47 @@ Historical replay повторяет live stability boundary и new-setup reset.
 
 ### Canonical futures mapping boundary — 27.08.2026
 
-Финальный live pipeline gate теперь не позволяет показать futures mapping до canonical `READY/CONFIRMED`. Это закрывает последний output-level parity gap между stateful lifecycle и reference mapping.
+Финальный live pipeline gate теперь не позволяет показать futures mapping до canonical `READY/CONFIRMED`. Это закрывает output-level parity gap между stateful lifecycle и reference mapping.
+
+### Repository CI inventory correction — 27.08.2026
+
+Обнаружено, что GitHub Actions workflow ссылался на `Program/tests`, тогда как фактический repository test inventory находится в `Program/test_*.py` и подкаталогах проекта. Workflow исправлен на:
+
+```text
+python -m compileall -q Program
+PYTHONPATH=Program python -m pytest -q Program
+```
+
+Это делает CI-цель соответствующей фактическому репозиторию и предотвращает ложный зелёный/сломанный validation path из-за неверного каталога.
 
 ---
 
 ## 14. CURRENT CHECKPOINT
 
-**Checkpoint:** Canonical SPOT → Futures Mapping Boundary Hardening  
+**Checkpoint:** Repository-wide deterministic validation path hardening  
 **Дата:** 27.08.2026  
 **Рабочая ветка:** `main`  
-**Последний рабочий commit уровня:** `2635565`  
+**Последний commit уровня:** `86ba350ad005007638d22fa5a868f1aae9f4c44d`
 
 ### Что сделано
 
-1. Добавлен финальный `_gate_futures_mapping()` в `MorningTradingPipelineService`.
-2. До canonical READY/CONFIRMED futures mapping fields не попадают в пользовательский live output.
-3. WAIT/ARMED получают явную причину `WAITING_FOR_CANONICAL_SPOT_READINESS`.
-4. READY/CONFIRMED сохраняют futures reference mapping без превращения его в confirmation.
-5. Добавлена regression coverage для WAIT, ARMED, READY и CONFIRMED boundary.
-6. Существующая lifecycle, quality, historical и ranking semantics не изменены.
-7. Pipeline version остаётся `1.4`.
+1. Проверен фактический repository test inventory.
+2. Обнаружена stale CI-конфигурация с несуществующим `Program/tests`.
+3. GitHub Actions переведён на `compileall -q Program`.
+4. GitHub Actions переведён на полный `PYTHONPATH=Program python -m pytest -q Program`.
+5. `PROJECT_PASSPORT.md` обновлён как единственный канонический MD-документ проекта.
+6. Все изменения сохранены в `main` без создания дополнительных веток.
 
 ### Следующий обязательный уровень
 
-**Release-readiness / end-to-end deterministic audit:**
+**Full repository deterministic audit / Release Candidate preparation:**
 
-- прогнать расширенную regression matrix, включая futures mapping tests;
-- проверить compile всех затронутых services/tests;
-- затем выполнить полный repository test inventory и найти оставшиеся архитектурные gaps;
-- после зелёного audit зафиксировать release candidate checkpoint в этом паспорте.
+- локально выполнить полный `pytest -q Program`, а не только текущую целевую матрицу;
+- проверить все legacy/standalone services и их тесты;
+- выявить тесты, которые не входят в текущие lifecycle suites;
+- проверить, что CI после исправления действительно проходит тот же полный inventory;
+- устранить только реальные архитектурные gaps, не меняя каноническую SPOT-first semantics;
+- после зелёного полного inventory зафиксировать Release Candidate checkpoint в этом паспорте.
 
 ---
 
