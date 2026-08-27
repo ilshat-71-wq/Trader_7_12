@@ -16,7 +16,7 @@ class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
     VERSION = "1.4"
-    SIGNAL_STABILITY_OBSERVATIONS = 1
+    SIGNAL_STABILITY_OBSERVATIONS = 2
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -90,7 +90,7 @@ class MorningTradingPipelineService:
         return {"WAIT": 0, "READY": 1, "CONFIRMED": 2}.get(str(signal_state or "WAIT").upper(), 0)
 
     def _advance_signal_state(self, candidate):
-        """Apply the canonical SPOT lifecycle and retain only local scan history."""
+        """Apply canonical SPOT lifecycle with a two-observation anti-noise gate."""
         ticker = str(candidate.get("spot_ticker") or candidate.get("ticker") or "").upper()
         previous = self._signal_history.get(ticker, {})
         previous_price = previous.get("spot_price")
@@ -98,8 +98,6 @@ class MorningTradingPipelineService:
         current_price = candidate.get("spot_price", candidate.get("last_close", 0))
         active_now = self._trigger_active(candidate)
         consecutive_active = (int(previous.get("consecutive_active", 0)) + 1) if active_now else 0
-        if not active_now:
-            consecutive_active = 0
         lifecycle = lifecycle_state(
             self._setup_state(candidate),
             candidate.get("direction"),
