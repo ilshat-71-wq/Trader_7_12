@@ -46,7 +46,7 @@ export PYTHONPATH="\$ROOT/Program"
 
 # Load the BCS refresh token from macOS Keychain for this process only.
 # It is intentionally not stored in the app bundle, Git repository, or plist.
-BCS_TOKEN="$(security find-generic-password -a "\$USER" -s "\$KEYCHAIN_SERVICE" -w 2>/dev/null || true)"
+BCS_TOKEN="\$(security find-generic-password -a "\$USER" -s "\$KEYCHAIN_SERVICE" -w 2>/dev/null || true)"
 if [[ -n "\$BCS_TOKEN" ]]; then
     export BCS_REFRESH_TOKEN="\$BCS_TOKEN"
     unset BCS_TOKEN
