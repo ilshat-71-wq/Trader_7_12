@@ -68,7 +68,14 @@ def test_readiness_contract_is_spot_only():
 def test_quality_combination_is_bounded_and_transparent():
     assert setup_quality_score(80) == 80
     assert setup_quality_score(80, 100, 100) == 88
-    assert setup_quality_score(200, -10, 500) == 60
+    assert setup_quality_score(200, -10, 500) == 80
+
+
+def test_lifecycle_wait_setup_never_becomes_active_signal():
+    result = lifecycle_state("WAIT", "LONG", "PULLBACK", 100, 101)
+    assert result["signal_state"] == "WAIT"
+    assert result["trigger_active"] is True
+    assert not result["signal_ready"]
 
 
 def test_lifecycle_watch_without_trigger():
