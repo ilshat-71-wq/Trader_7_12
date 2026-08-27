@@ -67,7 +67,7 @@ H1 задаёт контекст, M5 формирует сценарий.
 LONG: `H1 up → impulse → first pullback → stabilization → continuation`  
 SHORT: `H1 down → impulse → first rebound → stabilization → continuation`
 
-Состояния: `WAIT`, `WATCH`, `READY`, `CONFIRMED`.
+На уровне setup сохраняются `WAIT`, `WATCH`, `READY`, `CONFIRMED`. На уровне canonical signal lifecycle используются более детальные состояния `WAIT`, `WATCH`, `ARMED`, `READY`, `CONFIRMED`, а также terminal `INVALIDATED`.
 
 `READY/CONFIRMED` — аналитические состояния, не торговая команда.
 
@@ -90,7 +90,7 @@ SHORT → spot_price <= entry_trigger
 
 Файл: `Program/services/spot_signal_contract.py`.
 
-Чистый deterministic contract содержит `normalize_direction()`, `directional_rs()`, `trigger_present()`, `trigger_active()` и `readiness_state()`.
+Чистый deterministic contract содержит нормализацию direction/setup, directional RS, trigger presence, directional trigger activation/crossing, invalidation, lifecycle state и прозрачную quality aggregation.
 
 Контракт не обращается к BCS, сети, futures или live market-data.
 
@@ -101,13 +101,57 @@ SHORT → spot_price <= entry_trigger
 - directional RS;
 - trigger presence;
 - directional trigger activation;
-- final SPOT readiness state.
+- final SPOT readiness/lifecycle state.
 
 Публичный pipeline version остаётся `1.4`: это консолидация критических правил без изменения публичного version contract.
 
+### Canonical lifecycle — 27.08.2026
+
+Один setup lifecycle развивается детерминированно:
+
+```text
+WAIT
+ ↓
+WATCH
+ ↓
+ARMED
+ ↓
+READY
+ ↓
+CONFIRMED
+```
+
+`INVALIDATED` является terminal state текущего lifecycle. После invalidation возврат в `READY/CONFIRMED` запрещён без явного `new_setup=True`.
+
+Ключевые инварианты:
+
+1. trigger level и trigger activation разделены;
+2. LONG/SHORT activation направленная;
+3. crossing фиксируется отдельно от простого нахождения цены за уровнем;
+4. stability requirement учитывается отдельно;
+5. старый lifecycle не переходит назад из-за единичного шумового наблюдения;
+6. futures не участвуют в lifecycle;
+7. новый setup должен явно начать новый lifecycle.
+
 ---
 
-## 7. RANKING
+## 7. SETUP QUALITY
+
+Качество setup отделяется от самого факта существования setup.
+
+Canonical contract допускает прозрачную агрегацию:
+
+- базовое `setup_quality` — 60%;
+- `breakout_quality` — 20%;
+- `structure_quality` — 20%.
+
+Все компоненты ограничиваются диапазоном `0..100`. Если дополнительные компоненты не переданы, сохраняется базовый setup quality без искусственного ухудшения.
+
+Это подготовительный слой для дальнейшего профессионального quality engine; существующий breakout service пока не объявляется полной confirmation-моделью.
+
+---
+
+## 8. RANKING
 
 Основной ranking score — `candidate_score`, затем session-level `opportunity_score`.
 
@@ -120,7 +164,7 @@ TOP ограничен тремя кандидатами и не заполня�
 
 ---
 
-## 8. FUTURES MAPPING BOUNDARY
+## 9. FUTURES MAPPING BOUNDARY
 
 Futures — только reference mapping выбранного SPOT-актива.
 
@@ -137,13 +181,13 @@ Mapping разрешён только после:
 
 ---
 
-## 9. EVENT-RISK GATE
+## 10. EVENT-RISK GATE
 
 `moex_event_risk` остаётся жёстким SPOT eligibility gate. Сильные money/activity/RS/setup данные не могут его обойти.
 
 ---
 
-## 10. HISTORICAL REPLAY
+## 11. HISTORICAL REPLAY
 
 Historical replay — `READ ONLY / NO ORDERS`.
 
@@ -158,17 +202,31 @@ SHORT → spot_price <= entry_trigger
 
 Historical checkpoint хранит `spot_price` и `trigger_active`.
 
+Canonical lifecycle является network-free и предназначен для общего применения live/historical boundary; дальнейшая задача — заменить оставшиеся локальные historical readiness checks прямым использованием canonical lifecycle.
+
 ---
 
-## 11. TEST ARCHITECTURE
+## 12. TEST ARCHITECTURE
 
 Deterministic regression tests не должны зависеть от действующего BCS refresh token, сети или live market-data. Runtime BCS authorization относится только к production/live-data контуру.
 
-Покрываются SPOT pipeline, instrument radar, candidate score, directional RS ranking, event-risk gate, readiness, trigger activation, futures mapping boundary, expiry safety и historical/production parity.
+Текущий regression matrix canonical contract включает:
+
+- directional RS;
+- LONG/SHORT trigger activation;
+- trigger crossing;
+- invalid trigger;
+- WAIT/WATCH/ARMED/READY/CONFIRMED lifecycle;
+- stability requirement;
+- invalidation;
+- запрет возврата из INVALIDATED без нового setup;
+- anti-regression READY при шумовом наблюдении;
+- quality aggregation;
+- live/historical trigger parity.
 
 ---
 
-## 12. VALIDATED CHECKPOINTS
+## 13. VALIDATED CHECKPOINTS
 
 ### SPOT-first ranking
 
@@ -190,38 +248,45 @@ Futures metrics исключены из SPOT score/ranking. Production и histor
 
 27.08.2026 session ranking использует directional RS tie-break: более сильная поддержка текущего направления всегда выше.
 
+### Canonical lifecycle hardening
+
+27.08.2026 canonical contract расширен до строгой deterministic lifecycle-модели с `WATCH → ARMED → READY → CONFIRMED`, directional crossing, invalidation и explicit new-setup reset. Добавлена regression matrix для этих правил.
+
 ---
 
-## 13. CURRENT CHECKPOINT — CANONICAL CONTRACT ENFORCED IN LIVE PIPELINE
+## 14. CURRENT CHECKPOINT — CANONICAL SPOT LIFECYCLE HARDENED
 
 **Дата:** 27.08.2026  
-**Commits:** `1102d54`, `2cfa40a`, `53edc52`.
+**Commits:** `fcca362`, `eb2fdee9`.
 
 ### Что сделано
 
-1. Live `MorningTradingPipelineService` подключён к `spot_signal_contract.py`.
-2. Дублированные реализации directional RS / trigger presence / trigger activation заменены вызовами canonical helpers.
-3. Readiness в live pipeline вычисляется через `readiness_state()`.
-4. Добавлена regression-проверка live `_advance_signal_state()` против canonical semantics.
-5. Existing historical trigger-parity coverage сохранена.
+1. `spot_signal_contract.py` получил canonical lifecycle semantics.
+2. Разделены trigger presence, activation и crossing.
+3. Добавлен directional invalidation.
+4. `INVALIDATED` стал terminal состоянием текущего lifecycle.
+5. Повторная активация разрешается только через явный новый setup.
+6. Stability requirement остаётся отдельным параметром deterministic contract.
+7. Добавлена прозрачная bounded quality aggregation.
+8. Добавлена regression matrix для state machine, invalidation, crossing и anti-regression.
 
 ### Архитектурный результат
 
 ```text
 CANONICAL SPOT CONTRACT
         ↓
-LIVE PIPELINE
+STATE / TRIGGER LIFECYCLE
         ↓
 READY / CONFIRMED
         ↓
 FUTURES MAPPING ONLY
 ```
 
-Это повышает зрелость проекта: критические правила сигнала имеют один явный deterministic source of truth на live pipeline boundary.
+Это не изменение торговой стратегии и не разрешение на автоматическую торговлю. Это укрепление deterministic analytical boundary.
 
 ---
 
-## 14. RELEASE / WORKFLOW RULE
+## 15. RELEASE / WORKFLOW RULE
 
 После каждого законченного уровня:
 
@@ -237,13 +302,21 @@ FUTURES MAPPING ONLY
 
 ---
 
-## 15. NEXT ENGINEERING PRIORITY
+## 16. NEXT ENGINEERING PRIORITY
 
-Следующий уровень: довести canonical SPOT contract до полной production/historical boundary — убрать оставшиеся дублирующие trigger/readiness правила из historical/futures adapters и добавить contract-level audit, показывающий причину каждого `WAIT → WATCH → READY → CONFIRMED` перехода без обращения к futures.
+Следующий уровень — **production/historical boundary audit**:
+
+1. убрать оставшиеся локальные readiness/trigger rules из `historical_universe_replay_service.py`, `historical_candidate_ranker_service.py`, futures adapters и других boundary-модулей там, где они дублируют canonical contract;
+2. подключить canonical lifecycle к historical replay без изменения его фактической семантики;
+3. добавить contract-level audit trail с причиной каждого перехода;
+4. затем перейти к профессиональному SETUP QUALITY / breakout quality engine;
+5. после этого — к scoring и anti-churn tuning на regression matrix.
+
+Не менять публичный pipeline version без отдельного решения.
 
 ---
 
-## 16. SAFETY / PRODUCT BOUNDARY
+## 17. SAFETY / PRODUCT BOUNDARY
 
 Trader_7_12 Pro не является системой автоматического исполнения сделок.
 
