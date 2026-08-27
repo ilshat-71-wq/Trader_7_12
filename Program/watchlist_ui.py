@@ -26,7 +26,7 @@ SIGNAL_STATE_LABELS = {
 class WatchlistTraderWindow(TraderWindow):
     """Read-only GUI bound to the SPOT-first watchlist contract."""
 
-    VERSION = "1.3"
+    VERSION = "1.4"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
