@@ -426,3 +426,30 @@ UI разделяет теперь три разных понятия:
 `DIRECTION → SETUP → TRIGGER LEVEL → TRIGGER ACTIVE → READY → CONFIRMED`
 
 Futures остаётся исключительно `MAPPING ONLY`.
+
+---
+
+## 19. OFFLINE REGRESSION ISOLATION CHECKPOINT
+
+**Дата:** 27.08.2026  
+**Основание:** локальный regression run после checkpoint `11f97dc`.
+
+При локальном запуске `Program/test_instrument_morning_radar.py` функциональные unit-проверки начали зависеть от внешнего BCS authorization: конструктор `InstrumentMorningRadarService()` создавал `TradeService`, который пытался авторизоваться по refresh token. Локальный запуск показал `invalid_grant`, после чего один из детерминированных тестов падал на сетевой зависимости.
+
+Это не является дефектом торговой логики. Это нарушение изоляции unit-test слоя.
+
+Исправление следующего уровня:
+
+- `Program/test_instrument_morning_radar.py` больше не запускает live-конструктор `InstrumentMorningRadarService` для детерминированных helper-тестов;
+- тест создаёт экземпляр через `__new__` и вручную подставляет только необходимые pure-service dependencies;
+- `RelativeStrengthService` используется напрямую без BCS;
+- benchmark metadata фиксируется локально как `IMOEX2/IRUS2`;
+- live market-data / BCS authorization остаются отдельным runtime-контуром и не являются prerequisite для unit regression.
+
+**Новый тестовый invariant:**
+
+> **Детерминированный unit regression не должен требовать действующего BCS refresh token, сети или внешнего market-data сервиса.**
+
+Текущий checkpoint требует локальной повторной проверки после `git pull`: `compileall`, pipeline regression и `Program/test_instrument_morning_radar.py`. До этой проверки статус полного локального regression набора считается **PENDING VALIDATION**, а не SUCCESS.
+
+Архитектура production SPOT-first при этом не изменяется.

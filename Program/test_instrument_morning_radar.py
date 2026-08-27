@@ -1,11 +1,11 @@
 """
 Trader_7_12 Pro
 
-Instrument Morning Radar Service v0.3
+Instrument Morning Radar Service v0.4
 Deterministic unit test.
 
-Тест не обращается к BCS и не требует авторизации.
-Живой market-data запуск выполняется отдельной командой.
+Тест не обращается к BCS и не требует действующего refresh token.
+Live market-data запуск выполняется отдельной командой.
 """
 
 from datetime import date
@@ -13,13 +13,24 @@ from datetime import date
 from services.instrument_morning_radar_service import (
     InstrumentMorningRadarService
 )
+from services.relative_strength_service import RelativeStrengthService
 
 
 class DummyRadar:
-    """Создаёт сервис без сетевого доступа."""
+    """Создаёт сервис без запуска live-конструктора и сетевого доступа."""
 
     def __init__(self):
-        self.service = InstrumentMorningRadarService()
+        # InstrumentMorningRadarService.__init__ создаёт BCS-backed services.
+        # Для unit tests это лишняя внешняя зависимость: все проверяемые ниже
+        # helpers являются детерминированными и не требуют авторизации.
+        self.service = InstrumentMorningRadarService.__new__(
+            InstrumentMorningRadarService
+        )
+        self.service.radar_service = None
+        self.service.history_service = None
+        self.service.relative_strength_service = RelativeStrengthService()
+        self.service._benchmark_candles = None
+        self.service._benchmark_name = "IMOEX2/IRUS2"
 
 
 def assert_equal(actual, expected, message):
@@ -215,7 +226,7 @@ def main():
 
     print()
     print("=" * 72)
-    print("TRADER_7_12 PRO - INSTRUMENT MORNING RADAR v0.3 TEST")
+    print("TRADER_7_12 PRO - INSTRUMENT MORNING RADAR v0.4 TEST")
     print("=" * 72)
 
     for test in tests:
