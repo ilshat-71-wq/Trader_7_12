@@ -7,6 +7,7 @@ from services.futures_spot_mapping_service import FuturesSpotMappingService
 from services.history_candle_service import HistoryCandleService
 from services.morning_radar_service import MorningRadarService
 from services.morning_replay_service import MorningReplayService
+from services.spot_signal_contract import lifecycle_state
 from services.spot_universe_service import SpotUniverseService
 
 
@@ -234,31 +235,53 @@ class HistoricalUniverseReplayService:
         return "NONE"
 
     @staticmethod
-    def _spot_trigger_active(item):
-        """Return True only when the historical SPOT close reached its trigger."""
-        direction = str(item.get("direction") or "").upper()
-        try:
-            trigger = float(item.get("entry_trigger", 0) or 0)
-            price = float(item.get("spot_price", item.get("close", 0)) or 0)
-        except (TypeError, ValueError):
+    def _canonical_lifecycle(replay):
+        """Decorate historical checkpoints with the canonical SPOT lifecycle only."""
+        if not isinstance(replay, list):
+            return []
+        decorated = []
+        previous_price = None
+        previous_state = None
+        for raw in replay:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            try:
+                spot_price = float(item.get("spot_price", item.get("close", 0)) or 0)
+            except (TypeError, ValueError):
+                spot_price = 0.0
+            lifecycle = lifecycle_state(
+                setup_state=item.get("setup_state", "WAIT"),
+                direction=item.get("direction"),
+                setup=item.get("setup", "NONE"),
+                entry_trigger=item.get("entry_trigger", 0),
+                spot_price=spot_price,
+                previous_price=previous_price,
+                prior_signal_state=previous_state,
+                consecutive_active=1,
+                min_active_observations=1,
+                invalidation_level=item.get("invalidation_level"),
+                new_setup=bool(item.get("new_setup", False)),
+            )
+            item.update(lifecycle)
+            item["spot_price"] = spot_price
+            decorated.append(item)
+            previous_price = spot_price if spot_price > 0 else previous_price
+            previous_state = lifecycle.get("signal_state")
+        return decorated
+
+    @classmethod
+    def _spot_trigger_active(cls, item):
+        """Compatibility projection backed by the canonical SPOT lifecycle contract."""
+        if not isinstance(item, dict):
             return False
-        if trigger <= 0 or price <= 0:
-            return False
-        if direction == "LONG":
-            return price >= trigger
-        if direction == "SHORT":
-            return price <= trigger
-        return False
+        return bool(cls._canonical_lifecycle([item])[0].get("trigger_active")) if item else False
 
     @classmethod
     def _first_ready(cls, replay):
-        """First checkpoint where SPOT is ready AND its directional trigger is active."""
-        for item in replay:
-            if (
-                str(item.get("setup_state") or "WAIT").upper() in {"READY", "CONFIRMED"}
-                and float(item.get("entry_trigger", 0) or 0) > 0
-                and cls._spot_trigger_active(item)
-            ):
+        """First historical checkpoint whose canonical SPOT lifecycle is READY/CONFIRMED."""
+        for item in cls._canonical_lifecycle(replay):
+            if item.get("signal_state") in {"READY", "CONFIRMED"} and item.get("trigger_active"):
                 return item
         return None
 
@@ -285,8 +308,8 @@ class HistoricalUniverseReplayService:
             if direction not in {"LONG", "SHORT"}:
                 continue
             rs = self.calculate_relative_strength(daily, benchmark_candles, benchmark_meta["ticker"] if benchmark_meta else None)
-            replay = self.replay_service.replay_setup(ticker=ticker, class_code=class_code, direction=direction, trading_date=trading_date, checkpoints=checkpoints)
-            ready = self._first_ready(replay)
+            replay = self._canonical_lifecycle(self.replay_service.replay_setup(ticker=ticker, class_code=class_code, direction=direction, trading_date=trading_date, checkpoints=checkpoints))
+            ready = next((item for item in replay if item.get("signal_state") in {"READY", "CONFIRMED"} and item.get("trigger_active")), None)
             selected = ready or (replay[-1] if replay else {})
             rows.append({
                 "futures_ticker": "", "futures_class_code": "", "futures_expiry": None, "days_to_expiry": None,
@@ -299,7 +322,9 @@ class HistoricalUniverseReplayService:
                 "confirmation_time": None, "futures_price": 0.0, "setup": selected.get("setup", "NONE"), "setup_state": selected.get("setup_state", "WAIT"),
                 "entry_trigger": float(selected.get("entry_trigger", 0) or 0), "previous_high": float(selected.get("previous_high", 0) or 0), "previous_low": float(selected.get("previous_low", 0) or 0),
                 "spot_price": float(selected.get("spot_price", selected.get("close", 0)) or 0),
-                "trigger_active": self._spot_trigger_active(selected),
+                "trigger_active": bool(selected.get("trigger_active", False)),
+                "signal_state": selected.get("signal_state", "WAIT"), "trigger_state": selected.get("trigger_state", "WAITING"),
+                "signal_state_reason": selected.get("signal_state_reason", ""),
                 "futures_confirmation": {}, "futures_confirmation_timeline": [], "replay": replay,
                 "readiness_source": "SPOT", "readiness_confirmed_by_futures": False,
             })
