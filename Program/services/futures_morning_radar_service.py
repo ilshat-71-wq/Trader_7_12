@@ -22,7 +22,7 @@ from services.futures_trade_candidate_service import FuturesTradeCandidateServic
 class FuturesMorningRadarService:
     """Build the current-session SPOT shortlist, then attach futures mapping."""
 
-    VERSION = "1.2"
+    VERSION = "1.3"
     MAX_CONTRACTS_PER_SPOT = 2
     MAX_DAYS_TO_EXPIRY = 3
     MAPPING_CACHE_SECONDS = 300
@@ -70,20 +70,9 @@ class FuturesMorningRadarService:
         if key in self._price_stability_cache:
             return dict(self._price_stability_cache[key])
         try:
-            result=self.price_stability_service.evaluate(
-                spot_ticker,
-                spot_class_code,
-                reference_close=reference_close,
-                trading_date=trading_date,
-                now=self.session_service.now(),
-            )
+            result=self.price_stability_service.evaluate(spot_ticker, spot_class_code, reference_close=reference_close, trading_date=trading_date, now=self.session_service.now())
         except Exception as exc:
-            result={
-                "moex_event_risk": False,
-                "moex_price_stability_state": "ERROR",
-                "moex_price_stability_reason": type(exc).__name__,
-                "moex_data_status": "ERROR",
-            }
+            result={"moex_event_risk":False,"moex_price_stability_state":"ERROR","moex_price_stability_reason":type(exc).__name__,"moex_data_status":"ERROR"}
         self._price_stability_cache[key]=dict(result)
         return dict(result)
 
@@ -91,41 +80,45 @@ class FuturesMorningRadarService:
     def _spot_mapping_groups(mappings):
         grouped={}
         for mapping in mappings or []:
-            if not isinstance(mapping,dict):
-                continue
+            if not isinstance(mapping,dict): continue
             spot_ticker=str(mapping.get("spot_ticker") or "").strip().upper()
             spot_class_code=str(mapping.get("spot_class_code") or "").strip()
-            if not spot_ticker or not spot_class_code:
-                continue
+            if not spot_ticker or not spot_class_code: continue
             grouped.setdefault((spot_ticker,spot_class_code),[]).append(mapping)
         return grouped
 
     @classmethod
-    def _spot_ready_for_mapping(cls, result):
-        """Allow futures mapping only for direction-consistent ready SPOT setups."""
+    def _spot_trigger_active(cls, result):
+        """Return whether the current SPOT price has actually reached its directional trigger."""
         direction=str(result.get("direction") or "NONE").upper()
-        setup=str(result.get("setup") or "NONE").upper()
-        setup_direction=str(result.get("setup_direction") or direction).upper()
-        state=str(result.get("setup_state") or "WAIT").upper()
         try:
             trigger=float(result.get("entry_trigger",0) or 0)
             price=float(result.get("spot_price",result.get("last_close",0)) or 0)
         except (TypeError,ValueError):
             return False
+        if trigger <= 0 or price <= 0: return False
+        if direction == "LONG": return price >= trigger
+        if direction == "SHORT": return price <= trigger
+        return False
+
+    @classmethod
+    def _spot_ready_for_mapping(cls, result):
+        """Allow futures mapping only for direction-consistent ready SPOT setups with an active trigger."""
+        direction=str(result.get("direction") or "NONE").upper()
+        setup=str(result.get("setup") or "NONE").upper()
+        setup_direction=str(result.get("setup_direction") or direction).upper()
+        state=str(result.get("setup_state") or "WAIT").upper()
         return (
             direction in {"LONG","SHORT"}
             and setup_direction == direction
             and setup != "NONE"
             and state in {"READY","CONFIRMED"}
-            and trigger > 0
-            and price > 0
+            and cls._spot_trigger_active(result)
         )
 
     @classmethod
     def _select_current_contracts(cls,mappings):
-        """Return non-expiring contracts for post-readiness mapping only."""
-        grouped={}
-        today=date.today()
+        grouped={}; today=date.today()
         for mapping in mappings or []:
             if not isinstance(mapping,dict): continue
             spot_ticker=str(mapping.get("spot_ticker") or "").strip().upper()
@@ -134,9 +127,7 @@ class FuturesMorningRadarService:
             if expiry is None: continue
             days_to_expiry=(expiry-today).days
             if days_to_expiry <= cls.MAX_DAYS_TO_EXPIRY: continue
-            candidate=dict(mapping)
-            candidate["futures_expiry"]=expiry.isoformat()
-            candidate["days_to_expiry"]=days_to_expiry
+            candidate=dict(mapping); candidate["futures_expiry"]=expiry.isoformat(); candidate["days_to_expiry"]=days_to_expiry
             grouped.setdefault(spot_ticker,[]).append(candidate)
         selected=[]
         for candidates in grouped.values():
@@ -146,7 +137,7 @@ class FuturesMorningRadarService:
 
     @classmethod
     def _select_futures_mapping(cls, mappings):
-        """Choose a futures reference only after the SPOT setup is ready."""
+        """Choose a futures reference only after the SPOT setup is ready and active."""
         eligible=cls._select_current_contracts(mappings)
         return eligible[0] if eligible else None
 
@@ -161,146 +152,41 @@ class FuturesMorningRadarService:
 
     def scan(self, mappings=None, limit=None):
         """Run the complete SPOT analysis first; futures are mapping-only afterwards."""
-        if mappings is None:
-            mappings=self._load_mappings_cached()
+        if mappings is None: mappings=self._load_mappings_cached()
         if not isinstance(mappings,list): return []
-
         grouped=self._spot_mapping_groups(mappings)
         results=[]; radar_cache={}; money_cache={}; setup_cache={}
         session=self.session_service.get_session(); trading_date=self.session_service.get_trading_day()
-
         for radar_key, spot_mappings in grouped.items():
-            spot_ticker,spot_class_code=radar_key
-            representative=spot_mappings[0]
+            spot_ticker,spot_class_code=radar_key; representative=spot_mappings[0]
             if radar_key not in radar_cache:
-                try:
-                    radar_cache[radar_key]=self.radar_service.analyze(spot_ticker,spot_class_code)
-                except Exception as exc:
-                    radar_cache[radar_key]={"version":self.VERSION,"status":"ERROR","error":str(exc)}
+                try: radar_cache[radar_key]=self.radar_service.analyze(spot_ticker,spot_class_code)
+                except Exception as exc: radar_cache[radar_key]={"version":self.VERSION,"status":"ERROR","error":str(exc)}
             radar=radar_cache[radar_key]
-            if not isinstance(radar,dict): continue
-            if str(radar.get("status","")).upper()=="ERROR":
-                continue
-
+            if not isinstance(radar,dict) or str(radar.get("status","")).upper()=="ERROR": continue
             price_stability=self._price_stability(spot_ticker,spot_class_code,radar.get("last_close",0),trading_date)
             if radar_key not in setup_cache:
-                try:
-                    setup_cache[radar_key]=self.spot_setup_service.analyze(spot_ticker,spot_class_code,direction=radar.get("direction"),session=session,trading_date=trading_date)
-                except Exception as exc:
-                    setup_cache[radar_key]={"setup":"NONE","setup_direction":radar.get("direction","NONE"),"setup_state":"WAIT","setup_phase":"SETUP_ERROR","setup_quality_score":0.0,"setup_error":str(exc)}
+                try: setup_cache[radar_key]=self.spot_setup_service.analyze(spot_ticker,spot_class_code,direction=radar.get("direction"),session=session,trading_date=trading_date)
+                except Exception as exc: setup_cache[radar_key]={"setup":"NONE","setup_direction":radar.get("direction","NONE"),"setup_state":"WAIT","setup_phase":"SETUP_ERROR","setup_quality_score":0.0,"setup_error":str(exc)}
             spot_setup=setup_cache[radar_key]
-
             if radar_key not in money_cache:
-                try:
-                    money_cache[radar_key]=self.session_money_service.calculate(spot_ticker,spot_class_code,trading_date=trading_date,timeframe_minutes=5,session=session)
-                except Exception:
-                    money_cache[radar_key]={"session":session,"money_volume":0.0,"elapsed_minutes":0,"expected_minutes":0,"money_per_minute":0.0}
+                try: money_cache[radar_key]=self.session_money_service.calculate(spot_ticker,spot_class_code,trading_date=trading_date,timeframe_minutes=5,session=session)
+                except Exception: money_cache[radar_key]={"session":session,"money_volume":0.0,"elapsed_minutes":0,"expected_minutes":0,"money_per_minute":0.0}
             session_money=money_cache[radar_key]
-            current_spot_money=float(session_money.get("money_volume",0) or 0)
-            average_spot_money=float(radar.get("average_daily_money",0) or 0)
-            elapsed_minutes=int(session_money.get("elapsed_minutes",0) or 0)
-            expected_minutes=int(session_money.get("expected_minutes",0) or 0)
+            current_spot_money=float(session_money.get("money_volume",0) or 0); average_spot_money=float(radar.get("average_daily_money",0) or 0)
+            elapsed_minutes=int(session_money.get("elapsed_minutes",0) or 0); expected_minutes=int(session_money.get("expected_minutes",0) or 0)
             spot_money_ratio=current_spot_money/average_spot_money if average_spot_money>0 else 0.0
             spot_session_activity_ratio=self._activity_ratio(current_spot_money,average_spot_money,elapsed_minutes,expected_minutes)
-
             result=dict(radar)
-            result.update({
-                "pipeline_version":self.VERSION,
-                "futures_ticker":"",
-                "futures_class_code":"",
-                "futures_expiry":None,
-                "days_to_expiry":None,
-                "selection_score":None,
-                "liquidity_score":None,
-                "spread_score":None,
-                "expiry_score":None,
-                "spread_percent":None,
-                "turnover_30m":None,
-                "trade_count_30m":None,
-                "depth_notional":None,
-                "bid":None,
-                "ask":None,
-                "last":None,
-                "futures_selection_version":None,
-                "futures_selection_reason":"WAITING_FOR_SPOT_READINESS",
-                "futures_selection_candidates":None,
-                "spot_ticker":spot_ticker,
-                "spot_class_code":spot_class_code,
-                "spot_name":representative.get("spot_name",""),
-                "spot_type":representative.get("spot_type",""),
-                "mapping_method":representative.get("mapping_method"),
-                "market_session":session,
-                "spot_money_volume":round(current_spot_money,2),
-                "spot_average_daily_money":round(average_spot_money,2),
-                "spot_money_ratio":round(spot_money_ratio,4),
-                "spot_session_activity_ratio":spot_session_activity_ratio,
-                "spot_money_per_minute":round(float(session_money.get("money_per_minute",0) or 0),2),
-                "session_elapsed_minutes":elapsed_minutes,
-                "session_expected_minutes":expected_minutes,
-                "moex_event_risk":bool(price_stability.get("moex_event_risk")),
-                "moex_da_trigger_inferred":bool(price_stability.get("moex_da_trigger_inferred")),
-                "moex_da_trigger_percent":float(price_stability.get("moex_da_trigger_percent",20.0) or 20.0),
-                "moex_da_window_minutes":int(price_stability.get("moex_da_window_minutes",10) or 10),
-                "moex_weekend_band_percent":float(price_stability.get("moex_weekend_band_percent",3.0) or 3.0),
-                "moex_weekend_band_near":bool(price_stability.get("moex_weekend_band_near")),
-                "moex_weekend_band_hit":bool(price_stability.get("moex_weekend_band_hit")),
-                "moex_max_abs_move_percent":float(price_stability.get("moex_max_abs_move_percent",0.0) or 0.0),
-                "moex_price_stability_state":price_stability.get("moex_price_stability_state","NORMAL"),
-                "moex_price_stability_reason":price_stability.get("moex_price_stability_reason",""),
-                "moex_candles_loaded":int(price_stability.get("moex_candles_loaded",0) or 0),
-                "moex_data_status":price_stability.get("moex_data_status","NO_DATA"),
-                "setup":spot_setup.get("setup",radar.get("setup","NONE")),
-                "setup_direction":spot_setup.get("setup_direction",radar.get("setup_direction",radar.get("direction","NONE"))),
-                "setup_state":spot_setup.get("setup_state",radar.get("setup_state","WAIT")),
-                "setup_phase":spot_setup.get("setup_phase","UNKNOWN"),
-                "setup_quality_score":float(spot_setup.get("setup_quality_score",0) or 0),
-                "impulse_percent":float(spot_setup.get("impulse_percent",0) or 0),
-                "retracement_percent":float(spot_setup.get("retracement_percent",0) or 0),
-                "retracement_ratio":float(spot_setup.get("retracement_ratio",0) or 0),
-                "consolidation_candles":int(spot_setup.get("consolidation_candles",0) or 0),
-                "entry_trigger":float(spot_setup.get("entry_trigger",radar.get("entry_trigger",0)) or 0),
-                "previous_high":float(spot_setup.get("previous_high",radar.get("previous_high",0)) or 0),
-                "previous_low":float(spot_setup.get("previous_low",radar.get("previous_low",0)) or 0),
-                "impulse_high":float(spot_setup.get("impulse_high",0) or 0),
-                "impulse_low":float(spot_setup.get("impulse_low",0) or 0),
-            })
-
-            # Canonical SPOT eligibility/ranking gate. This is deliberately
-            # evaluated before any futures mapping is attached.
-            candidate = FuturesTradeCandidateService.build_candidate(result)
-            if candidate is None:
-                continue
-            result["candidate_score"] = candidate["candidate_score"]
-
-            # Critical architectural boundary: no futures lookup/selection is
-            # performed until the SPOT candidate has passed eligibility and
-            # the SPOT setup is READY/CONFIRMED with a usable trigger.
+            result.update({"pipeline_version":self.VERSION,"futures_ticker":"","futures_class_code":"","futures_expiry":None,"days_to_expiry":None,"selection_score":None,"liquidity_score":None,"spread_score":None,"expiry_score":None,"spread_percent":None,"turnover_30m":None,"trade_count_30m":None,"depth_notional":None,"bid":None,"ask":None,"last":None,"futures_selection_version":None,"futures_selection_reason":"WAITING_FOR_SPOT_READINESS","futures_selection_candidates":None,"spot_ticker":spot_ticker,"spot_class_code":spot_class_code,"spot_name":representative.get("spot_name",""),"spot_type":representative.get("spot_type",""),"mapping_method":representative.get("mapping_method"),"market_session":session,"spot_money_volume":round(current_spot_money,2),"spot_average_daily_money":round(average_spot_money,2),"spot_money_ratio":round(spot_money_ratio,4),"spot_session_activity_ratio":spot_session_activity_ratio,"spot_money_per_minute":round(float(session_money.get("money_per_minute",0) or 0),2),"session_elapsed_minutes":elapsed_minutes,"session_expected_minutes":expected_minutes,"moex_event_risk":bool(price_stability.get("moex_event_risk")),"moex_da_trigger_inferred":bool(price_stability.get("moex_da_trigger_inferred")),"moex_da_trigger_percent":float(price_stability.get("moex_da_trigger_percent",20.0) or 20.0),"moex_da_window_minutes":int(price_stability.get("moex_da_window_minutes",10) or 10),"moex_weekend_band_percent":float(price_stability.get("moex_weekend_band_percent",3.0) or 3.0),"moex_weekend_band_near":bool(price_stability.get("moex_weekend_band_near")),"moex_weekend_band_hit":bool(price_stability.get("moex_weekend_band_hit")),"moex_max_abs_move_percent":float(price_stability.get("moex_max_abs_move_percent",0.0) or 0.0),"moex_price_stability_state":price_stability.get("moex_price_stability_state","NORMAL"),"moex_price_stability_reason":price_stability.get("moex_price_stability_reason",""),"moex_candles_loaded":int(price_stability.get("moex_candles_loaded",0) or 0),"moex_data_status":price_stability.get("moex_data_status","NO_DATA"),"setup":spot_setup.get("setup",radar.get("setup","NONE")),"setup_direction":spot_setup.get("setup_direction",radar.get("setup_direction",radar.get("direction","NONE"))),"setup_state":spot_setup.get("setup_state",radar.get("setup_state","WAIT")),"setup_phase":spot_setup.get("setup_phase","UNKNOWN"),"setup_quality_score":float(spot_setup.get("setup_quality_score",0) or 0),"impulse_percent":float(spot_setup.get("impulse_percent",0) or 0),"retracement_percent":float(spot_setup.get("retracement_percent",0) or 0),"retracement_ratio":float(spot_setup.get("retracement_ratio",0) or 0),"consolidation_candles":int(spot_setup.get("consolidation_candles",0) or 0),"entry_trigger":float(spot_setup.get("entry_trigger",radar.get("entry_trigger",0)) or 0),"previous_high":float(spot_setup.get("previous_high",radar.get("previous_high",0)) or 0),"previous_low":float(spot_setup.get("previous_low",radar.get("previous_low",0)) or 0),"impulse_high":float(spot_setup.get("impulse_high",0) or 0),"impulse_low":float(spot_setup.get("impulse_low",0) or 0)})
+            candidate=FuturesTradeCandidateService.build_candidate(result)
+            if candidate is None: continue
+            result["candidate_score"]=candidate["candidate_score"]
             if self._spot_ready_for_mapping(result):
                 selected=self._select_futures_mapping(spot_mappings)
                 if selected:
-                    result.update({
-                        "futures_ticker":selected.get("futures_ticker",""),
-                        "futures_class_code":selected.get("futures_class_code",""),
-                        "futures_expiry":selected.get("futures_expiry"),
-                        "days_to_expiry":selected.get("days_to_expiry"),
-                        "selection_score":selected.get("selection_score"),
-                        "liquidity_score":selected.get("liquidity_score"),
-                        "spread_score":selected.get("spread_score"),
-                        "expiry_score":selected.get("expiry_score"),
-                        "spread_percent":selected.get("spread_percent"),
-                        "turnover_30m":selected.get("turnover_30m"),
-                        "trade_count_30m":selected.get("trade_count_30m"),
-                        "depth_notional":selected.get("depth_notional"),
-                        "bid":selected.get("bid"),
-                        "ask":selected.get("ask"),
-                        "last":selected.get("last"),
-                        "futures_selection_version":selected.get("futures_selection_version"),
-                        "futures_selection_reason":selected.get("futures_selection_reason","POST_SPOT_READINESS_MAPPING"),
-                        "futures_selection_candidates":selected.get("futures_selection_candidates"),
-                        "mapping_method":selected.get("mapping_method",result.get("mapping_method")),
-                    })
+                    result.update({"futures_ticker":selected.get("futures_ticker",""),"futures_class_code":selected.get("futures_class_code",""),"futures_expiry":selected.get("futures_expiry"),"days_to_expiry":selected.get("days_to_expiry"),"selection_score":selected.get("selection_score"),"liquidity_score":selected.get("liquidity_score"),"spread_score":selected.get("spread_score"),"expiry_score":selected.get("expiry_score"),"spread_percent":selected.get("spread_percent"),"turnover_30m":selected.get("turnover_30m"),"trade_count_30m":selected.get("trade_count_30m"),"depth_notional":selected.get("depth_notional"),"bid":selected.get("bid"),"ask":selected.get("ask"),"last":selected.get("last"),"futures_selection_version":selected.get("futures_selection_version"),"futures_selection_reason":selected.get("futures_selection_reason","POST_SPOT_READINESS_MAPPING"),"futures_selection_candidates":selected.get("futures_selection_candidates"),"mapping_method":selected.get("mapping_method",result.get("mapping_method"))})
             results.append(result)
-
         results.sort(key=self._sort_key,reverse=True)
         for rank,result in enumerate(results,start=1): result["rank"]=rank
         if limit is not None:
@@ -312,18 +198,9 @@ class FuturesMorningRadarService:
 
     @staticmethod
     def _sort_key(item):
-        direction=str(item.get("direction") or "").upper()
-        rs=float(item.get("relative_strength",0) or 0)
+        direction=str(item.get("direction") or "").upper(); rs=float(item.get("relative_strength",0) or 0)
         directional_rs=rs if direction=="LONG" else -rs if direction=="SHORT" else 0.0
-        return (
-            float(item.get("candidate_score",0) or 0),
-            float(item.get("spot_session_activity_ratio",0) or 0),
-            float(item.get("spot_money_per_minute",0) or 0),
-            float(item.get("spot_money_volume",0) or 0),
-            directional_rs,
-            float(item.get("setup_quality_score",0) or 0),
-            str(item.get("spot_ticker") or ""),
-        )
+        return (float(item.get("candidate_score",0) or 0),float(item.get("spot_session_activity_ratio",0) or 0),float(item.get("spot_money_per_minute",0) or 0),float(item.get("spot_money_volume",0) or 0),directional_rs,float(item.get("setup_quality_score",0) or 0),str(item.get("spot_ticker") or ""))
 
     @staticmethod
     def print_results(results):
