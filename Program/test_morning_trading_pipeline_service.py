@@ -108,24 +108,24 @@ class TestMorningTradingPipelineService:
         assert item["trigger_active"] is True
         assert item["signal_state"] == "READY"
 
-    def test_watch_with_unreached_long_trigger_stays_waiting(self):
+    def test_watch_with_unreached_long_trigger_becomes_armed(self):
         candidates = self.service([
             self.radar(setup_state="WATCH", direction="LONG", spot_price=298.5, entry_trigger=299.0)
         ]).scan(limit=3)
         item = candidates[0]
         assert item["trigger_present"] is True
         assert item["trigger_active"] is False
-        assert item["signal_state"] == "WAIT"
-        assert "waiting for the directional trigger" in item["signal_state_reason"]
+        assert item["signal_state"] == "ARMED"
+        assert "waiting for directional activation" in item["signal_state_reason"]
 
-    def test_watch_with_unreached_short_trigger_stays_waiting(self):
+    def test_watch_with_unreached_short_trigger_becomes_armed(self):
         candidates = self.service([
             self.radar(setup_state="WATCH", direction="SHORT", spot_price=300.0, entry_trigger=299.0, rs=-0.8)
         ]).scan(limit=3)
         item = candidates[0]
         assert item["trigger_present"] is True
         assert item["trigger_active"] is False
-        assert item["signal_state"] == "WAIT"
+        assert item["signal_state"] == "ARMED"
 
     def test_watch_with_active_short_trigger_becomes_ready(self):
         candidates = self.service([
