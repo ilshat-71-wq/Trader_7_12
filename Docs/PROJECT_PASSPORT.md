@@ -217,6 +217,8 @@ Historical replay теперь использует тот же двухнабл
 
 Таким образом одинаковая последовательность SPOT observations имеет одинаковую readiness boundary в live и historical слоях. `trigger_crossed`, `trigger_active`, stability counter, re-arm и terminal invalidation остаются раздельными canonical evidence.
 
+Explicit `new_setup=True` в historical replay сбрасывает stability counter и начинает новый lifecycle с первого наблюдения; старый lifecycle не передаёт накопленную стабильность новому setup.
+
 ---
 
 ## 12. TEST ARCHITECTURE
@@ -242,6 +244,8 @@ Live pipeline требует **2 последовательных наблюде
 ### Historical/live stability parity regression — 27.08.2026
 
 Historical replay теперь тестирует ту же границу `ARMED → READY` по второму последовательному активному observation, reset counter при потере trigger и сохранение READY после transient trigger loss.
+
+Дополнительно regression покрывает explicit `new_setup=True`: накопленная стабильность старого lifecycle не переносится на новый setup.
 
 Это закрывает parity-gap между live stateful scan и historical checkpoint replay на уровне lifecycle stability.
 
@@ -305,13 +309,17 @@ Futures metrics исключены из SPOT score/ranking.
 
 27.08.2026 historical replay получил тот же двухнаблюдательный stability gate и regression coverage для `ARMED → READY`, counter reset и сохранения READY после transient trigger loss.
 
+### Historical new-setup stability reset
+
+27.08.2026 explicit `new_setup=True` в historical lifecycle получил отдельную regression protection: новый setup начинает stability counter с нуля и не наследует накопленную стабильность предыдущего lifecycle.
+
 ---
 
 ## 14. CURRENT CHECKPOINT — HISTORICAL/LIVE STABILITY PARITY
 
 **Дата:** 27.08.2026  
 **Live baseline:** `6c960f7`  
-**Parity implementation:** historical stability gate  
+**Historical parity implementation:** `e0f7379` + `e168098`  
 
 ### Что сделано
 
@@ -321,10 +329,10 @@ Futures metrics исключены из SPOT score/ranking.
 4. Потеря trigger сбрасывает historical stability counter.
 5. `trigger_crossed` остаётся edge-aware и не смешивается со stability.
 6. `READY` сохраняется при transient trigger loss благодаря canonical monotonic lifecycle.
-7. `new_setup=True` явно отделяет новый lifecycle от предыдущего.
+7. `new_setup=True` сбрасывает counter до первого observation нового lifecycle.
 8. Historical readiness по-прежнему вычисляется только через canonical `lifecycle_state()`.
 9. Futures не участвуют в lifecycle parity.
-10. Добавлена regression matrix для historical anti-churn parity.
+10. Добавлена regression matrix для historical anti-churn parity и explicit new-setup reset.
 11. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
 
 ### Следующий обязательный уровень
