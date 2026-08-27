@@ -161,6 +161,12 @@ Canonical aggregation использует базовое `setup_quality` 60%, `
 
 Quality остаётся deterministic и network-free и пока не участвует автоматически в ranking. Это сохраняет разделение detection → quality → lifecycle.
 
+### Quality projection parity hardening — 27.08.2026
+
+Для одного и того же подготовленного candle window `SetupEngine.analyze()` обязан давать полностью детерминированные `setup_quality_score`, `quality_components` и `setup_quality_reasons`. Добавлена regression coverage, защищающая от скрытой зависимости quality от состояния процесса или внешних данных.
+
+Дополнительно проверяется, что quality использует только переданный window и не меняется при повторном вычислении того же набора свечей. Это является базовой parity-гарантией перед подключением quality к более высоким слоям.
+
 ---
 
 ## 8. RANKING
@@ -168,6 +174,8 @@ Quality остаётся deterministic и network-free и пока не учас
 Основной ranking score — `candidate_score`, затем session-level `opportunity_score`.
 
 Directional RS используется как tie-break. TOP ограничен тремя кандидатами и не заполняется искусственно. Futures metrics не входят в SPOT ranking.
+
+Quality пока является enrichment/tie-break information и не получает скрытого веса в `candidate_score` или `opportunity_score`.
 
 ---
 
@@ -212,6 +220,8 @@ Regression matrix canonical contract покрывает directional RS, LONG/SHO
 `Program/test_setup_quality_service.py` покрывает bounded score, прозрачные компоненты, continuation и incomplete OHLC.
 
 После SetupEngine integration дополнительно проверяется наличие quality у setup candidates, неизменность lifecycle, использование только доступного candle window, сохранение earliest READY selection и отсутствие автоматического влияния quality на ranking.
+
+Quality parity regression дополнительно проверяет повторяемость результата на идентичном window и отсутствие скрытого влияния внешнего состояния.
 
 ---
 
@@ -261,27 +271,41 @@ Futures metrics исключены из SPOT score/ranking.
 
 27.08.2026 введён `trigger_transition()` для единой edge-aware trigger projection. Crossing, active state, re-arm и invalidation теперь различаются явно; обычный откат после activation не считается invalidation.
 
+### Quality projection parity baseline
+
+27.08.2026 добавлена regression coverage для deterministic quality на идентичном candle window и защиты от скрытой зависимости от внешнего состояния. Production ranking не изменён.
+
 ---
 
-## 14. CURRENT CHECKPOINT — CANONICAL TRIGGER TRANSITION
+## 14. CURRENT CHECKPOINT — QUALITY PROJECTION PARITY BASELINE
 
 **Дата:** 27.08.2026  
-**Commit:** `7070991` + regression `268f7f0`.
+**Commit:** `4577aa9`.
 
 ### Что сделано
 
-1. Добавлен canonical `trigger_transition()` в `spot_signal_contract.py`.
-2. Crossing и текущая activation разделены.
-3. Обычный откат после activation получает `trigger_rearmed=True`, а не invalidation.
-4. Explicit invalidation level остаётся terminal trigger condition.
-5. `lifecycle_state()` использует ту же trigger transition projection.
-6. Добавлены LONG/SHORT regression cases для crossing, re-arm и invalidation.
-7. Futures boundary не затронут.
+1. `SetupEngine` остаётся единственным владельцем setup detection.
+2. `SetupQualityService` остаётся deterministic/network-free enrichment layer.
+3. Добавлена regression для повторного вычисления quality на идентичном candle window.
+4. Добавлена regression для использования только предоставленного candle window.
+5. Зафиксировано отсутствие влияния quality на setup state, trigger и ranking semantics.
+6. Existing canonical contract, historical lifecycle и live pipeline regression остаются неизменными.
+7. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
 8. Публичный pipeline version не изменён.
 
-### Следующая обязательная проверка
+### Локальная валидация checkpoint
 
-Подтвердить локально полный lifecycle regression. Затем провести **SPOT quality projection parity** для live/historical setup projections. После parity — anti-churn tuning и финальную regression matrix.
+Ожидается полный зелёный regression после `git pull`: SetupQuality + SetupEngine + canonical SPOT + historical + live pipeline.
+
+### Следующий обязательный уровень
+
+**Anti-churn / stability hardening** на базе уже введённого canonical trigger transition:
+
+- отделить `trigger_crossed` от устойчивой activation;
+- защитить READY от единичного шумового наблюдения;
+- формализовать минимальное число подтверждающих наблюдений;
+- сохранить deterministic live/historical parity;
+- не изменить SPOT ranking и futures mapping boundary.
 
 ---
 
@@ -301,17 +325,16 @@ Futures metrics исключены из SPOT score/ranking.
 
 ---
 
-## 16. NEXT ENGINEERING PRIORITY
+## 16. PROJECT COMPLETION ROADMAP
 
-Следующий уровень — **SPOT projection parity для Setup Quality**:
+Проект уже прошёл основную архитектурную фазу. До production-ready состояния остаются четыре инженерных блока:
 
-1. live SPOT projection должен получать тот же quality result, что и SetupEngine;
-2. historical checkpoint должен получать тот же deterministic quality result;
-3. quality не должен менять lifecycle или ranking;
-4. regression должна сравнивать live/historical quality на идентичном candle window;
-5. затем перейти к anti-churn tuning, используя новый canonical trigger transition.
+1. **Anti-churn / stability** — защита lifecycle от микрошумов и формализация подтверждающих наблюдений.
+2. **End-to-end parity** — финальная проверка live → historical на одинаковых входах без расхождений.
+3. **Ranking / candidate audit** — проверка отсутствия двойного учёта quality/RS/activity и финальный SPOT ranking audit.
+4. **Release audit** — полный offline regression, compile, dependency/import audit, futures mapping boundary, event-risk gate, README/Passport consistency и clean-main verification.
 
-Не менять публичный pipeline version без отдельного решения.
+После этих блоков отдельный этап «архитектурной переделки» не планируется. Возможны только bug fixes и controlled calibration по фактическим данным.
 
 ---
 
