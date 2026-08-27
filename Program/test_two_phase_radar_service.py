@@ -86,7 +86,7 @@ class FakeSessionMoney:
         }
 
 
-class TestableRadar(TwoPhaseFuturesMorningRadarService):
+class RadarHarness(TwoPhaseFuturesMorningRadarService):
     def __init__(self):
         super().__init__(
             mapping_service=FakeMapping(),
@@ -113,7 +113,7 @@ class TestableRadar(TwoPhaseFuturesMorningRadarService):
 
 
 def test_preliminary_keeps_top_five():
-    service = TestableRadar()
+    service = RadarHarness()
     mappings = FakeMapping().load()
     preliminary = service._preliminary_scan(mappings)
     ranked = sorted(
@@ -132,7 +132,7 @@ def test_preliminary_keeps_top_five():
 
 
 def test_deep_limit_is_five():
-    assert TestableRadar.DEEP_SPOT_LIMIT == 5
+    assert RadarHarness.DEEP_SPOT_LIMIT == 5
 
 
 if __name__ == "__main__":
