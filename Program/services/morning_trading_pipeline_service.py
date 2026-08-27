@@ -24,6 +24,13 @@ class MorningTradingPipelineService:
     }
     VALID_SETUPS = {"FIRST_PULLBACK", "FIRST_REBOUND", "BREAKOUT", "PULLBACK", "REBOUND"}
     VALID_STATES = {"WAIT", "WATCH", "READY", "CONFIRMED"}
+    FUTURES_MAPPING_FIELDS = (
+        "futures_ticker", "futures_class_code", "futures_expiry", "days_to_expiry",
+        "selection_score", "liquidity_score", "spread_score", "expiry_score",
+        "spread_percent", "turnover_30m", "trade_count_30m", "depth_notional",
+        "bid", "ask", "last", "futures_selection_version",
+        "futures_selection_candidates",
+    )
 
     def __init__(self, radar_service=None, confirmation_service=None, candidate_service=None, session_service=None):
         self.session_service = session_service or MarketSessionService()
@@ -89,6 +96,26 @@ class MorningTradingPipelineService:
     def _signal_priority(signal_state):
         return {"WAIT": 0, "READY": 1, "CONFIRMED": 2}.get(str(signal_state or "WAIT").upper(), 0)
 
+    @classmethod
+    def _gate_futures_mapping(cls, candidate):
+        """Expose futures mapping only after canonical SPOT readiness.
+
+        Upstream radar services may attach a reference contract after their
+        single-observation SPOT check. The stateful live pipeline is the final
+        authority for what reaches the user, so ARMED/WAIT output cannot carry
+        futures mapping data before the canonical stability gate reaches READY.
+        """
+        signal_state = str(candidate.get("signal_state") or "WAIT").upper()
+        if signal_state in {"READY", "CONFIRMED"}:
+            candidate["futures_selection_reason"] = candidate.get(
+                "futures_selection_reason", "POST_SPOT_READINESS_MAPPING"
+            )
+            return
+
+        for field in cls.FUTURES_MAPPING_FIELDS:
+            candidate[field] = None if field in {"futures_expiry", "selection_score", "liquidity_score", "spread_score", "expiry_score", "spread_percent", "turnover_30m", "trade_count_30m", "depth_notional", "bid", "ask", "last", "futures_selection_version", "futures_selection_candidates"} else ""
+        candidate["futures_selection_reason"] = "WAITING_FOR_CANONICAL_SPOT_READINESS"
+
     def _advance_signal_state(self, candidate):
         """Apply canonical SPOT lifecycle with a two-observation anti-noise gate."""
         ticker = str(candidate.get("spot_ticker") or candidate.get("ticker") or "").upper()
@@ -116,6 +143,7 @@ class MorningTradingPipelineService:
         candidate["futures_confirmation_status"] = "MAPPING_ONLY"
         candidate["futures_confirmation_score"] = 0
         candidate["futures_confirmation_reason"] = "Futures are reference-only; confirmation is not part of the SPOT signal"
+        self._gate_futures_mapping(candidate)
         self._signal_history[ticker] = {
             "spot_price": current_price,
             "signal_state": lifecycle["signal_state"],
