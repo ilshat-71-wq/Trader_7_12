@@ -9,13 +9,14 @@ from api.bcs_api import BCSAPI
 from services.two_phase_futures_morning_radar_service import TwoPhaseFuturesMorningRadarService
 from services.futures_trade_candidate_service import FuturesTradeCandidateService
 from services.market_session_service import MarketSessionService
-from services.spot_signal_contract import directional_rs, readiness_state, trigger_active, trigger_present
+from services.spot_signal_contract import directional_rs, lifecycle_state, trigger_active, trigger_present
 
 
 class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
     VERSION = "1.4"
+    SIGNAL_STABILITY_OBSERVATIONS = 1
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -35,6 +36,7 @@ class MorningTradingPipelineService:
         self.confirmation_service = confirmation_service
         self.candidate_service = candidate_service or FuturesTradeCandidateService()
         self._last_scan_diagnostics = {}
+        self._signal_history = {}
 
     @classmethod
     def _session_rank_score(cls, candidate, session):
@@ -83,33 +85,44 @@ class MorningTradingPipelineService:
     def _trigger_active(candidate):
         return trigger_active(candidate.get("direction"), candidate.get("spot_price", candidate.get("last_close", 0)), candidate.get("entry_trigger", 0))
 
-    @classmethod
-    def _advance_signal_state(cls, candidate):
-        """Derive readiness from the canonical SPOT signal contract only."""
-        setup_state = cls._setup_state(candidate)
-        setup = str(candidate.get("setup") or "NONE").upper()
-        direction = str(candidate.get("direction") or "NONE").upper()
-        trigger_exists = cls._trigger_present(candidate)
-        trigger_is_active = cls._trigger_active(candidate)
-        candidate["trigger_present"] = trigger_exists
-        candidate["trigger_active"] = trigger_is_active
-        candidate["signal_state"] = readiness_state(setup_state, direction, setup, candidate.get("entry_trigger", 0), candidate.get("spot_price", candidate.get("last_close", 0)))
+    @staticmethod
+    def _signal_priority(signal_state):
+        return {"WAIT": 0, "READY": 1, "CONFIRMED": 2}.get(str(signal_state or "WAIT").upper(), 0)
+
+    def _advance_signal_state(self, candidate):
+        """Apply the canonical SPOT lifecycle and retain only local scan history."""
+        ticker = str(candidate.get("spot_ticker") or candidate.get("ticker") or "").upper()
+        previous = self._signal_history.get(ticker, {})
+        previous_price = previous.get("spot_price")
+        previous_signal = previous.get("signal_state")
+        current_price = candidate.get("spot_price", candidate.get("last_close", 0))
+        active_now = self._trigger_active(candidate)
+        consecutive_active = (int(previous.get("consecutive_active", 0)) + 1) if active_now else 0
+        if not active_now:
+            consecutive_active = 0
+        lifecycle = lifecycle_state(
+            self._setup_state(candidate),
+            candidate.get("direction"),
+            candidate.get("setup"),
+            candidate.get("entry_trigger", 0),
+            current_price,
+            previous_price=previous_price,
+            prior_signal_state=previous_signal,
+            consecutive_active=consecutive_active,
+            min_active_observations=self.SIGNAL_STABILITY_OBSERVATIONS,
+        )
+        candidate.update(lifecycle)
+        candidate["trigger_present"] = self._trigger_present(candidate)
+        candidate["trigger_active"] = lifecycle["trigger_active"]
         candidate["futures_confirmation"] = "NOT_APPLICABLE"
         candidate["futures_confirmation_status"] = "MAPPING_ONLY"
         candidate["futures_confirmation_score"] = 0
         candidate["futures_confirmation_reason"] = "Futures are reference-only; confirmation is not part of the SPOT signal"
-        if direction not in {"LONG", "SHORT"} or setup not in cls.VALID_SETUPS:
-            candidate["signal_state_reason"] = "SPOT setup is not ready"
-        elif not trigger_exists:
-            candidate["signal_state_reason"] = "SPOT setup has no valid trigger level"
-        elif not trigger_is_active:
-            candidate["signal_state_reason"] = "SPOT setup is armed; waiting for the directional trigger"
-        elif candidate["signal_state"] == "CONFIRMED":
-            candidate["signal_state_reason"] = "SPOT setup and directional trigger are confirmed by SPOT price structure"
-        elif candidate["signal_state"] == "READY":
-            candidate["signal_state_reason"] = "SPOT setup is armed and the directional trigger is active"
-        else:
-            candidate["signal_state_reason"] = "SPOT setup is not ready"
+        self._signal_history[ticker] = {
+            "spot_price": current_price,
+            "signal_state": lifecycle["signal_state"],
+            "consecutive_active": lifecycle["stability_observations"],
+        }
 
     def scan(self, mappings=None, confirmations=None, limit=3):
         session_info = self.session_service.get_session_info()
@@ -133,12 +146,31 @@ class MorningTradingPipelineService:
             candidate["setup_state"] = self._setup_state(candidate)
             candidate["selection_role"] = "TOP_WATCHLIST"
             self._advance_signal_state(candidate)
-        candidates.sort(key=lambda item: (item.get("opportunity_score", 0), item.get("candidate_score", 0), item.get("spot_session_activity_ratio", 0), item.get("spot_money_per_minute", 0), item.get("spot_money_volume", 0), self._directional_rs(item), item.get("setup_score", 0), item.get("spot_ticker", "")), reverse=True)
+        candidates.sort(key=lambda item: (
+            self._signal_priority(item.get("signal_state")),
+            item.get("opportunity_score", 0),
+            item.get("candidate_score", 0),
+            self._directional_rs(item),
+            item.get("setup_score", 0),
+            item.get("spot_session_activity_ratio", 0),
+            item.get("spot_money_per_minute", 0),
+            item.get("spot_money_volume", 0),
+            item.get("spot_ticker", ""),
+        ), reverse=True)
         selected = candidates[:max(0, int(limit or 0))]
         for rank, candidate in enumerate(selected, start=1):
             candidate["pipeline_version"] = self.VERSION
             candidate["rank"] = rank
-        self._last_scan_diagnostics = {"session": session, "radar_results": len(radar_results), "candidates": len(candidates), "selected": len(selected), "ready": sum(1 for item in candidates if item.get("signal_state") == "READY"), "confirmed": sum(1 for item in candidates if item.get("signal_state") == "CONFIRMED"), "watch": sum(1 for item in candidates if self._setup_state(item) == "WATCH"), "wait": sum(1 for item in candidates if self._setup_state(item) == "WAIT")}
+        self._last_scan_diagnostics = {
+            "session": session,
+            "radar_results": len(radar_results),
+            "candidates": len(candidates),
+            "selected": len(selected),
+            "ready": sum(1 for item in candidates if item.get("signal_state") == "READY"),
+            "confirmed": sum(1 for item in candidates if item.get("signal_state") == "CONFIRMED"),
+            "watch": sum(1 for item in candidates if self._setup_state(item) == "WATCH"),
+            "wait": sum(1 for item in candidates if self._setup_state(item) == "WAIT"),
+        }
         if selected:
             selected[0]["scan_diagnostics"] = dict(self._last_scan_diagnostics)
         return selected
@@ -168,7 +200,8 @@ class MorningTradingPipelineService:
         print()
         print("Pipeline: FAST SPOT SCREEN -> DEEP SPOT H1/RS/M5 -> SETUP/TRIGGER -> READINESS -> FUTURES MAPPING")
         print("Direction, setup, trigger and readiness are determined from SPOT only.")
-        print("READY = valid SPOT setup + active directional trigger; CONFIRMED = SPOT setup itself confirmed by SPOT structure.")
+        print("READY = valid SPOT setup + active directional trigger + stability requirement.")
+        print("CONFIRMED = SPOT setup itself confirmed by SPOT structure.")
         print("Futures are mapping-only and never change eligibility, direction, RS, setup, readiness or ranking.")
         print("Scanner output is read-only and contains no portfolio sizing, SL/TP or order execution.")
         print("=" * 128)
