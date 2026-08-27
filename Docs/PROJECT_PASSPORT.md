@@ -147,7 +147,20 @@ Canonical contract допускает прозрачную агрегацию:
 
 Все компоненты ограничиваются диапазоном `0..100`. Если дополнительные компоненты не переданы, сохраняется базовый setup quality без искусственного ухудшения.
 
-Это подготовительный слой для дальнейшего профессионального quality engine; существующий breakout service пока не объявляется полной confirmation-моделью.
+### Setup Quality Engine — 27.08.2026
+
+Создан deterministic network-free `Program/services/setup_quality_service.py` как отдельный quality layer. Он не меняет lifecycle и не может сам перевести setup в `READY/CONFIRMED`.
+
+Качество разложено на независимые компоненты:
+
+- `geometry` — 30%;
+- `candle` — 25%;
+- `rejection` — 20%;
+- `continuation` — 25%.
+
+Каждый компонент ограничен `0..100`. Отдельно сохраняются `setup_quality_score`, `quality_components` и `setup_quality_reasons`. Отсутствующие OHLC-данные не превращаются в искусственное качество.
+
+Первый quality layer пока является изолированным canonical service: он не изменяет существующую selection/lifecycle семантику. Следующим шагом будет безопасная интеграция его результата в SetupEngine и live/historical SPOT projections с regression parity.
 
 ---
 
@@ -236,6 +249,8 @@ Deterministic regression tests не должны зависеть от дейс�
 
 После lifecycle hardening тестовые ожидания pipeline приведены в соответствие с новой семантикой: `WATCH + trigger не достигнут = ARMED`, а `WAIT = WAIT`.
 
+Добавлена отдельная regression matrix `Program/test_setup_quality_service.py` для bounded score, прозрачных компонентов, различия confirmed/unconfirmed continuation и отсутствия искусственного качества при неполных OHLC.
+
 ---
 
 ## 13. VALIDATED CHECKPOINTS
@@ -272,46 +287,32 @@ Futures metrics исключены из SPOT score/ranking. Production и histor
 
 27.08.2026 historical replay переведён на canonical `lifecycle_state()` из `spot_signal_contract.py`. Локальная readiness/trigger формула удалена; historical checkpoints теперь несут единый canonical lifecycle и reason trail. Добавлены regression tests для ARMED, READY, monotonicity и terminal invalidation.
 
+### Setup quality layer
+
+27.08.2026 создан отдельный canonical `SetupQualityService` с bounded structural scoring и offline regression matrix. Quality layer изолирован от lifecycle и ranking до завершения integration/parity этапа.
+
 ---
 
-## 14. CURRENT CHECKPOINT — HISTORICAL CANONICAL BOUNDARY CLOSED
+## 14. CURRENT CHECKPOINT — SETUP QUALITY LAYER CREATED
 
 **Дата:** 27.08.2026  
-**Commits:** `526b5dd`, `27ae47c`.
+**Commits:** `fa1fe9d`, `23eb1f1`.
 
 ### Что сделано
 
-1. Historical replay импортирует canonical `lifecycle_state()`.
-2. Каждый replay checkpoint декорируется canonical lifecycle.
-3. Historical `_first_ready()` больше не содержит собственной readiness формулы.
-4. Historical `_spot_trigger_active()` стал compatibility projection на canonical contract.
-5. Historical result сохраняет `signal_state`, `trigger_state` и `signal_state_reason`.
-6. Проверяется monotonic lifecycle между checkpoint-ами.
-7. Terminal invalidation не может самопроизвольно вернуться в READY/CONFIRMED.
-8. Futures boundary не затронут и остаётся post-SPOT mapping only.
-9. Regression coverage расширен историческим lifecycle.
+1. Создан network-free `SetupQualityService`.
+2. Setup quality отделён от lifecycle state.
+3. Введены четыре независимых компонента: geometry/candle/rejection/continuation.
+4. Все компоненты и итог ограничены `0..100`.
+5. Сохраняются прозрачные `quality_components` и `setup_quality_reasons`.
+6. Неполные OHLC не создают искусственного качества.
+7. Подтверждённый continuation не смешивается с самим фактом наличия setup.
+8. Futures boundary не затронут.
+9. Публичный pipeline version не изменён.
 
-### Архитектурный результат
+### Важное архитектурное ограничение
 
-```text
-LIVE SPOT
-    │
-    ├──────────────┐
-    │              │
-    ▼              ▼
-CANONICAL SPOT SIGNAL CONTRACT
-    ▲              ▲
-    │              │
-HISTORICAL REPLAY ┘
-    │
-    ▼
-READY / CONFIRMED
-    │
-    ▼
-FUTURES MAPPING ONLY
-```
-
-Теперь live и historical используют один lifecycle decision boundary.
+Quality service пока является **изолированным layer**. Он не меняет `setup_state`, canonical lifecycle или ranking. Это намеренный промежуточный checkpoint: сначала проверяем deterministic quality semantics, затем интегрируем её в SetupEngine и live/historical projections с parity tests.
 
 ---
 
@@ -333,14 +334,15 @@ FUTURES MAPPING ONLY
 
 ## 16. NEXT ENGINEERING PRIORITY
 
-Следующий уровень — **профессиональный SETUP QUALITY engine**:
+Следующий уровень — **интеграция SETUP QUALITY в SetupEngine и SPOT projections**:
 
-1. отделить structural setup quality от простого `setup_state`;
-2. формализовать impulse, retracement, consolidation/stabilization и breakout/rebound quality;
-3. исключить двойной учёт одного и того же price evidence;
-4. связать quality с canonical contract без переноса решения во futures;
-5. добавить LONG/SHORT и historical/live regression matrix;
-6. затем перейти к trigger re-arming / anti-churn tuning.
+1. SetupEngine должен отдавать quality вместе с setup, не меняя lifecycle semantics;
+2. quality должен использовать только candles, доступные на соответствующем checkpoint;
+3. setup state и quality не должны подменять друг друга;
+4. live и historical должны получать одинаковый quality result;
+5. ranking пока не должен автоматически начинать двойной учёт quality;
+6. добавить LONG/SHORT, WAIT/READY и historical/live parity regression;
+7. затем перейти к trigger re-arming / anti-churn tuning.
 
 Не менять публичный pipeline version без отдельного решения.
 
