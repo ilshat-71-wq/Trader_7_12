@@ -2,11 +2,15 @@
 
 Pure SPOT price-action detection. No broker calls and no orders.
 The caller supplies the candle window, so no future candles are introduced.
+Setup quality is calculated by the canonical network-free quality service and
+never changes setup lifecycle semantics.
 """
+
+from services.setup_quality_service import SetupQualityService
 
 
 class SetupEngine:
-    VERSION = "0.1"
+    VERSION = "0.2"
     MIN_IMPULSE_MOVE_PERCENT = 0.15
     MAX_PULLBACK_PERCENT = 0.80
     MIN_RANGE_CANDLES = 3
@@ -27,11 +31,20 @@ class SetupEngine:
         high, low, close = cls._f(candle.get("high")), cls._f(candle.get("low")), cls._f(candle.get("close"))
         return close > 0 and high >= low > 0
 
+    @staticmethod
+    def _with_quality(result, candles):
+        enriched = dict(result)
+        quality = SetupQualityService.score(enriched, candles)
+        enriched.update(quality)
+        return enriched
+
     @classmethod
     def _empty(cls, direction):
         return {"version": cls.VERSION, "setup": "NONE", "setup_direction": direction,
                 "setup_state": "WAIT", "entry_trigger": 0.0,
-                "setup_index": None, "confirmation_index": None, "level": 0.0}
+                "setup_index": None, "confirmation_index": None, "level": 0.0,
+                "setup_quality_score": 0.0, "setup_quality_reasons": [],
+                "quality_components": {}}
 
     @classmethod
     def _result(cls, setup, direction, state, trigger=0.0, setup_index=None, confirmation_index=None, level=0.0):
@@ -153,6 +166,7 @@ class SetupEngine:
             cls._pullback(prepared, direction),
             cls._breakout(prepared, direction),
         ]
+        candidates = [cls._with_quality(candidate, prepared) for candidate in candidates]
         ready = [c for c in candidates if c["setup_state"] == "READY"]
         selected = min(ready, key=lambda c: c["confirmation_index"]) if ready else next((c for c in candidates if c["setup"] != "NONE"), cls._empty(direction))
         result = dict(selected)
