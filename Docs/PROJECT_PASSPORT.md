@@ -377,3 +377,49 @@ SHORT → directional_rs = -RS
 > **Session ranking не должен нарушать смысл directional RS: больший directional RS всегда означает более сильную поддержку текущего направления.**
 
 Futures по-прежнему не участвует в SPOT ranking.
+
+---
+
+## 17. CURRENT CHECKPOINT — CANONICAL SPOT SIGNAL CONTRACT
+
+**Дата:** 27.08.2026  
+**Service:** `spot_signal_contract.py`
+
+Выделены чистые, детерминированные правила SPOT-сигнала в отдельный контрактный модуль:
+
+- `directional_rs()`;
+- `trigger_present()`;
+- `trigger_active()`;
+- `readiness_state()`;
+- `normalize_direction()`.
+
+Контракт фиксирует единый смысл directional RS и directional trigger activation без обращения к BCS, сети, futures или live market-data.
+
+### Contract rules
+
+```text
+LONG  → directional_rs =  RS
+SHORT → directional_rs = -RS
+
+LONG  → trigger_active iff spot_price >= entry_trigger
+SHORT → trigger_active iff spot_price <= entry_trigger
+```
+
+`readiness_state()` допускает `READY` только при валидном SPOT setup и фактически активном directional trigger; `CONFIRMED` сохраняется только для подтверждённого SPOT setup.
+
+### Regression coverage
+
+Добавлен `Program/test_spot_signal_contract.py`, который проверяет:
+
+- соответствие directional RS live pipeline контракту;
+- соответствие trigger activation live pipeline и historical replay контракту;
+- запрет activation при отсутствующем trigger;
+- детерминированную SPOT-only readiness модель.
+
+### Инвариант
+
+> **Production и historical replay должны интерпретировать одинаковые SPOT evidence одинаково; futures не является частью signal contract.**
+
+Это создаёт отдельный архитектурный слой между market evidence и сервисами:
+
+`SPOT EVIDENCE → CANONICAL SIGNAL CONTRACT → PIPELINE / HISTORICAL REPLAY / UI`
