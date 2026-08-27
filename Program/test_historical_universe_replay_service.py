@@ -135,6 +135,19 @@ def test_historical_stability_counter_resets_on_trigger_loss():
     assert [item["signal_state"] for item in result] == ["ARMED", "ARMED", "ARMED", "READY"]
 
 
+def test_historical_new_setup_resets_stability_counter():
+    replay = [
+        {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.2},
+        {"checkpoint": "08:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.3},
+        {"checkpoint": "09:00", "direction": "LONG", "setup": "PULLBACK", "setup_state": "WATCH", "entry_trigger": 101, "spot_price": 101.2, "new_setup": True},
+    ]
+    result = HistoricalUniverseReplayService._canonical_lifecycle(replay)
+    assert result[1]["stability_observations"] == 2
+    assert result[2]["stability_observations"] == 1
+    assert result[2]["signal_state"] == "ARMED"
+    assert result[2]["lifecycle_reset"] is True
+
+
 def test_canonical_historical_lifecycle_is_monotonic_across_checkpoints():
     replay = [
         {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "WATCH", "entry_trigger": 100, "spot_price": 99},
