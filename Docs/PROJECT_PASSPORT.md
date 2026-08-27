@@ -200,9 +200,15 @@ LONG  → spot_price >= entry_trigger
 SHORT → spot_price <= entry_trigger
 ```
 
-Historical checkpoint хранит `spot_price` и `trigger_active`.
+Historical checkpoint хранит `spot_price`, `trigger_active`, `trigger_state` и canonical `signal_state`.
 
-Canonical lifecycle является network-free и предназначен для общего применения live/historical boundary; следующая задача — заменить оставшиеся локальные historical readiness checks прямым использованием canonical lifecycle.
+### Historical canonical boundary — 27.08.2026
+
+`HistoricalUniverseReplayService` больше не определяет readiness отдельной формулой `setup_state + trigger`. Каждый historical checkpoint проходит через тот же network-free `lifecycle_state()` из `spot_signal_contract.py`, что и live lifecycle.
+
+Historical replay теперь сохраняет canonical lifecycle evidence, включая `signal_state_reason`, `trigger_crossed`, `trigger_invalidated` и stability fields. Compatibility helper `_spot_trigger_active()` остаётся только projection на canonical contract и не содержит собственной directional логики.
+
+Это закрывает критическое расхождение между live и historical readiness boundary без изменения публичной pipeline version.
 
 ---
 
@@ -223,7 +229,10 @@ Deterministic regression tests не должны зависеть от дейс�
 - запрет возврата из INVALIDATED без нового setup;
 - anti-regression READY при шумовом наблюдении;
 - quality aggregation;
-- live/historical trigger parity.
+- live/historical trigger parity;
+- historical canonical lifecycle projection;
+- historical monotonic lifecycle across checkpoints;
+- historical terminal invalidation without new setup.
 
 После lifecycle hardening тестовые ожидания pipeline приведены в соответствие с новой семантикой: `WATCH + trigger не достигнут = ARMED`, а `WAIT = WAIT`.
 
@@ -259,39 +268,50 @@ Futures metrics исключены из SPOT score/ranking. Production и histor
 
 27.08.2026 устранена ошибка, при которой `setup_state=WAIT` мог становиться `READY` только из-за активной цены. Теперь `WAIT` остаётся `WAIT`, а `WATCH` с неактивным trigger корректно отображается как `ARMED`.
 
+### Historical canonical boundary
+
+27.08.2026 historical replay переведён на canonical `lifecycle_state()` из `spot_signal_contract.py`. Локальная readiness/trigger формула удалена; historical checkpoints теперь несут единый canonical lifecycle и reason trail. Добавлены regression tests для ARMED, READY, monotonicity и terminal invalidation.
+
 ---
 
-## 14. CURRENT CHECKPOINT — CANONICAL SPOT LIFECYCLE HARDENED
+## 14. CURRENT CHECKPOINT — HISTORICAL CANONICAL BOUNDARY CLOSED
 
 **Дата:** 27.08.2026  
-**Commits:** `fcca362`, `eb2fdee`, `66ebf82`, `c4b204a`, `df6b60e`, `ae6f6af`.
+**Commits:** `526b5dd`, `27ae47c`.
 
 ### Что сделано
 
-1. `spot_signal_contract.py` получил canonical lifecycle semantics.
-2. Разделены trigger presence, activation и crossing.
-3. Добавлен directional invalidation.
-4. `INVALIDATED` стал terminal состоянием текущего lifecycle.
-5. Повторная активация разрешается только через явный новый setup.
-6. Stability requirement остаётся отдельным параметром deterministic contract.
-7. Добавлена прозрачная bounded quality aggregation.
-8. Добавлена regression matrix для state machine, invalidation, crossing и anti-regression.
-9. Исправлена boundary-ошибка `WAIT → READY` при активной цене.
-10. Pipeline regression приведён в соответствие с canonical состояниями `WAIT / WATCH / ARMED / READY / CONFIRMED`.
+1. Historical replay импортирует canonical `lifecycle_state()`.
+2. Каждый replay checkpoint декорируется canonical lifecycle.
+3. Historical `_first_ready()` больше не содержит собственной readiness формулы.
+4. Historical `_spot_trigger_active()` стал compatibility projection на canonical contract.
+5. Historical result сохраняет `signal_state`, `trigger_state` и `signal_state_reason`.
+6. Проверяется monotonic lifecycle между checkpoint-ами.
+7. Terminal invalidation не может самопроизвольно вернуться в READY/CONFIRMED.
+8. Futures boundary не затронут и остаётся post-SPOT mapping only.
+9. Regression coverage расширен историческим lifecycle.
 
 ### Архитектурный результат
 
 ```text
-CANONICAL SPOT CONTRACT
-        ↓
-STATE / TRIGGER LIFECYCLE
-        ↓
+LIVE SPOT
+    │
+    ├──────────────┐
+    │              │
+    ▼              ▼
+CANONICAL SPOT SIGNAL CONTRACT
+    ▲              ▲
+    │              │
+HISTORICAL REPLAY ┘
+    │
+    ▼
 READY / CONFIRMED
-        ↓
+    │
+    ▼
 FUTURES MAPPING ONLY
 ```
 
-Это не изменение торговой стратегии и не разрешение на автоматическую торговлю. Это укрепление deterministic analytical boundary.
+Теперь live и historical используют один lifecycle decision boundary.
 
 ---
 
@@ -313,13 +333,14 @@ FUTURES MAPPING ONLY
 
 ## 16. NEXT ENGINEERING PRIORITY
 
-Следующий уровень — **production/historical boundary audit**:
+Следующий уровень — **профессиональный SETUP QUALITY engine**:
 
-1. убрать оставшиеся локальные readiness/trigger rules из `historical_universe_replay_service.py`, `historical_candidate_ranker_service.py`, futures adapters и других boundary-модулей там, где они дублируют canonical contract;
-2. подключить canonical lifecycle к historical replay без изменения его фактической семантики;
-3. добавить contract-level audit trail с причиной каждого перехода;
-4. затем перейти к профессиональному SETUP QUALITY / breakout quality engine;
-5. после этого — к scoring и anti-churn tuning на regression matrix.
+1. отделить structural setup quality от простого `setup_state`;
+2. формализовать impulse, retracement, consolidation/stabilization и breakout/rebound quality;
+3. исключить двойной учёт одного и того же price evidence;
+4. связать quality с canonical contract без переноса решения во futures;
+5. добавить LONG/SHORT и historical/live regression matrix;
+6. затем перейти к trigger re-arming / anti-churn tuning.
 
 Не менять публичный pipeline version без отдельного решения.
 
