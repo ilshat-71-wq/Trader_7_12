@@ -8,6 +8,7 @@ from services.spot_signal_contract import (
     trigger_crossed,
     trigger_present,
     trigger_state,
+    trigger_transition,
 )
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
@@ -55,6 +56,38 @@ def test_trigger_state_distinguishes_armed_active_and_invalidated():
     assert trigger_state("LONG", 99, 100) == "ARMED"
     assert trigger_state("LONG", 100, 100) == "ACTIVE"
     assert trigger_state("LONG", 94, 100, 95) == "INVALIDATED"
+
+
+def test_trigger_transition_records_crossing_without_confusing_state():
+    result = trigger_transition("LONG", 99, 100, 100, prior_trigger_state="ARMED")
+    assert result["trigger_state"] == "ACTIVE"
+    assert result["trigger_crossed"] is True
+    assert result["trigger_rearmed"] is False
+
+
+def test_trigger_transition_rearms_after_activation_without_invalidation():
+    result = trigger_transition("LONG", 101, 99, 100, prior_trigger_state="ACTIVE")
+    assert result["trigger_state"] == "ARMED"
+    assert result["trigger_active"] is False
+    assert result["trigger_rearmed"] is True
+    assert result["trigger_invalidated"] is False
+
+
+def test_trigger_transition_invalidation_overrides_rearm():
+    result = trigger_transition("LONG", 101, 94, 100, invalidation_level=95, prior_trigger_state="ACTIVE")
+    assert result["trigger_state"] == "INVALIDATED"
+    assert result["trigger_rearmed"] is False
+    assert result["trigger_invalidated"] is True
+
+
+def test_trigger_transition_short_is_directional():
+    crossed = trigger_transition("SHORT", 101, 99, 100, prior_trigger_state="ARMED")
+    assert crossed["trigger_state"] == "ACTIVE"
+    assert crossed["trigger_crossed"] is True
+
+    rearmed = trigger_transition("SHORT", 99, 101, 100, prior_trigger_state="ACTIVE")
+    assert rearmed["trigger_state"] == "ARMED"
+    assert rearmed["trigger_rearmed"] is True
 
 
 def test_readiness_contract_is_spot_only():
