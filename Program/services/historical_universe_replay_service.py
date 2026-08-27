@@ -21,6 +21,7 @@ class HistoricalUniverseReplayService:
     MIN_DAYS_TO_EXPIRY = 3
     RS_LOOKBACK_DAYS = 3
     RS_TICKERS = ("IMOEX2", "IRUS2")
+    SIGNAL_STABILITY_OBSERVATIONS = 2
 
     def __init__(self, mapping_service=None, history_service=None, replay_service=None, radar_helper=None, spot_universe_service=None):
         self.mapping_service = mapping_service or FuturesSpotMappingService()
@@ -234,14 +235,15 @@ class HistoricalUniverseReplayService:
             return "LATE"
         return "NONE"
 
-    @staticmethod
-    def _canonical_lifecycle(replay):
-        """Decorate historical checkpoints with the canonical SPOT lifecycle only."""
+    @classmethod
+    def _canonical_lifecycle(cls, replay):
+        """Decorate historical checkpoints with the same stability gate as live SPOT."""
         if not isinstance(replay, list):
             return []
         decorated = []
         previous_price = None
         previous_state = None
+        consecutive_active = 0
         for raw in replay:
             if not isinstance(raw, dict):
                 continue
@@ -250,6 +252,17 @@ class HistoricalUniverseReplayService:
                 spot_price = float(item.get("spot_price", item.get("close", 0)) or 0)
             except (TypeError, ValueError):
                 spot_price = 0.0
+            try:
+                direction = str(item.get("direction") or "").upper()
+                trigger = float(item.get("entry_trigger", 0) or 0)
+                active_now = spot_price > 0 and trigger > 0 and (
+                    (direction == "LONG" and spot_price >= trigger)
+                    or (direction == "SHORT" and spot_price <= trigger)
+                )
+            except (TypeError, ValueError):
+                active_now = False
+            consecutive_active = consecutive_active + 1 if active_now else 0
+            new_setup = bool(item.get("new_setup", False))
             lifecycle = lifecycle_state(
                 setup_state=item.get("setup_state", "WAIT"),
                 direction=item.get("direction"),
@@ -257,14 +270,16 @@ class HistoricalUniverseReplayService:
                 entry_trigger=item.get("entry_trigger", 0),
                 spot_price=spot_price,
                 previous_price=previous_price,
-                prior_signal_state=previous_state,
-                consecutive_active=1,
-                min_active_observations=1,
+                prior_signal_state=None if new_setup else previous_state,
+                consecutive_active=consecutive_active,
+                min_active_observations=cls.SIGNAL_STABILITY_OBSERVATIONS,
                 invalidation_level=item.get("invalidation_level"),
-                new_setup=bool(item.get("new_setup", False)),
+                new_setup=new_setup,
             )
             item.update(lifecycle)
             item["spot_price"] = spot_price
+            item["stability_observations"] = consecutive_active
+            item["stability_required"] = cls.SIGNAL_STABILITY_OBSERVATIONS
             decorated.append(item)
             previous_price = spot_price if spot_price > 0 else previous_price
             previous_state = lifecycle.get("signal_state")
