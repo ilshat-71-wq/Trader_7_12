@@ -1,6 +1,3 @@
-from datetime import date
-from types import SimpleNamespace
-
 from services.historical_universe_replay_service import HistoricalUniverseReplayService
 
 
@@ -71,3 +68,27 @@ def test_confirmation_window_remains_deterministic():
     assert HistoricalUniverseReplayService.confirmation_window("13:00") == "LATE"
     assert HistoricalUniverseReplayService.confirmation_window("13:01") == "NONE"
     assert HistoricalUniverseReplayService.confirmation_window(None) == "NONE"
+
+
+def test_trigger_activation_is_directional():
+    assert HistoricalUniverseReplayService._spot_trigger_active({"direction": "LONG", "spot_price": 101, "entry_trigger": 100}) is True
+    assert HistoricalUniverseReplayService._spot_trigger_active({"direction": "LONG", "spot_price": 99.9, "entry_trigger": 100}) is False
+    assert HistoricalUniverseReplayService._spot_trigger_active({"direction": "SHORT", "spot_price": 99, "entry_trigger": 100}) is True
+    assert HistoricalUniverseReplayService._spot_trigger_active({"direction": "SHORT", "spot_price": 100.1, "entry_trigger": 100}) is False
+
+
+def test_first_ready_requires_active_trigger():
+    replay = [
+        {"checkpoint": "08:00", "direction": "LONG", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99},
+        {"checkpoint": "08:30", "direction": "LONG", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.1},
+    ]
+    ready = HistoricalUniverseReplayService._first_ready(replay)
+    assert ready["checkpoint"] == "08:30"
+
+
+def test_first_ready_does_not_promote_unreached_ready_state():
+    replay = [
+        {"checkpoint": "08:00", "direction": "SHORT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.5},
+        {"checkpoint": "08:30", "direction": "SHORT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.1},
+    ]
+    assert HistoricalUniverseReplayService._first_ready(replay) is None
