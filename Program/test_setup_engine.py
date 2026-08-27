@@ -84,6 +84,40 @@ class SetupEngineTests(unittest.TestCase):
         self.assertGreaterEqual(enriched["setup_quality_score"], 0.0)
         self.assertLessEqual(enriched["setup_quality_score"], 100.0)
 
+    def test_quality_is_deterministic_for_identical_window(self):
+        candles = [
+            candle(100.0, 99.0, 99.5),
+            candle(100.2, 99.2, 99.7),
+            candle(100.1, 99.1, 99.6),
+            candle(100.8, 99.5, 100.6),
+        ]
+        first = SetupEngine.analyze(candles, "LONG")
+        second = SetupEngine.analyze(list(candles), "LONG")
+        self.assertEqual(first["setup"], second["setup"])
+        self.assertEqual(first["setup_state"], second["setup_state"])
+        self.assertEqual(first["entry_trigger"], second["entry_trigger"])
+        self.assertEqual(first["setup_quality_score"], second["setup_quality_score"])
+        self.assertEqual(first["quality_components"], second["quality_components"])
+        self.assertEqual(first["setup_quality_reasons"], second["setup_quality_reasons"])
+
+    def test_quality_uses_only_the_supplied_window(self):
+        prefix = [
+            candle(90.0, 89.0, 89.5),
+            candle(91.0, 90.0, 90.5),
+        ]
+        window = [
+            candle(100.0, 99.0, 99.5),
+            candle(100.2, 99.2, 99.7),
+            candle(100.1, 99.1, 99.6),
+            candle(100.8, 99.5, 100.6),
+        ]
+        base = SetupEngine.analyze(window, "LONG")
+        extended = SetupEngine.analyze(prefix + window, "LONG")
+        self.assertEqual(base["candle_count"], len(window))
+        self.assertEqual(extended["candle_count"], len(prefix) + len(window))
+        self.assertEqual(base["setup_quality_score"], extended["setup_quality_score"])
+        self.assertEqual(base["quality_components"], extended["quality_components"])
+
     def test_invalid_direction(self):
         with self.assertRaises(ValueError):
             SetupEngine.analyze([], "SIDEWAYS")
