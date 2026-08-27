@@ -120,6 +120,20 @@ CONFIRMED
 
 Ключевые инварианты: trigger level и activation разделены; LONG/SHORT activation направленная; crossing фиксируется отдельно; stability учитывается отдельно; старый lifecycle не откатывается из-за шума; futures не участвуют; новый setup явно начинает новый lifecycle.
 
+### Canonical trigger transition — 27.08.2026
+
+Добавлена `trigger_transition()` как единая edge-aware projection для trigger lifecycle.
+
+Она разделяет:
+
+- `trigger_crossed` — факт перехода через trigger на текущем наблюдении;
+- `trigger_active` — текущее level-based состояние;
+- `trigger_state` — `WAITING / ARMED / ACTIVE / INVALIDATED`;
+- `trigger_rearmed` — возврат из `ACTIVE` в `ARMED` без invalidation;
+- `trigger_invalidated` — отдельный terminal risk condition.
+
+Ключевой инвариант: **обычный откат цены после активации не равен invalidation**. Он может re-arm trigger, но не уничтожает setup lifecycle. Только explicit invalidation level переводит trigger в `INVALIDATED`; новый setup нужен для восстановления terminal signal lifecycle.
+
 ---
 
 ## 7. SETUP QUALITY
@@ -193,7 +207,7 @@ Historical replay сохраняет canonical lifecycle evidence, включа�
 
 Deterministic regression tests не зависят от BCS refresh token, сети или live market-data.
 
-Regression matrix canonical contract покрывает directional RS, LONG/SHORT trigger activation/crossing, invalid trigger, WAIT/WATCH/ARMED/READY/CONFIRMED lifecycle, stability, invalidation, new-setup reset и live/historical parity.
+Regression matrix canonical contract покрывает directional RS, LONG/SHORT trigger activation/crossing, invalid trigger, trigger transition/re-arming, WAIT/WATCH/ARMED/READY/CONFIRMED lifecycle, stability, invalidation, new-setup reset и live/historical parity.
 
 `Program/test_setup_quality_service.py` покрывает bounded score, прозрачные компоненты, continuation и incomplete OHLC.
 
@@ -243,26 +257,31 @@ Futures metrics исключены из SPOT score/ranking.
 
 27.08.2026 `SetupEngine` интегрировал canonical `SetupQualityService`: setup detection остаётся владельцем setup state, quality является отдельным enrichment layer, lifecycle и ranking semantics не изменены.
 
+### Canonical trigger transition
+
+27.08.2026 введён `trigger_transition()` для единой edge-aware trigger projection. Crossing, active state, re-arm и invalidation теперь различаются явно; обычный откат после activation не считается invalidation.
+
 ---
 
-## 14. CURRENT CHECKPOINT — SETUP QUALITY INTEGRATED INTO SETUPENGINE
+## 14. CURRENT CHECKPOINT — CANONICAL TRIGGER TRANSITION
 
 **Дата:** 27.08.2026  
-**Commit:** `a536286`.
+**Commit:** `7070991` + regression `268f7f0`.
 
 ### Что сделано
 
-1. `SetupEngine.analyze()` обогащает setup candidates canonical quality result.
-2. Используется только текущее подготовленное candle window.
-3. `setup_state` не зависит от quality score.
-4. Earliest READY selection не изменена.
-5. Quality остаётся network-free и deterministic.
-6. Futures boundary не затронут.
-7. Публичный pipeline version не изменён.
+1. Добавлен canonical `trigger_transition()` в `spot_signal_contract.py`.
+2. Crossing и текущая activation разделены.
+3. Обычный откат после activation получает `trigger_rearmed=True`, а не invalidation.
+4. Explicit invalidation level остаётся terminal trigger condition.
+5. `lifecycle_state()` использует ту же trigger transition projection.
+6. Добавлены LONG/SHORT regression cases для crossing, re-arm и invalidation.
+7. Futures boundary не затронут.
+8. Публичный pipeline version не изменён.
 
 ### Следующая обязательная проверка
 
-Подтвердить локально regression matrix и отсутствие lifecycle/ranking regression. Затем перейти к **SPOT projection parity: live + historical получают одинаковое quality enrichment**, после чего — trigger re-arming / anti-churn.
+Подтвердить локально полный lifecycle regression. Затем провести **SPOT quality projection parity** для live/historical setup projections. После parity — anti-churn tuning и финальную regression matrix.
 
 ---
 
@@ -290,7 +309,7 @@ Futures metrics исключены из SPOT score/ranking.
 2. historical checkpoint должен получать тот же deterministic quality result;
 3. quality не должен менять lifecycle или ranking;
 4. regression должна сравнивать live/historical quality на идентичном candle window;
-5. затем перейти к trigger re-arming / anti-churn tuning.
+5. затем перейти к anti-churn tuning, используя новый canonical trigger transition.
 
 Не менять публичный pipeline version без отдельного решения.
 
