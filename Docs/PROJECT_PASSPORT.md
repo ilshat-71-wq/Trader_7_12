@@ -223,6 +223,14 @@ Regression matrix canonical contract покрывает directional RS, LONG/SHO
 
 Quality parity regression дополнительно проверяет повторяемость результата на идентичном window и отсутствие скрытого влияния внешнего состояния.
 
+### Anti-churn stability regression — 27.08.2026
+
+Live pipeline теперь требует **2 последовательных наблюдения с активным directional trigger** для перехода в `READY`.
+
+Первое активное наблюдение остаётся `ARMED`; второе последовательное активное наблюдение переводит lifecycle в `READY`. Если trigger не активен, счётчик сбрасывается.
+
+Стабильность не меняет ranking, candidate score, RS, setup detection или futures mapping boundary. Это исключительно lifecycle anti-noise gate.
+
 ---
 
 ## 13. VALIDATED CHECKPOINTS
@@ -275,37 +283,35 @@ Futures metrics исключены из SPOT score/ranking.
 
 27.08.2026 добавлена regression coverage для deterministic quality на идентичном candle window и защиты от скрытой зависимости от внешнего состояния. Production ranking не изменён.
 
+### Anti-churn / stability hardening
+
+27.08.2026 live pipeline получил двухнаблюдательный stability gate. Единичный активный trigger больше не переводит новый setup непосредственно в READY; требуется второе последовательное активное наблюдение. Existing READY lifecycle не откатывается из-за временного шумового наблюдения.
+
 ---
 
-## 14. CURRENT CHECKPOINT — QUALITY PROJECTION PARITY BASELINE
+## 14. CURRENT CHECKPOINT — ANTI-CHURN / STABILITY HARDENING
 
 **Дата:** 27.08.2026  
-**Commit:** `4577aa9`.
+**Commit:** `723cfa9` + `ed17a5a`.
 
 ### Что сделано
 
-1. `SetupEngine` остаётся единственным владельцем setup detection.
-2. `SetupQualityService` остаётся deterministic/network-free enrichment layer.
-3. Добавлена regression для повторного вычисления quality на идентичном candle window.
-4. Добавлена regression для использования только предоставленного candle window.
-5. Зафиксировано отсутствие влияния quality на setup state, trigger и ranking semantics.
-6. Existing canonical contract, historical lifecycle и live pipeline regression остаются неизменными.
-7. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
-8. Публичный pipeline version не изменён.
-
-### Локальная валидация checkpoint
-
-Ожидается полный зелёный regression после `git pull`: SetupQuality + SetupEngine + canonical SPOT + historical + live pipeline.
+1. `MorningTradingPipelineService.SIGNAL_STABILITY_OBSERVATIONS` повышен с `1` до `2`.
+2. Первый активный trigger observation остаётся `ARMED`.
+3. Второе последовательное активное observation переводит setup в `READY`.
+4. Потеря trigger сбрасывает consecutive-active counter.
+5. Existing `READY` lifecycle защищён от обратного перехода из-за обычного price noise.
+6. Добавлена regression coverage для LONG/SHORT двухнаблюдательной активации.
+7. Добавлен anti-churn regression для сохранения READY после transient observations.
+8. SPOT ranking, quality и futures mapping semantics не изменены.
+9. `PROJECT_PASSPORT.md` обновлён этим checkpoint.
+10. Публичный pipeline version остаётся `1.4`.
 
 ### Следующий обязательный уровень
 
-**Anti-churn / stability hardening** на базе уже введённого canonical trigger transition:
+**End-to-end live ↔ historical parity audit.**
 
-- отделить `trigger_crossed` от устойчивой activation;
-- защитить READY от единичного шумового наблюдения;
-- формализовать минимальное число подтверждающих наблюдений;
-- сохранить deterministic live/historical parity;
-- не изменить SPOT ranking и futures mapping boundary.
+Нужно проверить, что одинаковая последовательность SPOT observations даёт одинаковый lifecycle в live pipeline и historical replay, включая stability counter, trigger crossing, re-arm и invalidation. После этого — ranking audit и финальный release audit.
 
 ---
 
@@ -327,12 +333,11 @@ Futures metrics исключены из SPOT score/ranking.
 
 ## 16. PROJECT COMPLETION ROADMAP
 
-Проект уже прошёл основную архитектурную фазу. До production-ready состояния остаются четыре инженерных блока:
+Проект уже прошёл основную архитектурную фазу. До production-ready состояния остаются три инженерных блока:
 
-1. **Anti-churn / stability** — защита lifecycle от микрошумов и формализация подтверждающих наблюдений.
-2. **End-to-end parity** — финальная проверка live → historical на одинаковых входах без расхождений.
-3. **Ranking / candidate audit** — проверка отсутствия двойного учёта quality/RS/activity и финальный SPOT ranking audit.
-4. **Release audit** — полный offline regression, compile, dependency/import audit, futures mapping boundary, event-risk gate, README/Passport consistency и clean-main verification.
+1. **End-to-end parity** — финальная проверка live → historical на одинаковых входах без расхождений.
+2. **Ranking / candidate audit** — проверка отсутствия двойного учёта quality/RS/activity и финальный SPOT ranking audit.
+3. **Release audit** — полный offline regression, compile, dependency/import audit, futures mapping boundary, event-risk gate, documentation consistency и clean-main verification.
 
 После этих блоков отдельный этап «архитектурной переделки» не планируется. Возможны только bug fixes и controlled calibration по фактическим данным.
 
