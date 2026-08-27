@@ -42,12 +42,27 @@ def test_readiness_contract_is_spot_only():
     assert readiness_state("CONFIRMED", "LONG", "FIRST_PULLBACK", 100, 101) == "CONFIRMED"
 
 
+def test_live_pipeline_advance_signal_state_uses_canonical_contract():
+    cases = [
+        ({"setup_state": "WATCH", "setup": "FIRST_PULLBACK", "direction": "LONG", "entry_trigger": 100, "spot_price": 101}, "READY"),
+        ({"setup_state": "WATCH", "setup": "FIRST_PULLBACK", "direction": "LONG", "entry_trigger": 100, "spot_price": 99}, "WAIT"),
+        ({"setup_state": "WATCH", "setup": "FIRST_REBOUND", "direction": "SHORT", "entry_trigger": 100, "spot_price": 99}, "READY"),
+        ({"setup_state": "WATCH", "setup": "FIRST_REBOUND", "direction": "SHORT", "entry_trigger": 100, "spot_price": 101}, "WAIT"),
+    ]
+    for candidate, expected in cases:
+        candidate = dict(candidate)
+        MorningTradingPipelineService._advance_signal_state(candidate)
+        assert candidate["signal_state"] == expected
+        assert candidate["trigger_active"] == trigger_active(candidate["direction"], candidate["spot_price"], candidate["entry_trigger"])
+
+
 if __name__ == "__main__":
     tests = [
         test_directional_rs_contract_matches_live_pipeline,
         test_trigger_contract_matches_live_and_historical,
         test_invalid_trigger_is_never_active,
         test_readiness_contract_is_spot_only,
+        test_live_pipeline_advance_signal_state_uses_canonical_contract,
     ]
     for test in tests:
         test()
