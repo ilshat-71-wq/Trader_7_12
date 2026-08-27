@@ -336,3 +336,44 @@ SHORT → spot_price <= entry_trigger
 `SPOT PRICE → TRIGGER LEVEL → DIRECTIONAL ACTIVATION → READY → FUTURES MAPPING`
 
 Futures по-прежнему не участвует в определении исторической SPOT readiness.
+
+---
+
+## 16. CURRENT CHECKPOINT — DIRECTIONAL RS RANKING CONSISTENCY
+
+**Дата:** 27.08.2026  
+**Service:** `MorningTradingPipelineService 1.4`  
+**UI:** `WatchlistTraderWindow 1.4`  
+**Commits:** `d2b6d0c`, `2e7c7b8`, `d1d4aad`
+
+Закрыта граница между базовым candidate ranking и session-level re-ranking: production pipeline теперь сохраняет directional RS tie-break после расчёта `opportunity_score`.
+
+### Правило
+
+RS нормализуется относительно направления сценария:
+
+```text
+LONG  → directional_rs =  RS
+SHORT → directional_rs = -RS
+```
+
+Следовательно, при прочих равных:
+
+- LONG с более положительным RS выше;
+- SHORT с более отрицательным RS выше.
+
+Это устраняет ситуацию, когда session-level сортировка могла случайно поставить более слабый SHORT выше более сильного SHORT только потому, что исходное числовое значение RS было «больше».
+
+### Regression coverage
+
+В `Program/test_morning_trading_pipeline_service.py` добавлены проверки directional RS для LONG и SHORT и обновлён pipeline version до `1.4`.
+
+### UI consistency
+
+`Program/watchlist_ui.py` синхронизирован с pipeline version `1.4`; отображаемые `OPPORTUNITY`, `SETUP`, `TRIGGER`, `READY/CONFIRMED` остаются read-only и SPOT-first.
+
+### Инвариант
+
+> **Session ranking не должен нарушать смысл directional RS: больший directional RS всегда означает более сильную поддержку текущего направления.**
+
+Futures по-прежнему не участвует в SPOT ranking.
