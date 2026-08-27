@@ -14,8 +14,6 @@ VALID_SETUPS = {
     "RETEST", "BREAKOUT_AFTER_PULLBACK", "BREAKDOWN_AFTER_REBOUND",
 }
 
-# Canonical monotonic progression for one setup lifecycle. INVALIDATED starts
-# a terminal state; a new setup must receive a new lifecycle id externally.
 STATE_ORDER = {
     "WAIT": 0,
     "WATCH": 1,
@@ -117,6 +115,49 @@ def trigger_state(direction, spot_price, entry_trigger, invalidation_level=None)
     return "ARMED"
 
 
+def trigger_transition(
+    direction,
+    previous_price,
+    spot_price,
+    entry_trigger,
+    invalidation_level=None,
+    prior_trigger_state=None,
+):
+    """Return the canonical trigger transition for one observation.
+
+    Trigger activation is edge-aware (`trigger_crossed`) while the current
+    state remains level-aware (`trigger_active`). A retreat below/above the
+    trigger after activation is represented as `ARMED` with `rearmed=True`;
+    it does not silently invalidate the setup. Invalidation remains terminal
+    and is controlled only by the explicit invalidation level.
+    """
+    prior = str(prior_trigger_state or "").upper()
+    present = trigger_present(entry_trigger)
+    active = trigger_active(direction, spot_price, entry_trigger)
+    crossed = trigger_crossed(direction, previous_price, spot_price, entry_trigger)
+    invalidated = invalidation_active(direction, spot_price, invalidation_level)
+
+    if invalidated:
+        state = "INVALIDATED"
+    elif not present:
+        state = "WAITING"
+    elif active:
+        state = "ACTIVE"
+    else:
+        state = "ARMED"
+
+    rearmed = prior == "ACTIVE" and state == "ARMED" and not invalidated
+    return {
+        "trigger_state": state,
+        "trigger_present": present,
+        "trigger_active": active,
+        "trigger_crossed": crossed,
+        "trigger_invalidated": invalidated,
+        "trigger_rearmed": rearmed,
+        "prior_trigger_state": prior,
+    }
+
+
 def setup_quality_score(setup_quality, breakout_quality=0, structure_quality=0):
     """Combine quality inputs without allowing a component to exceed 100."""
     values = []
@@ -127,8 +168,6 @@ def setup_quality_score(setup_quality, breakout_quality=0, structure_quality=0):
             values.append(0.0)
     if not any(values):
         return 0.0
-    # Existing setup_quality remains the primary component; optional breakout
-    # and structure evidence contribute only when supplied.
     if values[1] == 0 and values[2] == 0:
         return round(values[0], 2)
     return round(values[0] * 0.60 + values[1] * 0.20 + values[2] * 0.20, 2)
@@ -223,7 +262,6 @@ def lifecycle_state(
         trigger = "ACTIVE"
         reason = "trigger active; waiting for stability"
 
-    # Do not allow an old lifecycle to jump backwards unless explicitly reset.
     if not new_setup and prior in STATE_ORDER and signal in STATE_ORDER:
         if STATE_ORDER[signal] < STATE_ORDER[prior] and not invalidated:
             signal = prior
@@ -232,12 +270,16 @@ def lifecycle_state(
             elif prior == "READY":
                 reason = "SPOT lifecycle remains ready"
 
+    transition = trigger_transition(
+        direction,
+        previous_price,
+        spot_price,
+        entry_trigger,
+        invalidation_level=invalidation_level,
+    )
+
     return {
-        "trigger_state": trigger,
-        "trigger_present": present,
-        "trigger_active": active,
-        "trigger_crossed": crossed,
-        "trigger_invalidated": invalidated,
+        **transition,
         "signal_state": signal,
         "signal_ready": signal in {"READY", "CONFIRMED"},
         "signal_confirmed": signal == "CONFIRMED",
