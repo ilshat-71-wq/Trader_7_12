@@ -21,10 +21,10 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check pytest requests
 
-      - name: Compile project Python
-        run: python -m compileall -q Program/services Program/tests
+      - name: Compile repository Python
+        run: python -m compileall -q Program
 
-      - name: Run SPOT-first regression suite
+      - name: Run full repository regression suite
         env:
           PYTHONPATH: Program
-        run: python -m pytest -q Program/tests
+        run: python -m pytest -q Program
