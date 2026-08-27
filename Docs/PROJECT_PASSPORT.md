@@ -2,23 +2,14 @@
 
 **Дата актуализации:** 27.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Рабочая ветка:** `main`
+**Ветка:** `main`  
+**Назначение:** read-only SPOT-first opportunity scanner для самостоятельной intraday-торговли фьючерсами Московской биржи.
+
+> Сканер находит ГДЕ смотреть. Пользователь самостоятельно выбирает фьючерс, график, вход и риск. Исполнение ордеров, SL/TP и position sizing отсутствуют.
 
 ---
 
-## 1. ЦЕЛЬ ПРОЕКТА
-
-Trader_7_12 Pro — read-only аналитический scanner/assistant для самостоятельной intraday-торговли фьючерсами Московской биржи.
-
-Канонический принцип:
-
-> **Сканер находит ГДЕ смотреть. Пользователь самостоятельно выбирает фьючерс, график, вход и риск.**
-
-Исполнение ордеров, SL/TP и position sizing отсутствуют.
-
----
-
-## 2. КАНОНИЧЕСКАЯ SPOT-FIRST АРХИТЕКТУРА
+## 1. КАНОНИЧЕСКАЯ АРХИТЕКТУРА
 
 ```text
 SPOT
@@ -42,100 +33,90 @@ TOP 2–3 SPOT WATCHLIST
 FUTURES MAPPING ONLY
 ```
 
-Фьючерс не определяет direction, RS, eligibility, setup, trigger, readiness или ranking.
+Фьючерс не определяет direction, RS, eligibility, setup, trigger, readiness или SPOT ranking.
 
 ---
 
-## 3. SPOT MONEY / ACTIVITY
+## 2. SPOT MONEY / ACTIVITY
 
-Основная метрика — `price × volume`.
-
-Используются:
-
-- текущий SPOT money volume;
-- средний оборот завершённых дней;
-- текущий session money volume;
-- money per minute;
-- activity ratio относительно ожидаемой активности к текущему моменту.
+Используются `price × volume`, текущий session money volume, средний оборот завершённых дней, money per minute и activity ratio относительно ожидаемой активности к текущему моменту.
 
 Абсолютный оборот сам по себе не делает инструмент лидером: важна активность относительно собственной нормы.
 
 ---
 
-## 4. MARKET BENCHMARK / RS
+## 3. MARKET BENCHMARK / RS
 
-Основной benchmark российского рынка — `IMOEX2 / IRUS2`.
+Benchmark российского рынка: `IMOEX2 / IRUS2`.
 
 `relative_strength = instrument_return - benchmark_return`.
 
-- `STRONGER` — RS ≥ +0.20 п.п.;
-- `WEAKER` — RS ≤ −0.20 п.п.;
-- `NEUTRAL` — промежуточная зона;
-- `RS_UNAVAILABLE` — обязательные benchmark data отсутствуют.
+- `STRONGER`: RS ≥ +0.20 п.п.;
+- `WEAKER`: RS ≤ −0.20 п.п.;
+- `NEUTRAL`: промежуточная зона;
+- `RS_UNAVAILABLE`: обязательные benchmark data отсутствуют.
 
-Direction и RS должны быть согласованы для качественного кандидата:
-
-- LONG + STRONGER;
-- SHORT + WEAKER.
-
-Фиктивный RS запрещён.
+Direction и RS должны быть согласованы: LONG + STRONGER, SHORT + WEAKER. Фиктивный RS запрещён.
 
 ---
 
-## 5. SETUP / READINESS
+## 4. SETUP / READINESS
 
-Основной контекст — H1 SPOT. Формирование сценария — M5 SPOT.
+H1 задаёт контекст, M5 формирует сценарий.
 
-LONG:
+LONG: `H1 up → impulse → first pullback → stabilization → continuation`  
+SHORT: `H1 down → impulse → first rebound → stabilization → continuation`
 
-`H1 up → impulse → first pullback → stabilization → continuation`
+Состояния: `WAIT`, `WATCH`, `READY`, `CONFIRMED`.
 
-SHORT:
-
-`H1 down → impulse → first rebound → stabilization → continuation`
-
-Состояния:
-
-- `WAIT` — setup ещё не сформирован;
-- `WATCH` — setup развивается;
-- `READY` — setup сформирован и trigger фактически активирован;
-- `CONFIRMED` — подтверждённый SPOT-сценарий.
-
-`READY/CONFIRMED` не являются торговой командой.
+`READY/CONFIRMED` — аналитические состояния, не торговая команда.
 
 ---
 
-## 6. TRIGGER INVARIANT
+## 5. TRIGGER INVARIANT
 
-Ключевой invariant проекта:
+> **Trigger level ≠ trigger activation.**
 
-> **Наличие trigger level ≠ trigger activation.**
+```text
+LONG  → spot_price >= entry_trigger
+SHORT → spot_price <= entry_trigger
+```
 
-Directional activation:
+Цена до trigger не считается фактически активировавшей сценарий.
 
-- LONG → `spot_price >= entry_trigger`;
-- SHORT → `spot_price <= entry_trigger`.
+---
 
-Таким образом, цена, находящаяся до trigger, не может считаться фактически активировавшей сценарий.
+## 6. CANONICAL SPOT SIGNAL CONTRACT
+
+Файл: `Program/services/spot_signal_contract.py`.
+
+Чистый deterministic contract содержит `normalize_direction()`, `directional_rs()`, `trigger_present()`, `trigger_active()` и `readiness_state()`.
+
+Контракт не обращается к BCS, сети, futures или live market-data.
+
+### Production integration — 27.08.2026
+
+`MorningTradingPipelineService` использует canonical contract непосредственно для:
+
+- directional RS;
+- trigger presence;
+- directional trigger activation;
+- final SPOT readiness state.
+
+Публичный pipeline version остаётся `1.4`: это консолидация критических правил без изменения публичного version contract.
 
 ---
 
 ## 7. RANKING
 
-Итоговый ranking отвечает на вопрос:
-
-> **Где сегодня одновременно есть деньги, активность, движение, сила/слабость и качественный SPOT context?**
-
-`candidate_score` является основным ranking score. Setup quality выводится отдельно и не заменяет opportunity score.
+Основной ranking score — `candidate_score`, затем session-level `opportunity_score`.
 
 Directional RS используется как tie-break:
 
 - LONG → больший RS выше;
 - SHORT → более отрицательный RS выше.
 
-Futures turnover, price, spread, confirmation и expiry не входят в SPOT ranking.
-
-TOP ограничен тремя кандидатами и не заполняется искусственно.
+TOP ограничен тремя кандидатами и не заполняется искусственно. Futures turnover, price, spread, expiry и confirmation не входят в SPOT ranking.
 
 ---
 
@@ -143,283 +124,129 @@ TOP ограничен тремя кандидатами и не заполня�
 
 Futures — только reference mapping выбранного SPOT-актива.
 
-Mapping разрешён только после прохождения всех SPOT eligibility gates и при одновременном выполнении:
+Mapping разрешён только после:
 
 1. `setup_state ∈ {READY, CONFIRMED}`;
 2. `setup_direction == direction`;
-3. trigger существует;
-4. trigger фактически активирован по направлению.
+3. валидного trigger;
+4. фактической directional trigger activation.
 
-`WAIT`, `WATCH` или `READY` с ещё не достигнутым trigger не могут вызвать futures mapping.
+Контракты с `days_to_expiry <= 3` исключаются.
 
-Контракты с `days_to_expiry <= 3` исключаются из reference mapping.
+> **SPOT READY + неактивный trigger не может вызвать futures mapping.**
 
 ---
 
 ## 9. EVENT-RISK GATE
 
-`moex_event_risk` остаётся жёстким SPOT eligibility gate.
-
-Сильные money/activity/RS/setup данные не могут обойти event-risk rejection.
+`moex_event_risk` остаётся жёстким SPOT eligibility gate. Сильные money/activity/RS/setup данные не могут его обойти.
 
 ---
 
 ## 10. HISTORICAL REPLAY
 
-Historical replay остаётся `READ ONLY / NO ORDERS`.
+Historical replay — `READ ONLY / NO ORDERS`.
 
 Исторический SPOT candidate формируется и ранжируется до futures lookup. Futures не могут скрыто изменить historical SPOT eligibility или ranking.
 
-Parity invariant:
-
-> Если два SPOT-кандидата имеют одинаковые SPOT evidence, изменение futures ticker, expiry, turnover, price или confirmation не должно менять их SPOT ranking.
-
----
-
-## 11. TEST ARCHITECTURE
-
-Детерминированные unit regression не должны зависеть от действующего BCS refresh token, сети или live market-data.
-
-Runtime BCS authorization относится только к production/live-data контуру.
-
-Проверяемые области:
-
-- SPOT pipeline;
-- instrument radar;
-- candidate score;
-- directional RS tie-break;
-- event-risk gate;
-- readiness;
-- trigger activation;
-- futures mapping boundary;
-- expiry safety;
-- historical/production parity.
-
----
-
-## 12. ВАЛИДИРОВАННЫЕ CHECKPOINTS
-
-### SPOT-first ranking
-
-- Futures metrics исключены из SPOT score/ranking.
-- Production candidate проходит через канонический `FuturesTradeCandidateService.build_candidate()` до futures mapping.
-- Directional RS tie-break синхронизирован production/historical.
-
-### Readiness boundary
-
-- Futures mapping выполняется только после SPOT readiness.
-- `WATCH + trigger` не является достаточным условием mapping.
-- Direction mismatch блокирует mapping.
-- Контракты с ≤3 днями до expiry исключаются.
-
-### Trigger activation
-
-27.08.2026 исправлено различие между `trigger level` и `trigger active`:
-
-- LONG активируется при `price >= trigger`;
-- SHORT активируется при `price <= trigger`;
-- `READY` требует активного направленного trigger;
-- UI разделяет trigger level, trigger state и SPOT READY;
-- futures не участвует в trigger decision.
-
-### Offline regression isolation
-
-27.08.2026 unit-тесты instrument radar изолированы от BCS authorization: deterministic tests не требуют live refresh token.
-
----
-
-## 13. CURRENT CHECKPOINT — ACTIVE SPOT TRIGGER BEFORE FUTURES MAPPING
-
-**Дата:** 27.08.2026  
-**Service:** `FuturesMorningRadarService 1.3`  
-**Commit:** `e8bdf0a518d36247259bec523f0d6a550fddc41c`
-
-Усилена production boundary между SPOT readiness и futures mapping.
-
-### Изменение
-
-Ранее `_spot_ready_for_mapping()` проверял наличие положительного `entry_trigger` и состояние `READY/CONFIRMED`, но не проверял, достигла ли текущая SPOT цена этого уровня.
-
-Теперь mapping допускается только при фактической directional activation:
+Historical trigger activation использует ту же directional модель:
 
 ```text
 LONG  → spot_price >= entry_trigger
 SHORT → spot_price <= entry_trigger
 ```
 
-Добавлен отдельный pure helper:
+Historical checkpoint хранит `spot_price` и `trigger_active`.
 
-`FuturesMorningRadarService._spot_trigger_active()`
+---
 
-`_spot_ready_for_mapping()` использует его как обязательный gate.
+## 11. TEST ARCHITECTURE
 
-### Regression coverage
+Deterministic regression tests не должны зависеть от действующего BCS refresh token, сети или live market-data. Runtime BCS authorization относится только к production/live-data контуру.
 
-`Program/test_futures_morning_radar_service.py` дополнен проверками:
+Покрываются SPOT pipeline, instrument radar, candidate score, directional RS ranking, event-risk gate, readiness, trigger activation, futures mapping boundary, expiry safety и historical/production parity.
 
-- LONG active trigger;
-- LONG unreached trigger;
-- SHORT active trigger;
-- SHORT unreached trigger;
-- `READY + unreached trigger → no futures mapping`;
-- `READY + active trigger → mapping allowed`;
-- проверка отсутствия самого вызова mapping при unreached trigger.
+---
 
-### Инвариант
+## 12. VALIDATED CHECKPOINTS
 
-> **SPOT READY + trigger level без фактической activation не может запустить futures mapping.**
+### SPOT-first ranking
 
-Это закрывает архитектурную цепочку:
+Futures metrics исключены из SPOT score/ranking. Production и historical paths сохраняют SPOT-first boundary.
 
-`DIRECTION → SETUP → TRIGGER LEVEL → TRIGGER ACTIVE → READY → FUTURES MAPPING`
+### Trigger activation
 
-Futures остаётся `MAPPING ONLY`.
+27.08.2026 закрыто различие между trigger level и trigger active. LONG/SHORT activation направленная и SPOT-only.
+
+### Offline regression isolation
+
+27.08.2026 instrument radar unit tests изолированы от BCS authorization.
+
+### Historical parity
+
+27.08.2026 historical replay не создаёт `ready_time` до фактической SPOT trigger activation.
+
+### Directional RS consistency
+
+27.08.2026 session ranking использует directional RS tie-break: более сильная поддержка текущего направления всегда выше.
+
+---
+
+## 13. CURRENT CHECKPOINT — CANONICAL CONTRACT ENFORCED IN LIVE PIPELINE
+
+**Дата:** 27.08.2026  
+**Commits:** `1102d54`, `2cfa40a`, `53edc52`.
+
+### Что сделано
+
+1. Live `MorningTradingPipelineService` подключён к `spot_signal_contract.py`.
+2. Дублированные реализации directional RS / trigger presence / trigger activation заменены вызовами canonical helpers.
+3. Readiness в live pipeline вычисляется через `readiness_state()`.
+4. Добавлена regression-проверка live `_advance_signal_state()` против canonical semantics.
+5. Existing historical trigger-parity coverage сохранена.
+
+### Архитектурный результат
+
+```text
+CANONICAL SPOT CONTRACT
+        ↓
+LIVE PIPELINE
+        ↓
+READY / CONFIRMED
+        ↓
+FUTURES MAPPING ONLY
+```
+
+Это повышает зрелость проекта: критические правила сигнала имеют один явный deterministic source of truth на live pipeline boundary.
 
 ---
 
 ## 14. RELEASE / WORKFLOW RULE
 
-После каждого законченного уровня проекта:
+После каждого законченного уровня:
 
-1. изменения делаются в GitHub `main`;
-2. commit сохраняется в GitHub;
-3. `main` синхронизируется;
-4. `PROJECT_PASSPORT.md` обновляется;
-5. проходят compile/regression checks;
-6. пользователю выдаётся одна команда для локального `git pull` и reinstall/validation при необходимости.
+1. изменения сохраняются в GitHub `main`;
+2. commit фиксируется;
+3. `PROJECT_PASSPORT.md` обновляется;
+4. проходят compile/regression checks;
+5. пользователь делает один локальный `git pull`;
+6. reinstall требуется только если изменены app bundle/launcher/icon или другой локально собираемый компонент.
 
 **Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`  
 **Единственная рабочая ветка:** `main`
 
 ---
 
-## 15. CURRENT CHECKPOINT — HISTORICAL TRIGGER ACTIVATION PARITY
+## 15. NEXT ENGINEERING PRIORITY
 
-**Дата:** 27.08.2026  
-**Services:** `HistoricalUniverseReplayService 1.1`, `MorningReplayService 0.5`
-
-Исторический replay теперь использует тот же принцип trigger activation, что и production pipeline.
-
-### Изменение
-
-Ранее historical `_first_ready()` считал любой `READY/CONFIRMED` checkpoint с положительным `entry_trigger` первым ready-событием, даже если историческая SPOT цена ещё не достигла trigger.
-
-Теперь replay хранит `spot_price` на каждом checkpoint и разрешает исторический `ready_time` только при directional activation:
-
-```text
-LONG  → spot_price >= entry_trigger
-SHORT → spot_price <= entry_trigger
-```
-
-Добавлены поля historical checkpoint:
-
-- `spot_price`;
-- `trigger_active` на уровне итогового historical candidate.
-
-### Regression coverage
-
-`Program/test_historical_universe_replay_service.py` дополнен проверками:
-
-- LONG active trigger;
-- LONG unreached trigger;
-- SHORT active trigger;
-- SHORT unreached trigger;
-- первый `READY` выбирается только после фактической activation;
-- если весь replay имеет неактивный trigger, `ready_time` не создаётся.
-
-### Инвариант parity
-
-> **Production и historical replay не могут считать один и тот же SPOT trigger активным по разным правилам.**
-
-Цепочка теперь едина:
-
-`SPOT PRICE → TRIGGER LEVEL → DIRECTIONAL ACTIVATION → READY → FUTURES MAPPING`
-
-Futures по-прежнему не участвует в определении исторической SPOT readiness.
+Следующий уровень: довести canonical SPOT contract до полной production/historical boundary — убрать оставшиеся дублирующие trigger/readiness правила из historical/futures adapters и добавить contract-level audit, показывающий причину каждого `WAIT → WATCH → READY → CONFIRMED` перехода без обращения к futures.
 
 ---
 
-## 16. CURRENT CHECKPOINT — DIRECTIONAL RS RANKING CONSISTENCY
+## 16. SAFETY / PRODUCT BOUNDARY
 
-**Дата:** 27.08.2026  
-**Service:** `MorningTradingPipelineService 1.4`  
-**UI:** `WatchlistTraderWindow 1.4`  
-**Commits:** `d2b6d0c`, `2e7c7b8`, `d1d4aad`
+Trader_7_12 Pro не является системой автоматического исполнения сделок.
 
-Закрыта граница между базовым candidate ranking и session-level re-ranking: production pipeline теперь сохраняет directional RS tie-break после расчёта `opportunity_score`.
+Нет order execution, SL/TP engine, portfolio sizing, automatic position management или futures confirmation как торгового сигнала.
 
-### Правило
-
-RS нормализуется относительно направления сценария:
-
-```text
-LONG  → directional_rs =  RS
-SHORT → directional_rs = -RS
-```
-
-Следовательно, при прочих равных:
-
-- LONG с более положительным RS выше;
-- SHORT с более отрицательным RS выше.
-
-Это устраняет ситуацию, когда session-level сортировка могла случайно поставить более слабый SHORT выше более сильного SHORT только потому, что исходное числовое значение RS было «больше».
-
-### Regression coverage
-
-В `Program/test_morning_trading_pipeline_service.py` добавлены проверки directional RS для LONG и SHORT и обновлён pipeline version до `1.4`.
-
-### UI consistency
-
-`Program/watchlist_ui.py` синхронизирован с pipeline version `1.4`; отображаемые `OPPORTUNITY`, `SETUP`, `TRIGGER`, `READY/CONFIRMED` остаются read-only и SPOT-first.
-
-### Инвариант
-
-> **Session ranking не должен нарушать смысл directional RS: больший directional RS всегда означает более сильную поддержку текущего направления.**
-
-Futures по-прежнему не участвует в SPOT ranking.
-
----
-
-## 17. CURRENT CHECKPOINT — CANONICAL SPOT SIGNAL CONTRACT
-
-**Дата:** 27.08.2026  
-**Service:** `spot_signal_contract.py`
-
-Выделены чистые, детерминированные правила SPOT-сигнала в отдельный контрактный модуль:
-
-- `directional_rs()`;
-- `trigger_present()`;
-- `trigger_active()`;
-- `readiness_state()`;
-- `normalize_direction()`.
-
-Контракт фиксирует единый смысл directional RS и directional trigger activation без обращения к BCS, сети, futures или live market-data.
-
-### Contract rules
-
-```text
-LONG  → directional_rs =  RS
-SHORT → directional_rs = -RS
-
-LONG  → trigger_active iff spot_price >= entry_trigger
-SHORT → trigger_active iff spot_price <= entry_trigger
-```
-
-`readiness_state()` допускает `READY` только при валидном SPOT setup и фактически активном directional trigger; `CONFIRMED` сохраняется только для подтверждённого SPOT setup.
-
-### Regression coverage
-
-Добавлен `Program/test_spot_signal_contract.py`, который проверяет:
-
-- соответствие directional RS live pipeline контракту;
-- соответствие trigger activation live pipeline и historical replay контракту;
-- запрет activation при отсутствующем trigger;
-- детерминированную SPOT-only readiness модель.
-
-### Инвариант
-
-> **Production и historical replay должны интерпретировать одинаковые SPOT evidence одинаково; futures не является частью signal contract.**
-
-Это создаёт отдельный архитектурный слой между market evidence и сервисами:
-
-`SPOT EVIDENCE → CANONICAL SIGNAL CONTRACT → PIPELINE / HISTORICAL REPLAY / UI`
+Futures остаётся `MAPPING ONLY`.
