@@ -14,7 +14,7 @@ from services.market_session_service import MarketSessionService
 class MorningTradingPipelineService:
     """Build the read-only chain: direction -> setup -> trigger -> readiness -> futures mapping."""
 
-    VERSION = "1.2"
+    VERSION = "1.3"
     SESSION_PROFILES = {
         "MORNING": {"candidate": 0.70, "activity": 0.20, "momentum": 0.10, "label": "ИМПУЛЬС / АКТИВНОСТЬ / ПЕРВЫЙ ДВИЖ"},
         "MAIN": {"candidate": 0.65, "activity": 0.25, "momentum": 0.10, "label": "ПРОДОЛЖЕНИЕ / СИЛА-СЛАБОСТЬ / АКТИВНОСТЬ"},
@@ -76,26 +76,53 @@ class MorningTradingPipelineService:
 
     @staticmethod
     def _trigger_present(candidate):
+        """Return whether a valid SPOT trigger level exists."""
+        try:
+            trigger = float(candidate.get("entry_trigger", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return trigger > 0
+
+    @staticmethod
+    def _trigger_active(candidate):
+        """Return whether current SPOT price has actually reached the trigger.
+
+        A trigger level being present is not the same as the trigger firing.
+        LONG activates at/above the trigger; SHORT activates at/below it.
+        """
         try:
             trigger = float(candidate.get("entry_trigger", 0) or 0)
             price = float(candidate.get("spot_price", candidate.get("last_close", 0)) or 0)
         except (TypeError, ValueError):
             return False
-        return trigger > 0 and price > 0
+
+        if trigger <= 0 or price <= 0:
+            return False
+
+        direction = str(candidate.get("direction") or "").upper()
+        if direction == "LONG":
+            return price >= trigger
+        if direction == "SHORT":
+            return price <= trigger
+        return False
 
     @classmethod
     def _advance_signal_state(cls, candidate):
-        """Derive readiness exclusively from the SPOT setup and trigger.
+        """Derive readiness exclusively from SPOT setup and actual trigger activation.
 
-        WATCH + valid trigger -> READY.
-        SPOT CONFIRMED + valid trigger -> CONFIRMED.
+        A trigger level can be armed without being fired. READY is therefore
+        assigned only when the SPOT price has actually reached the directional
+        trigger. CONFIRMED additionally requires the SPOT setup to be confirmed.
         No futures request is made here.
         """
         setup_state = cls._setup_state(candidate)
         setup = str(candidate.get("setup") or "NONE").upper()
         direction = str(candidate.get("direction") or "NONE").upper()
         trigger_present = cls._trigger_present(candidate)
+        trigger_active = cls._trigger_active(candidate)
 
+        candidate["trigger_present"] = trigger_present
+        candidate["trigger_active"] = trigger_active
         candidate["signal_state"] = "WAIT"
         candidate["signal_state_reason"] = "SPOT setup is not ready"
         candidate["futures_confirmation"] = "NOT_APPLICABLE"
@@ -106,14 +133,18 @@ class MorningTradingPipelineService:
         if direction not in {"LONG", "SHORT"} or setup not in cls.VALID_SETUPS:
             return
         if not trigger_present:
+            candidate["signal_state_reason"] = "SPOT setup has no valid trigger level"
+            return
+        if not trigger_active:
+            candidate["signal_state_reason"] = "SPOT setup is armed; waiting for the directional trigger"
             return
 
         if setup_state == "CONFIRMED":
             candidate["signal_state"] = "CONFIRMED"
-            candidate["signal_state_reason"] = "SPOT setup and trigger are confirmed by SPOT price structure"
+            candidate["signal_state_reason"] = "SPOT setup and directional trigger are confirmed by SPOT price structure"
         elif setup_state in {"WATCH", "READY"}:
             candidate["signal_state"] = "READY"
-            candidate["signal_state_reason"] = "SPOT setup is armed and has a real trigger"
+            candidate["signal_state_reason"] = "SPOT setup is armed and the directional trigger is active"
 
     def scan(self, mappings=None, confirmations=None, limit=3):
         session_info = self.session_service.get_session_info()
@@ -205,7 +236,7 @@ class MorningTradingPipelineService:
         print()
         print("Pipeline: FAST SPOT SCREEN -> DEEP SPOT H1/RS/M5 -> SETUP/TRIGGER -> READINESS -> FUTURES MAPPING")
         print("Direction, setup, trigger and readiness are determined from SPOT only.")
-        print("READY = valid SPOT setup + real trigger; CONFIRMED = SPOT setup itself confirmed by SPOT structure.")
+        print("READY = valid SPOT setup + active directional trigger; CONFIRMED = SPOT setup itself confirmed by SPOT structure.")
         print("Futures are mapping-only and never change eligibility, direction, RS, setup, readiness or ranking.")
         print("Scanner output is read-only and contains no portfolio sizing, SL/TP or order execution.")
         print("=" * 128)
