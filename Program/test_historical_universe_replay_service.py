@@ -77,21 +77,23 @@ def test_trigger_activation_is_directional():
     assert HistoricalUniverseReplayService._spot_trigger_active({"direction": "SHORT", "setup": "BREAKOUT", "setup_state": "READY", "spot_price": 100.1, "entry_trigger": 100}) is False
 
 
-def test_first_ready_uses_canonical_lifecycle_and_requires_active_trigger():
+def test_first_ready_uses_canonical_lifecycle_and_requires_stable_activation():
     replay = [
         {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99},
         {"checkpoint": "08:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.1},
+        {"checkpoint": "09:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.2},
     ]
     ready = HistoricalUniverseReplayService._first_ready(replay)
-    assert ready["checkpoint"] == "08:30"
+    assert ready["checkpoint"] == "09:00"
     assert ready["signal_state"] == "READY"
     assert ready["trigger_state"] == "ACTIVE"
+    assert ready["stability_observations"] == 2
 
 
-def test_first_ready_does_not_promote_unreached_ready_state():
+def test_first_ready_does_not_promote_single_active_observation():
     replay = [
         {"checkpoint": "08:00", "direction": "SHORT", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.5},
-        {"checkpoint": "08:30", "direction": "SHORT", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.1},
+        {"checkpoint": "08:30", "direction": "SHORT", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99.8},
     ]
     assert HistoricalUniverseReplayService._first_ready(replay) is None
 
@@ -104,18 +106,46 @@ def test_canonical_historical_lifecycle_marks_armed_before_activation():
     assert item["signal_state"] == "ARMED"
     assert item["trigger_state"] == "ARMED"
     assert item["trigger_active"] is False
+    assert item["stability_observations"] == 0
+    assert item["stability_required"] == 2
+
+
+def test_historical_stability_gate_matches_live_boundary():
+    replay = [
+        {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99.8},
+        {"checkpoint": "08:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.2},
+        {"checkpoint": "09:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.4},
+    ]
+    result = HistoricalUniverseReplayService._canonical_lifecycle(replay)
+    assert [item["signal_state"] for item in result] == ["ARMED", "ARMED", "READY"]
+    assert [item["stability_observations"] for item in result] == [0, 1, 2]
+    assert result[1]["trigger_crossed"] is True
+    assert result[2]["trigger_crossed"] is False
+
+
+def test_historical_stability_counter_resets_on_trigger_loss():
+    replay = [
+        {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.2},
+        {"checkpoint": "08:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99.8},
+        {"checkpoint": "09:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.3},
+        {"checkpoint": "09:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.4},
+    ]
+    result = HistoricalUniverseReplayService._canonical_lifecycle(replay)
+    assert [item["stability_observations"] for item in result] == [1, 0, 1, 2]
+    assert [item["signal_state"] for item in result] == ["ARMED", "ARMED", "ARMED", "READY"]
 
 
 def test_canonical_historical_lifecycle_is_monotonic_across_checkpoints():
     replay = [
         {"checkpoint": "08:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "WATCH", "entry_trigger": 100, "spot_price": 99},
         {"checkpoint": "08:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.2},
-        {"checkpoint": "09:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99.8},
+        {"checkpoint": "09:00", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 100.3},
+        {"checkpoint": "09:30", "direction": "LONG", "setup": "BREAKOUT", "setup_state": "READY", "entry_trigger": 100, "spot_price": 99.8},
     ]
     result = HistoricalUniverseReplayService._canonical_lifecycle(replay)
-    assert [item["signal_state"] for item in result] == ["ARMED", "READY", "READY"]
+    assert [item["signal_state"] for item in result] == ["ARMED", "ARMED", "READY", "READY"]
     assert result[1]["trigger_active"] is True
-    assert result[2]["trigger_active"] is False
+    assert result[3]["trigger_active"] is False
 
 
 def test_canonical_historical_invalidation_is_terminal_without_new_setup():
