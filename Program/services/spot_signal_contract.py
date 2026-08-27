@@ -175,7 +175,7 @@ def lifecycle_state(
     direction = normalize_direction(direction)
     setup = normalize_setup(setup)
     prior = str(prior_signal_state or "").upper()
-    valid_setup = direction in VALID_DIRECTIONS and setup != "NONE"
+    valid_setup = direction in VALID_DIRECTIONS and setup != "NONE" and setup_state != "WAIT"
     present = trigger_present(entry_trigger)
     active = trigger_active(direction, spot_price, entry_trigger)
     crossed = trigger_crossed(direction, previous_price, spot_price, entry_trigger)
@@ -193,7 +193,7 @@ def lifecycle_state(
     if not valid_setup:
         signal = "WAIT"
         trigger = "WAITING"
-        reason = "invalid SPOT setup"
+        reason = "SPOT setup is not ready"
     elif invalidated:
         signal = "INVALIDATED"
         trigger = "INVALIDATED"
