@@ -106,13 +106,7 @@ LONG  → spot_price >= entry_trigger
 SHORT → spot_price <= entry_trigger
 ```
 
-`trigger_transition()` разделяет:
-
-- `trigger_crossed` — edge transition на текущем observation;
-- `trigger_active` — level-based состояние;
-- `trigger_state` — `WAITING / ARMED / ACTIVE / INVALIDATED`;
-- `trigger_rearmed` — возврат из ACTIVE в ARMED без invalidation;
-- `trigger_invalidated` — terminal risk condition.
+`trigger_transition()` разделяет `trigger_crossed`, `trigger_active`, `trigger_state`, `trigger_rearmed` и `trigger_invalidated`.
 
 Обычный откат после activation не является invalidation. Он может re-arm trigger, но не уничтожает lifecycle.
 
@@ -122,18 +116,9 @@ SHORT → spot_price <= entry_trigger
 
 Файл: `Program/services/setup_quality_service.py`.
 
-Quality отделена от detection и lifecycle. Canonical aggregation использует bounded компоненты `0..100`; отдельный SetupQualityService использует:
-
-- `geometry` — 30%;
-- `candle` — 25%;
-- `rejection` — 20%;
-- `continuation` — 25%.
-
-Результат сохраняется как `setup_quality_score`, `quality_components`, `setup_quality_reasons`.
+Quality отделена от detection и lifecycle. Canonical aggregation использует bounded компоненты `0..100`; отдельный SetupQualityService использует geometry 30%, candle 25%, rejection 20%, continuation 25%.
 
 `SetupEngine.analyze()` обогащает setup candidate quality на том же подготовленном candle window. Quality deterministic/network-free, не переводит setup в READY/CONFIRMED и не меняет earliest READY selection.
-
-Для идентичного candle window regression защищает повторяемость score/components/reasons и отсутствие скрытой зависимости от внешнего состояния.
 
 ---
 
@@ -143,15 +128,13 @@ Quality отделена от detection и lifecycle. Canonical aggregation ис
 
 Directional RS используется как tie-break. TOP ограничен тремя кандидатами и не заполняется искусственно. Futures metrics не входят в SPOT ranking.
 
-Quality присутствует как прозрачный SPOT quality input; его влияние ограничено небольшим bounded setup bonus в `candidate_score` и не может заменить activity, money или directional RS. Session ranking остаётся deterministic.
+Quality — прозрачный bounded SPOT input с небольшим setup bonus и не может заменить activity, money или directional RS. Session ranking deterministic.
 
 ---
 
 ## 8. ANTI-CHURN STABILITY
 
 `MorningTradingPipelineService` использует `SIGNAL_STABILITY_OBSERVATIONS = 2`.
-
-Правило:
 
 ```text
 1-е последовательное active observation → ARMED
@@ -162,9 +145,7 @@ explicit invalidation → INVALIDATED
 new_setup=True → новый lifecycle без старой стабильности
 ```
 
-Stability не меняет SPOT ranking, candidate score, RS, setup detection или futures eligibility. Это исключительно lifecycle anti-noise gate.
-
-Historical replay использует ту же границу, обеспечивая live/historical parity.
+Stability не меняет SPOT ranking, candidate score, RS, setup detection или futures eligibility. Historical replay использует ту же границу.
 
 ---
 
@@ -172,18 +153,9 @@ Historical replay использует ту же границу, обеспеч�
 
 Futures — только reference mapping выбранного SPOT-актива.
 
-Первичный radar может вычислять возможный mapping, но пользовательский live pipeline имеет финальный canonical gate. До `signal_state ∈ {READY, CONFIRMED}` futures mapping data очищаются из результата и получают:
+До `signal_state ∈ {READY, CONFIRMED}` futures mapping data очищаются из результата. После canonical READY/CONFIRMED mapping может быть показан как reference-only.
 
-`futures_selection_reason = WAITING_FOR_CANONICAL_SPOT_READINESS`.
-
-После canonical READY/CONFIRMED mapping может быть показан как reference-only.
-
-Дополнительные ограничения:
-
-- direction должен совпадать с setup direction;
-- trigger должен быть directional active;
-- `days_to_expiry <= 3` исключается;
-- futures не участвуют в SPOT eligibility, direction, RS, setup, readiness или ranking.
+Дополнительные ограничения: direction должен совпадать с setup direction; trigger должен быть directional active; `days_to_expiry <= 3` исключается; futures не участвуют в SPOT eligibility, direction, RS, setup, readiness или ranking.
 
 `futures_confirmation` всегда `NOT_APPLICABLE`; futures не подтверждают SPOT signal.
 
@@ -201,9 +173,7 @@ Historical replay — `READ ONLY / NO ORDERS`.
 
 Исторический SPOT candidate формируется и ранжируется до futures lookup. Futures не могут изменить historical SPOT eligibility или ranking.
 
-`HistoricalUniverseReplayService` использует тот же network-free `lifecycle_state()` из canonical contract. Checkpoint хранит canonical lifecycle evidence, включая `signal_state_reason`, `trigger_crossed`, `trigger_invalidated` и stability fields.
-
-Historical anti-churn parity повторяет live boundary: первое active observation — ARMED, второе — READY, потеря trigger сбрасывает counter, transient retreat после READY не откатывает lifecycle. `new_setup=True` начинает новый lifecycle и не наследует старую стабильность.
+`HistoricalUniverseReplayService` использует тот же network-free `lifecycle_state()` из canonical contract. Historical anti-churn parity повторяет live boundary, включая new-setup reset.
 
 ---
 
@@ -211,108 +181,91 @@ Historical anti-churn parity повторяет live boundary: первое acti
 
 Regression tests deterministic и не зависят от BCS refresh token, сети или live market-data.
 
-Покрываются:
+Покрываются canonical lifecycle, trigger crossing/re-arm/invalidation, stability, setup quality, SetupEngine parity, live/historical parity, SPOT→futures boundary, event-risk, expiry, RS tie-break и независимость SPOT ranking от futures reference data.
 
-- canonical direction / RS;
-- LONG/SHORT trigger activation;
-- trigger crossing / re-arm / invalidation;
-- WAIT/WATCH/ARMED/READY/CONFIRMED lifecycle;
-- stability и new-setup reset;
-- setup quality и incomplete OHLC;
-- SetupEngine quality integration/parity;
-- live anti-churn;
-- historical/live stability parity;
-- SPOT → futures mapping boundary;
-- event-risk gate;
-- expiry filtering;
-- directional RS tie-break;
-- сохранение SPOT ranking независимо от futures reference data.
-
-CI должен проверять фактический repository test inventory через `pytest -q Program`, а не несуществующий каталог `Program/tests`.
+CI проверяет фактический repository test inventory через `pytest -q Program`.
 
 ---
 
-## 13. VALIDATED CHECKPOINTS — 27.08.2026
+## 13. REPOSITORY HYGIENE / TEST INVENTORY — 27.08.2026
+
+Обнаружен legacy-каталог `Program/tests/`. Его содержимое не было слепо удалено: четыре полезных набора regression coverage перенесены в канонический корень `Program/`:
+
+- `test_futures_selection_and_market_universe.py`;
+- `test_historical_candidate_ranker_service.py`;
+- `test_moex_index_universe_service.py`;
+- `test_spot_universe_service.py`.
+
+После переноса старые копии из `Program/tests/` удалены. Production services не удалялись, поскольку по текущему inventory они являются частью архитектуры или используются существующими тестами/runners.
+
+Также устранён единственный обнаруженный pytest collection warning: тестовый harness `TestableRadar` переименован в `RadarHarness`, поскольку pytest ошибочно пытался собирать helper-class с `__init__` как test class.
+
+Локальная рабочая правка исторического теста сохранена в перенесённом canonical test: readiness/mapping fixtures теперь используют действительно активный trigger boundary (`spot_price == entry_trigger`).
+
+---
+
+## 14. VALIDATED CHECKPOINTS — 27.08.2026
 
 ### Canonical lifecycle hardening
-
 Deterministic `WATCH → ARMED → READY → CONFIRMED`, directional crossing, terminal invalidation и explicit new-setup reset.
 
-### Lifecycle boundary correction
-
-`setup_state=WAIT` не становится READY только из-за активной цены; trigger level и trigger activation разделены.
-
 ### Historical canonical boundary
-
 Historical replay переведён на canonical lifecycle contract.
 
 ### Setup quality layer
-
 Создан отдельный deterministic `SetupQualityService` с bounded structural scoring.
 
 ### SetupEngine quality integration
-
 Quality интегрирована в SetupEngine как enrichment без изменения detection/lifecycle semantics.
 
-### Quality parity baseline
-
-Повторный расчёт на идентичном candle window deterministic; внешнее состояние не влияет.
-
 ### Live anti-churn
-
 Введён двухнаблюдательный `ARMED → READY` gate.
 
 ### Historical/live stability parity
-
 Historical replay повторяет live stability boundary и new-setup reset.
 
-### Canonical futures mapping boundary — 27.08.2026
+### Canonical futures mapping boundary
+Финальный live pipeline gate не позволяет показать futures mapping до canonical `READY/CONFIRMED`.
 
-Финальный live pipeline gate теперь не позволяет показать futures mapping до canonical `READY/CONFIRMED`. Это закрывает output-level parity gap между stateful lifecycle и reference mapping.
-
-### Repository CI inventory correction — 27.08.2026
-
-Обнаружено, что GitHub Actions workflow ссылался на `Program/tests`, тогда как фактический repository test inventory находится в `Program/test_*.py` и подкаталогах проекта. Workflow исправлен на:
+### Repository CI inventory correction
+GitHub Actions переведён на фактический repository inventory:
 
 ```text
 python -m compileall -q Program
 PYTHONPATH=Program python -m pytest -q Program
 ```
 
-Это делает CI-цель соответствующей фактическому репозиторию и предотвращает ложный зелёный/сломанный validation path из-за неверного каталога.
+### Repository cleanup checkpoint — 27.08.2026
+Legacy nested tests migrated into the canonical `Program/test_*.py` inventory, stale copies removed, pytest collection warning eliminated. No additional branch created.
 
 ---
 
-## 14. CURRENT CHECKPOINT
+## 15. CURRENT CHECKPOINT
 
-**Checkpoint:** Repository-wide deterministic validation path hardening  
+**Checkpoint:** Full repository deterministic audit / Release Candidate preparation  
 **Дата:** 27.08.2026  
-**Рабочая ветка:** `main`  
-**Последний commit уровня:** `86ba350ad005007638d22fa5a868f1aae9f4c44d`
+**Рабочая ветка:** `main`
 
-### Что сделано
+### Текущий статус
 
-1. Проверен фактический repository test inventory.
-2. Обнаружена stale CI-конфигурация с несуществующим `Program/tests`.
-3. GitHub Actions переведён на `compileall -q Program`.
-4. GitHub Actions переведён на полный `PYTHONPATH=Program python -m pytest -q Program`.
-5. `PROJECT_PASSPORT.md` обновлён как единственный канонический MD-документ проекта.
-6. Все изменения сохранены в `main` без создания дополнительных веток.
+До cleanup полный repository inventory показывал **163 collected tests**, из них **161 passed / 2 failed / 1 warning**. Два failure были не production regression, а stale historical fixtures, которые противоречили canonical directional trigger boundary. Оба fixture исправлены и перенесены в canonical root inventory.
+
+После cleanup необходимо локально подтвердить новый полный inventory. Ожидаемый результат — отсутствие `Program/tests`, отсутствие collection warning и полный зелёный repository regression.
 
 ### Следующий обязательный уровень
 
-**Full repository deterministic audit / Release Candidate preparation:**
+**Release Candidate validation:**
 
-- локально выполнить полный `pytest -q Program`, а не только текущую целевую матрицу;
-- проверить все legacy/standalone services и их тесты;
-- выявить тесты, которые не входят в текущие lifecycle suites;
-- проверить, что CI после исправления действительно проходит тот же полный inventory;
-- устранить только реальные архитектурные gaps, не меняя каноническую SPOT-first semantics;
-- после зелёного полного inventory зафиксировать Release Candidate checkpoint в этом паспорте.
+1. `git pull --ff-only`;
+2. compile всего `Program`;
+3. полный `PYTHONPATH=Program python3 -m pytest -q Program`;
+4. убедиться, что legacy `Program/tests` отсутствует;
+5. проверить отсутствие warnings/errors;
+6. если всё зелёное — зафиксировать RC checkpoint и перейти к финальной эксплуатационной проверке launch/UI/data path.
 
 ---
 
-## 15. RELEASE / WORKFLOW RULE
+## 16. RELEASE / WORKFLOW RULE
 
 После каждого законченного уровня:
 
@@ -324,3 +277,5 @@ PYTHONPATH=Program python -m pytest -q Program
 6. reinstall требуется только если изменены app bundle/launcher/icon или другой локально собираемый компонент.
 
 **Канонический паспорт:** `Docs/PROJECT_PASSPORT.md`.
+**Рабочая ветка:** только `main`.
+**Дополнительные ветки:** не создаём.
