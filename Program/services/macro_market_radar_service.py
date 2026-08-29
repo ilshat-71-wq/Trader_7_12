@@ -64,13 +64,18 @@ class MacroMarketRadarService:
             days = cls._days_to_expiry(item)
             if days is None or days <= cls.MAX_DAYS_TO_EXPIRY:
                 continue
+            ticker = str(item.get("ticker") or "").upper()
+            class_code = str(item.get("classCode") or "").strip()
             row = dict(item)
             row["days_to_expiry"] = days
-            row["spot_ticker"] = str(item.get("ticker") or "").upper()
-            row["spot_class_code"] = str(item.get("classCode") or "").strip()
+            row["spot_ticker"] = ticker
+            row["spot_class_code"] = class_code
             row["spot_group"] = group
             row["market_universe"] = group
             row["analysis_source"] = "FUTURES_DIRECT"
+            row["futures_ticker"] = ticker
+            row["futures_class_code"] = class_code
+            row["futures_expiry"] = item.get("expiry")
             grouped[group].append(row)
 
         result = []
@@ -119,8 +124,8 @@ class MacroMarketRadarService:
         results = []
 
         for item in selected:
-            ticker = str(item.get("ticker") or "").strip().upper()
-            class_code = str(item.get("classCode") or "").strip()
+            ticker = str(item.get("futures_ticker") or item.get("ticker") or "").strip().upper()
+            class_code = str(item.get("futures_class_code") or item.get("classCode") or "").strip()
             group = item.get("spot_group")
             if not ticker or not class_code or group not in self.GROUPS:
                 continue
@@ -197,7 +202,7 @@ class MacroMarketRadarService:
             )
 
             last_close = self._float(daily.get("last_close"))
-            expiry = item.get("expiry")
+            expiry = item.get("futures_expiry", item.get("expiry"))
             result = {
                 "version": self.VERSION,
                 "status": "WATCHLIST",
