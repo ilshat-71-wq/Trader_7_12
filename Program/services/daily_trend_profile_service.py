@@ -5,7 +5,8 @@ Deterministic, network-free analysis of completed daily SPOT candles.
 
 Purpose:
 - explicitly measure 2/3/4-day directional persistence;
-- distinguish a persistent trend from a one-day impulse;
+- distinguish a persistent trend from a one-window impulse;
+- require cross-window confirmation before declaring an aggregate direction;
 - expose direction, consistency, return and a bounded trend score;
 - provide a reusable input for the future TOP-2/3 opportunity assistant.
 
@@ -16,7 +17,7 @@ The service never uses futures data and never makes a trade decision.
 class DailyTrendProfileService:
     """Analyze completed daily candles without network access."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
     WINDOWS = (2, 3, 4)
 
     @staticmethod
@@ -118,28 +119,28 @@ class DailyTrendProfileService:
             if profile["state"] not in {"INSUFFICIENT_DATA", "INVALID_DATA"}
         ]
 
-        directions = [
-            profile["direction"]
-            for profile in valid
-            if profile["direction"] in {"LONG", "SHORT"}
-        ]
+        long_windows = sum(1 for profile in valid if profile["direction"] == "LONG")
+        short_windows = sum(1 for profile in valid if profile["direction"] == "SHORT")
 
-        if not directions:
-            aggregate_direction = "NEUTRAL"
-        elif directions.count("LONG") > directions.count("SHORT"):
+        # A single shorter-window impulse must never override neutral/contrary
+        # longer windows. Declare direction only when at least two available
+        # windows agree and that side has a strict majority of directional windows.
+        if long_windows >= 2 and long_windows > short_windows:
             aggregate_direction = "LONG"
-        elif directions.count("SHORT") > directions.count("LONG"):
+        elif short_windows >= 2 and short_windows > long_windows:
             aggregate_direction = "SHORT"
         else:
             aggregate_direction = "NEUTRAL"
 
-        aligned = sum(
-            1 for direction in directions
-            if direction == aggregate_direction
+        directional_windows = long_windows + short_windows
+        aligned = (
+            long_windows if aggregate_direction == "LONG"
+            else short_windows if aggregate_direction == "SHORT"
+            else 0
         )
         alignment_percent = (
-            round(aligned / len(directions) * 100.0, 2)
-            if directions and aggregate_direction != "NEUTRAL"
+            round(aligned / directional_windows * 100.0, 2)
+            if directional_windows and aggregate_direction != "NEUTRAL"
             else 0.0
         )
 
@@ -153,21 +154,17 @@ class DailyTrendProfileService:
         # Conservative bounded score. Persistence and cross-window agreement
         # matter more than raw price change, so a single shock candle cannot
         # dominate the profile.
-        score = min(
-            100,
-            persistent_windows * 20
-            + round(alignment_percent * 0.30)
-            + round(
-                max(
-                    (abs(profiles["4"]["change_percent"])
-                     if profiles["4"]["state"] not in {"INSUFFICIENT_DATA", "INVALID_DATA"}
-                     else 0.0),
-                    (abs(profiles["3"]["change_percent"])
-                     if profiles["3"]["state"] not in {"INSUFFICIENT_DATA", "INVALID_DATA"}
-                     else 0.0),
-                ) * 5
-            ),
-        )
+        valid_change = [abs(profile["change_percent"]) for profile in valid]
+        max_change = max(valid_change, default=0.0)
+        if aggregate_direction == "NEUTRAL":
+            score = 0
+        else:
+            score = min(
+                100,
+                persistent_windows * 20
+                + round(alignment_percent * 0.30)
+                + round(max_change * 5),
+            )
 
         return {
             "version": cls.VERSION,
