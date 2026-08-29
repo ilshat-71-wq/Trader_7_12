@@ -3,15 +3,16 @@ Trader_7_12 Pro
 
 Main launcher
 
-Версия 0.9
+Версия 1.0
 
 Запуск:
 - подключение BCS API
 - загрузка рынка
-- запуск канонического SPOT opportunity watchlist интерфейса
+- запуск полного opportunity watchlist интерфейса
+- SPOT equities + direct macro coverage: OIL/GOLD/GAS/USDRUB
 
 Если BCS временно недоступен, интерфейс всё равно запускается
-для просмотра; торговая логика и сканирование не изменяются.
+для просмотра.
 """
 
 import sys
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import QApplication
 
 from market.market_loader import MarketLoader
 from watchlist_ui import WatchlistTraderWindow
+from services.full_market_pipeline_service import FullMarketPipelineService
 
 
 def main():
@@ -36,10 +38,15 @@ def main():
         print("⚠️ Интерфейс запускается в режиме просмотра")
     else:
         print("✅ БКС подключён")
-        print("ℹ️ Загрузка рынка будет выполнена только после запуска сканирования")
+        print("ℹ️ Сканирование включает акции + OIL/GOLD/GAS/USDRUB")
 
     app = QApplication(sys.argv)
     window = WatchlistTraderWindow(scanner_enabled=connected)
+    if connected:
+        try:
+            window.scanner = FullMarketPipelineService()
+        except Exception as exc:
+            print(f"⚠️ Полный сканер не инициализирован: {type(exc).__name__}: {exc}")
     window.show()
 
     sys.exit(app.exec())
