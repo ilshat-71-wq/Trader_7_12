@@ -29,7 +29,9 @@ def test_persistent_short_across_2_3_4_days():
 
 
 def test_mixed_daily_structure_is_not_called_persistent():
-    candles = [candle(100), candle(103), candle(101), candle(104), candle(102)]
+    # Last four closes: 103 -> 101 -> 100 -> 100.
+    # There is no net move, so the profile must remain neutral/mixed.
+    candles = [candle(100), candle(103), candle(101), candle(100), candle(100)]
     result = DailyTrendProfileService.analyze(candles)
 
     assert result["direction"] == "NEUTRAL"
