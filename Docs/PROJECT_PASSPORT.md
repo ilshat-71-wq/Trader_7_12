@@ -9,22 +9,21 @@
 
 ---
 
-## 1. ЦЕЛЕВАЯ КОНЦЕПЦИЯ ПОМОЩНИКА
+## 1. ЦЕЛЬ ПОМОЩНИКА
 
-Цель следующего этапа — ежедневно выделять **TOP-2/3 базовых SPOT-инструмента**, где одновременно наблюдаются:
+Ежедневно выделять **TOP-2/3 базовых SPOT-инструмента**, где одновременно наблюдаются:
 
 - устойчивый дневной тренд;
-- рост/снижение денежной активности и оборота;
+- денежная активность, объём и оборот;
 - достаточная ликвидность;
 - относительная сила/слабость относительно рынка;
 - направленный money flow;
+- LONG/SHORT balance, только если есть достоверный источник;
 - качественный intraday setup;
 - подтверждённый trigger;
-- положительное историческое математическое ожидание для аналогичных сетапов после накопления достаточной статистики.
+- положительное историческое математическое ожидание после накопления достаточной статистики.
 
-**Важно:** текущий `opportunity_score` не является вероятностью прибыли. Вероятность и математическое ожидание должны появиться только после отдельной исторической статистической валидации.
-
-Целевой пользовательский сценарий:
+Целевой сценарий:
 
 ```text
 SPOT BASE ASSET
@@ -43,7 +42,7 @@ H1 STRUCTURE + M5 SETUP
       ↓
 TRIGGER / STABILITY
       ↓
-MATHEMATICAL EXPECTATION (after validated history)
+MATHEMATICAL EXPECTATION — AFTER VALIDATED HISTORY
       ↓
 TOP 2–3 SPOT OPPORTUNITIES
       ↓
@@ -52,113 +51,88 @@ FUTURES MAPPING — REFERENCE ONLY
 USER DECIDES WHETHER / WHICH FUTURE TO TRADE
 ```
 
+`opportunity_score` — рейтинг модели, **не вероятность прибыли**.
+
 ---
 
 ## 2. SPOT-FIRST / FUTURES BOUNDARY
 
-Фьючерс **не определяет**:
+Фьючерс не определяет direction, daily trend, relative strength, SPOT eligibility, setup, trigger, readiness или SPOT ranking.
 
-- direction;
-- daily trend;
-- relative strength;
-- SPOT eligibility;
-- setup;
-- trigger;
-- readiness;
-- SPOT ranking.
+Для `SIU6` анализируется базовый актив **SI / USD-RUB SPOT**. Фьючерс является только способом реализации выбранного пользователем сценария.
 
-Например, для `SIU6` анализируется базовый актив **SI / USD-RUB SPOT**. Фьючерс может быть показан как инструмент реализации сценария, но решение торговать `SIU6` или не торговать принимает пользователь.
-
-Таким образом, сильный рост конкретного фьючерса сам по себе не должен превращать его в TOP-кандидата.
+Сильный рост конкретного фьючерса сам по себе не должен превращать его в TOP-кандидата.
 
 ---
 
-## 3. DAILY TREND — НОВЫЙ КАНОНИЧЕСКИЙ СЛОЙ
+## 3. DAILY TREND — КАНОНИЧЕСКИЙ СЛОЙ
 
-Добавлен deterministic network-free сервис:
+`Program/services/daily_trend_profile_service.py` — deterministic network-free анализ завершённых дневных свечей.
 
-`Program/services/daily_trend_profile_service.py`
+**Version: 1.1**
 
-Версия: `1.0`.
+Анализируются отдельные окна последних **2, 3 и 4 завершённых D-свечей**.
 
-Он отдельно измеряет последние **2, 3 и 4 завершённых дневных свечи**.
-
-Для каждого окна рассчитываются:
+Для каждого окна:
 
 - `direction`: `LONG / SHORT / NEUTRAL`;
 - `state`: `PERSISTENT / CONSISTENT / WEAK / MIXED`;
-- изменение цены за окно;
-- количество положительных дневных переходов;
-- количество отрицательных дневных переходов;
+- изменение цены;
+- положительные и отрицательные дневные переходы;
 - directional days;
 - `consistency_percent`.
 
-Дополнительно рассчитываются:
+Aggregate direction является консервативным: одна короткая импульсная структура не должна переопределять более широкую картину. Для aggregate LONG/SHORT требуется подтверждение минимум двумя доступными окнами.
 
-- согласованность направления между окнами 2/3/4 дня;
-- количество persistent windows;
-- bounded `score` 0–100.
-
-### Интерпретация
+Принцип:
 
 ```text
-2 дня ↑  → ранний подтверждающий фактор
-3 дня ↑  → сильный фактор устойчивого тренда
-4 дня ↑  → сильный фактор продолжения
+2 дня ↑ → ранний фактор
+3 дня ↑ → подтверждение устойчивости
+4 дня ↑ → дополнительное подтверждение продолжения
 
 2/3/4 дня ↓ → аналогично для SHORT
 ```
 
-Один резкий день не должен автоматически считаться устойчивым трендом.
-
-Новый сервис является **детерминированным аналитическим слоем без сети и futures**. Он добавлен безопасно, с regression tests. Следующая задача — подключить его к финальному SPOT ranking вместо/поверх старой упрощённой 3-дневной логики после локальной проверки.
+Один резкий день не считается устойчивым трендом автоматически.
 
 ---
 
-## 4. СУЩЕСТВУЮЩИЙ MORNING RADAR
+## 4. MORNING RADAR
 
-`Program/services/morning_radar_service.py` остаётся базовым источником:
+`Program/services/morning_radar_service.py` остаётся источником завершённых D-свечей, daily direction, daily change, average daily money и money activity.
 
-- завершённых D-свечей;
-- daily direction;
-- daily change;
-- average daily money;
-- money activity.
-
-Текущая legacy/canonical логика использует `TREND_DAYS = 3` и уже исключает текущую незавершённую дневную свечу.
-
-Новый `DailyTrendProfileService` расширяет это до явного анализа 2/3/4 дней, не ломая существующий контракт.
+Legacy `TREND_DAYS = 3` сохраняется для обратной совместимости. `DailyTrendProfileService` является дополнительным каноническим аналитическим слоем 2/3/4 дня и подготовлен для усиления финального SPOT ranking.
 
 ---
 
-## 5. MONEY / ACTIVITY
+## 5. MONEY / ACTIVITY / LIQUIDITY
 
 Используются/предусмотрены:
 
 - `price × volume`;
-- текущий session money volume;
+- session money volume;
 - средний оборот завершённых дней;
 - money per minute;
-- activity ratio относительно ожидаемой активности.
+- activity ratio относительно собственной нормы;
+- liquidity filters.
 
-Абсолютный оборот сам по себе не делает инструмент лидером. Важна активность относительно собственной нормы и качества движения.
+Абсолютный оборот сам по себе не является сигналом. Важна концентрация текущих денег, относительная активность, ликвидность и качество движения.
 
 ---
 
-## 6. MARKET BENCHMARK / RELATIVE STRENGTH
+## 6. RELATIVE STRENGTH
 
-Основной benchmark российского рынка: `IMOEX2 / IRUS2`.
+Benchmark: `IMOEX2 / IRUS2`.
 
 `relative_strength = instrument_return - benchmark_return`.
-
-Canonical interpretation:
 
 - `STRONGER`: RS ≥ +0.20 п.п.;
 - `WEAKER`: RS ≤ −0.20 п.п.;
 - `NEUTRAL`: промежуточная зона;
-- `RS_UNAVAILABLE`: обязательные benchmark data отсутствуют.
+- `RS_UNAVAILABLE`: обязательные данные отсутствуют.
 
-LONG должен согласовываться с `STRONGER`, SHORT — с `WEAKER`. Фиктивный RS запрещён.
+LONG должен согласовываться с `STRONGER`, SHORT — с `WEAKER`. Синтетический RS запрещён.
 
 ---
 
@@ -166,15 +140,10 @@ LONG должен согласовываться с `STRONGER`, SHORT — с `WE
 
 H1 задаёт контекст, M5 формирует сценарий.
 
-LONG:
+LONG: `H1 up → impulse → first pullback → stabilization → continuation`  
+SHORT: `H1 down → impulse → first rebound → stabilization → continuation`
 
-`H1 up → impulse → first pullback → stabilization → continuation`
-
-SHORT:
-
-`H1 down → impulse → first rebound → stabilization → continuation`
-
-Canonical lifecycle:
+Lifecycle:
 
 ```text
 WAIT → WATCH → ARMED → READY → CONFIRMED
@@ -182,7 +151,7 @@ WAIT → WATCH → ARMED → READY → CONFIRMED
 
 `INVALIDATED` — terminal state текущего lifecycle.
 
-`READY/CONFIRMED` — аналитические состояния, а не торговая команда.
+`READY/CONFIRMED` — аналитические состояния, не торговая команда.
 
 ---
 
@@ -197,24 +166,15 @@ LONG  → spot_price >= entry_trigger
 SHORT → spot_price <= entry_trigger
 ```
 
-`MorningTradingPipelineService` использует двухнаблюдательный stability gate:
+`MorningTradingPipelineService` использует двухнаблюдательный stability gate: первое active observation → `ARMED`, второе → `READY`.
 
-```text
-1-е active observation → ARMED
-2-е active observation → READY
-```
-
-Обычный transient retreat не уничтожает lifecycle. Explicit invalidation переводит его в `INVALIDATED`; `new_setup=True` начинает новый lifecycle.
+Transient retreat не уничтожает lifecycle; explicit invalidation переводит его в `INVALIDATED`.
 
 ---
 
 ## 9. SETUP QUALITY
 
-`Program/services/setup_quality_service.py` содержит deterministic bounded quality scoring.
-
-Quality отделена от detection и lifecycle и не должна самостоятельно превращать setup в READY/CONFIRMED.
-
-`SetupEngine` использует quality как enrichment.
+`setup_quality_service.py` содержит bounded deterministic quality scoring. Quality отделена от detection/lifecycle и не должна самостоятельно превращать setup в READY/CONFIRMED.
 
 ---
 
@@ -224,17 +184,15 @@ Quality отделена от detection и lifecycle и не должна сам
 
 TOP ограничен тремя кандидатами и не заполняется искусственно.
 
-SPOT ranking не должен зависеть от futures reference metrics.
+SPOT ranking не зависит от futures reference metrics. Directional RS является значимым directional factor / tie-break.
 
-Directional RS используется как значимый directional factor / tie-break.
-
-Новый daily 2/3/4-day profile предназначен для усиления ranking именно как **устойчивость направления**, а не как прогноз гарантированной доходности.
+Daily 2/3/4-day profile предназначен для усиления ranking как **устойчивость направления**, а не как прогноз гарантированной доходности.
 
 ---
 
 ## 11. EVENT RISK
 
-`moex_event_risk` остаётся жёстким SPOT eligibility gate и проверяется до candidate formation/mapping.
+`moex_event_risk` является жёстким SPOT eligibility gate до candidate formation/mapping.
 
 Сильный однодневный выброс без устойчивой структуры не должен автоматически становиться качественным кандидатом.
 
@@ -242,35 +200,29 @@ Directional RS используется как значимый directional fact
 
 ## 12. HISTORICAL REPLAY / MATHEMATICAL EXPECTATION
 
-Historical replay — `READ ONLY / NO ORDERS`.
+Historical replay: **READ ONLY / NO ORDERS**.
 
-Historical SPOT candidate формируется и ранжируется до futures lookup.
+Для будущего статистического слоя накапливаются:
 
-Следующий статистический этап должен накапливать для каждого типа сетапа:
-
-- количество наблюдений;
+- число наблюдений;
 - win/loss;
-- средний adverse excursion;
-- средний favourable excursion;
+- average adverse excursion;
+- average favourable excursion;
 - средний результат;
 - payoff ratio;
 - hit rate;
 - expectancy;
-- результат по LONG/SHORT;
-- результат по ликвидности и activity regime;
-- результат по 2/3/4-day trend regime.
+- LONG/SHORT breakdown;
+- liquidity/activity regimes;
+- 2/3/4-day trend regimes.
 
-До достаточной выборки **никакая expectancy не должна отображаться как доказанная вероятность прибыли**.
+До достаточной выборки expectancy не должна отображаться как доказанная вероятность прибыли.
 
 ---
 
-## 13. LONG / SHORT MONEY BALANCE
+## 13. LONG / SHORT BALANCE
 
-В архитектуре помощника предусмотрен отдельный фактор для анализа доступных данных о балансе LONG/SHORT.
-
-Он не должен подменять SPOT price action и не должен использоваться, если источник не даёт достоверную и своевременную информацию.
-
-При отсутствии качественных данных значение должно быть `UNAVAILABLE`, а не синтетически вычисляться.
+Фактор используется только при наличии достоверных и своевременных данных. При отсутствии качественного источника значение — `UNAVAILABLE`; синтетическая оценка запрещена.
 
 ---
 
@@ -278,41 +230,26 @@ Historical SPOT candidate формируется и ранжируется до 
 
 Futures — reference mapping выбранного SPOT-актива.
 
-До `signal_state ∈ {READY, CONFIRMED}` futures mapping data очищаются из результата.
+До `signal_state ∈ {READY, CONFIRMED}` futures mapping очищается из результата. После READY/CONFIRMED могут быть показаны ticker, expiry, days-to-expiry и направление SPOT-сценария.
 
-После READY/CONFIRMED могут быть показаны:
-
-- futures ticker;
-- expiry;
-- days to expiry;
-- направление соответствующего SPOT сценария.
-
-Futures не подтверждают SPOT signal.
-
-Фьючерсы с `days_to_expiry <= 3` исключаются из reference mapping.
+Фьючерсы не подтверждают SPOT signal. Контракты с `days_to_expiry <= 3` исключаются из reference mapping.
 
 ---
 
-## 15. TEST ARCHITECTURE
+## 15. TESTS / REGRESSION
 
-Regression tests deterministic и не требуют BCS refresh token, сети или live market data.
+Тесты deterministic и не требуют BCS token, сети или live market data.
 
-Текущий baseline после repository cleanup:
+Критический regression для daily trend проверяет, что:
 
 ```text
-163 passed
+110 → 100 → 100   = SHORT для 3-дневного окна
+100 → 110 → 100 → 100 = NEUTRAL для 4-дневного окна
 ```
 
-Добавлены отдельные tests для нового daily trend profile:
+Следовательно, единичный короткий импульс не создаёт aggregate SHORT.
 
-`Program/test_daily_trend_profile_service.py`
-
-Проверяются:
-
-- persistent LONG на 2/3/4 дня;
-- persistent SHORT на 2/3/4 дня;
-- смешанная структура;
-- insufficient history.
+После исправления тестовых данных ожидаемый полный baseline: **168 passed**.
 
 ---
 
@@ -328,17 +265,15 @@ Regression tests deterministic и не требуют BCS refresh token, сет�
 - `Docs/historical_replay`;
 - ранее удалённые legacy production files.
 
-Не удаляются production services только потому, что они не импортируются напрямую из `main.py`: часть используется historical replay, diagnostics и regression tests.
+Production services не удаляются только потому, что они не импортируются напрямую из `main.py`: часть используется historical replay, diagnostics и regression tests.
 
 ---
 
 ## 17. INSTALLED `.APP`
 
-Установленный bundle:
+Bundle:
 
 `/Users/ilshatmac/Applications/Trader_7_12 Pro.app`
-
-Параметры аудита:
 
 ```text
 CFBundleName:                Trader_7_12 Pro
@@ -347,23 +282,11 @@ Bundle ID:                   com.trader712.pro
 Architecture:                Mach-O x86_64
 ```
 
-`.app` является тонким launcher bundle и использует канонический рабочий каталог:
+`.app` является тонким launcher bundle и использует канонический каталог:
 
-```text
-/Users/ilshatmac/Documents/Trader_7_12
-```
+`/Users/ilshatmac/Documents/Trader_7_12`
 
-Launcher устанавливает:
-
-```text
-PYTHONPATH=/Users/ilshatmac/Documents/Trader_7_12/Program
-```
-
-и запускает текущий:
-
-```text
-/usr/bin/env python3 /Users/ilshatmac/Documents/Trader_7_12/Program/main.py
-```
+Launcher устанавливает `PYTHONPATH=$ROOT/Program` и запускает текущий `Program/main.py`.
 
 BCS refresh token берётся из macOS Keychain и не хранится в Git, app bundle или plist.
 
@@ -383,46 +306,47 @@ BCS refresh token берётся из macOS Keychain и не хранится в
 - `ОТНОСИТЕЛЬНАЯ СИЛА`;
 - `СЕТАП И ТРИГГЕР`.
 
-`ОЦЕНКА ВОЗМОЖНОСТИ` является рейтингом модели, а не статистической вероятностью исхода.
+Оценка возможности — рейтинг модели, не статистическая вероятность.
 
 ---
 
 ## 19. CURRENT CHECKPOINT — 29.08.2026
 
-Новый кодовый слой:
+Последовательность текущего RC:
 
 ```text
-3992fc8  Add deterministic 2-4 day daily trend profile service
-b04569d  Add regression tests for 2-4 day trend profile
+3cdf903  Document RC app architecture and runtime audit
+18ef865  Remove obsolete legacy production files
+...
+802e1c8  Add regression coverage for single-window daily impulse
+3386b5a  Fix daily trend impulse regression test data
 ```
 
-Следующая локальная проверка на iMac должна подтвердить:
+На локальной машине после `git pull --ff-only origin main` необходимо выполнить:
 
 ```bash
-cd ~/Documents/Trader_7_12
-git pull --ff-only origin main
 python3 -m compileall -q Program
 PYTHONPATH=Program python3 -m pytest -q Program
 ```
 
-После этого можно переходить к следующему шагу: **подключить 2/3/4-day profile непосредственно в TOP-2/3 SPOT ranking**, а затем отдельно добавить validated expectancy из historical replay.
+Ожидаемый результат после синхронизации: **168 passed** и чистый `git status`.
 
 ---
 
-## 20. ПРОФЕССИОНАЛЬНЫЙ ПРИНЦИП ПРОЕКТА
+## 20. TRADING SAFETY / OPERATING RULE
 
-Trader_7_12 Pro не должен пытаться угадывать каждый день направление цены.
+Проект находится в стадии **контролируемого пользовательского тестирования**, а не доказанной прибыльности.
 
-Он должен искать повторяемые ситуации, где одновременно сходятся:
+Сканер не гарантирует ежедневную прибыль и не доказывает цель `20 000 ₽+` в день. Перед переходом к существенным объёмам необходимы историческая валидация expectancy и серия paper/small-size наблюдений.
 
-**тренд + деньги + ликвидность + относительная сила + структура + trigger + статистически подтверждённое преимущество.**
-
-Финальная задача помощника — не сказать пользователю «покупай фьючерс», а дать ему прозрачный shortlist:
+Практический принцип:
 
 ```text
-№1 — базовый актив — направление — score — почему
-№2 — базовый актив — направление — score — почему
-№3 — базовый актив — направление — score — почему
+SCANNER FINDS OPPORTUNITY
+        ↓
+USER CHECKS CONTEXT
+        ↓
+USER DECIDES FUTURES / ENTRY / RISK
+        ↓
+NO AUTOMATIC ORDERS
 ```
-
-И отдельно показать, какие данные подтверждают или опровергают сценарий.
