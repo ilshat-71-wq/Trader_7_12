@@ -41,7 +41,10 @@ def test_mixed_daily_structure_is_not_called_persistent():
 
 
 def test_single_window_impulse_cannot_create_aggregate_short():
-    candles = [candle(100), candle(100), candle(110), candle(100)]
+    # 3-day window: 110 -> 100 -> 100 => SHORT.
+    # 4-day window: 100 -> 110 -> 100 -> 100 => MIXED/NEUTRAL.
+    # The single shorter-window signal must not create an aggregate SHORT.
+    candles = [candle(100), candle(110), candle(100), candle(100)]
     result = DailyTrendProfileService.analyze(candles)
 
     assert result["windows"]["3"]["direction"] == "SHORT"
