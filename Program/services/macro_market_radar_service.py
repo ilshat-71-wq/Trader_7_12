@@ -68,8 +68,12 @@ class MacroMarketRadarService:
             class_code = str(item.get("classCode") or "").strip()
             row = dict(item)
             row["days_to_expiry"] = days
-            row["spot_ticker"] = ticker
+            # Selector grouping uses the macro group; actual analysis/execution
+            # ticker remains in analysis_ticker/futures_ticker.
+            row["spot_ticker"] = group
             row["spot_class_code"] = class_code
+            row["analysis_ticker"] = ticker
+            row["analysis_class_code"] = class_code
             row["spot_group"] = group
             row["market_universe"] = group
             row["analysis_source"] = "FUTURES_DIRECT"
@@ -80,7 +84,7 @@ class MacroMarketRadarService:
 
         result = []
         for group, rows in grouped.items():
-            rows.sort(key=lambda x: (x["days_to_expiry"], x["ticker"]))
+            rows.sort(key=lambda x: (x["days_to_expiry"], x["analysis_ticker"]))
             result.extend(rows[:2])
         return result
 
@@ -124,8 +128,8 @@ class MacroMarketRadarService:
         results = []
 
         for item in selected:
-            ticker = str(item.get("futures_ticker") or item.get("ticker") or "").strip().upper()
-            class_code = str(item.get("futures_class_code") or item.get("classCode") or "").strip()
+            ticker = str(item.get("analysis_ticker") or item.get("futures_ticker") or "").strip().upper()
+            class_code = str(item.get("analysis_class_code") or item.get("futures_class_code") or "").strip()
             group = item.get("spot_group")
             if not ticker or not class_code or group not in self.GROUPS:
                 continue
