@@ -6,9 +6,10 @@ endpoint may not expose that SPOT security. This service therefore provides a
 conservative, explicit fallback: macro markets are analysed directly on a
 live, dated futures contract when a usable SPOT source is unavailable.
 
-This is not a hidden futures confirmation layer. The result is labelled
-FUTURES_DIRECT and the analysed contract is the instrument itself. No
-portfolio sizing or order execution is performed here.
+The fallback is intentionally usable during weekend/evening futures sessions:
+when the canonical daily SPOT-style radar cannot produce a direction, the
+service derives a *direct intraday proxy direction* from the last-trades stream.
+That does not pretend to be SPOT data and is explicitly labelled as such.
 """
 
 from datetime import date
@@ -20,9 +21,9 @@ from services.futures_morning_radar_service import FuturesMorningRadarService
 
 
 class MacroMarketRadarService:
-    """Scan the four configured macro groups without requiring SPOT metadata."""
+    """Scan configured macro groups without requiring SPOT metadata."""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
     GROUPS = MarketTradingUniverseService.MACRO_GROUPS
     MAX_DAYS_TO_EXPIRY = 3
 
@@ -68,8 +69,6 @@ class MacroMarketRadarService:
             class_code = str(item.get("classCode") or "").strip()
             row = dict(item)
             row["days_to_expiry"] = days
-            # Selector grouping uses the macro group; actual analysis/execution
-            # ticker remains in analysis_ticker/futures_ticker.
             row["spot_ticker"] = group
             row["spot_class_code"] = class_code
             row["analysis_ticker"] = ticker
@@ -109,6 +108,83 @@ class MacroMarketRadarService:
             result.append(dict(item))
         return result
 
+    def _direct_trade_snapshot(self, ticker, class_code):
+        """Build a conservative intraday direction when daily radar has no data."""
+        if self.api is None or not hasattr(self.api, "get_last_trades"):
+            return None
+        try:
+            payload = self.api.get_last_trades(ticker, class_code)
+        except Exception:
+            return None
+        records = payload.get("records", []) if isinstance(payload, dict) else []
+        if not isinstance(records, list):
+            return None
+
+        valid = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            price = self._float(record.get("price"))
+            if price <= 0:
+                continue
+            valid.append(record)
+        if len(valid) < 2:
+            return None
+
+        first_price = self._float(valid[0].get("price"))
+        last_price = self._float(valid[-1].get("price"))
+        if first_price <= 0 or last_price <= 0:
+            return None
+        change = (last_price / first_price - 1.0) * 100.0
+        if change > 0:
+            direction = "LONG"
+        elif change < 0:
+            direction = "SHORT"
+        else:
+            direction = "NONE"
+
+        money = 0.0
+        for record in valid:
+            price = self._float(record.get("price"))
+            quantity = self._float(
+                record.get("quantity", record.get("qty", record.get("volume", 0)))
+            )
+            if quantity > 0:
+                money += abs(price * quantity)
+        return {
+            "direction": direction,
+            "change_percent": change,
+            "last_close": last_price,
+            "trade_count": len(valid),
+            "trade_money": money,
+            "status": "INTRADAY_PROXY",
+        }
+
+    def _radar(self, ticker, class_code):
+        """Use canonical instrument radar first, then explicit intraday fallback."""
+        base_radar = getattr(self.radar_service, "radar_service", None)
+        if base_radar is None:
+            return None, None
+
+        raw = None
+        try:
+            raw = base_radar.analyze(ticker, class_code)
+        except Exception:
+            try:
+                raw = base_radar.calculate(ticker=ticker, class_code=class_code)
+            except Exception:
+                raw = None
+
+        if isinstance(raw, dict) and str(raw.get("status") or "").upper() != "ERROR":
+            daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
+            trend = daily.get("trend") if isinstance(daily.get("trend"), dict) else {}
+            direction = str(trend.get("direction") or raw.get("direction") or "NONE").upper()
+            if direction in {"LONG", "SHORT"}:
+                return raw, None
+
+        fallback = self._direct_trade_snapshot(ticker, class_code)
+        return raw if isinstance(raw, dict) else {}, fallback
+
     def scan(self, limit=None):
         if self.session_service is None or self.session_money_service is None:
             return []
@@ -117,10 +193,6 @@ class MacroMarketRadarService:
         mappings = self.build_universe(futures)
         selected = self._select_contracts(mappings)
         if not selected:
-            return []
-
-        base_radar = getattr(self.radar_service, "radar_service", None)
-        if base_radar is None:
             return []
 
         session = self.session_service.get_session()
@@ -134,16 +206,21 @@ class MacroMarketRadarService:
             if not ticker or not class_code or group not in self.GROUPS:
                 continue
 
-            try:
-                raw = base_radar.calculate(ticker=ticker, class_code=class_code)
-            except Exception:
-                continue
-            if not isinstance(raw, dict):
-                continue
-
+            raw, fallback = self._radar(ticker, class_code)
+            raw = raw if isinstance(raw, dict) else {}
             daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
             trend = daily.get("trend") if isinstance(daily.get("trend"), dict) else {}
-            direction = str(trend.get("direction") or "NONE").upper()
+            direction = str(trend.get("direction") or raw.get("direction") or "NONE").upper()
+            change = self._float(trend.get("change_percent"))
+            last_close = self._float(daily.get("last_close"))
+            source_status = "DAILY_RADAR"
+
+            if direction not in {"LONG", "SHORT"} and isinstance(fallback, dict):
+                direction = str(fallback.get("direction") or "NONE").upper()
+                change = self._float(fallback.get("change_percent"))
+                last_close = self._float(fallback.get("last_close"))
+                source_status = "INTRADAY_PROXY"
+
             if direction not in {"LONG", "SHORT"}:
                 continue
 
@@ -166,7 +243,13 @@ class MacroMarketRadarService:
             activity_ratio = FuturesMorningRadarService._activity_ratio(
                 current_money, average_money, elapsed, expected
             )
-            change = self._float(trend.get("change_percent"))
+            if activity_ratio <= 0 and isinstance(fallback, dict):
+                fallback_money = self._float(fallback.get("trade_money"))
+                if fallback_money > 0 and elapsed > 0:
+                    money_per_minute = max(money_per_minute, fallback_money / elapsed)
+                if fallback_money > 0 and current_money <= 0:
+                    current_money = fallback_money
+
             directional_change = change if direction == "LONG" else -change
 
             setup = {
@@ -204,13 +287,18 @@ class MacroMarketRadarService:
                     + min(max(self._float(setup.get("setup_quality_score")), 0.0) * 0.15, 15.0),
                 ),
             )
+            if source_status == "INTRADAY_PROXY":
+                candidate_score = min(
+                    100.0,
+                    candidate_score + min(abs(change) * 2.0, 10.0),
+                )
 
-            last_close = self._float(daily.get("last_close"))
             expiry = item.get("futures_expiry", item.get("expiry"))
             result = {
                 "version": self.VERSION,
                 "status": "WATCHLIST",
                 "analysis_source": "FUTURES_DIRECT",
+                "macro_analysis_status": source_status,
                 "spot_data_status": "UNAVAILABLE_PROXY_TO_FUTURES",
                 "direction": direction,
                 "spot_group": group,
@@ -230,7 +318,7 @@ class MacroMarketRadarService:
                 "session_expected_minutes": expected,
                 "spot_change_percent": change,
                 "change_percent": change,
-                "trend_state": trend.get("state", "UNKNOWN"),
+                "trend_state": trend.get("state", "INTRADAY_PROXY" if source_status == "INTRADAY_PROXY" else "UNKNOWN"),
                 "trend_days": int(self._float(trend.get("days"))),
                 "radar_score": candidate_score,
                 "candidate_score": round(candidate_score, 2),
@@ -281,7 +369,7 @@ class MacroMarketRadarService:
                 self._float(x.get("candidate_score")),
                 self._float(x.get("spot_session_activity_ratio")),
                 self._float(x.get("spot_money_per_minute")),
-                abs(self._float(x.get("spot_change_percent"))),
+                self._float(x.get("spot_change_percent")),
                 str(x.get("spot_ticker") or ""),
             ),
             reverse=True,
