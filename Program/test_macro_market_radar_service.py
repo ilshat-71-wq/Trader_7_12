@@ -37,3 +37,31 @@ def test_macro_universe_marks_direct_analysis_explicitly():
     result = MacroMarketRadarService.build_universe([future("SiZ6", far)])
     assert result[0]["analysis_source"] == "FUTURES_DIRECT"
     assert result[0]["spot_group"] == "USDRUB"
+
+
+def test_intraday_proxy_direction_uses_first_and_last_trade():
+    class FakeAPI:
+        def get_last_trades(self, ticker, class_code):
+            return {
+                "records": [
+                    {"dateTime": "2026-08-30T07:00:00Z", "price": 100.0, "quantity": 2},
+                    {"dateTime": "2026-08-30T07:10:00Z", "price": 101.0, "quantity": 3},
+                ]
+            }
+
+    radar = MacroMarketRadarService(api=FakeAPI())
+    result = radar._direct_trade_snapshot("TEST", "SPBFUT")
+
+    assert result["direction"] == "LONG"
+    assert round(result["change_percent"], 4) == 1.0
+    assert result["trade_count"] == 2
+    assert result["trade_money"] == 503.0
+
+
+def test_intraday_proxy_returns_none_without_two_valid_trades():
+    class FakeAPI:
+        def get_last_trades(self, ticker, class_code):
+            return {"records": [{"price": 100.0}]}
+
+    radar = MacroMarketRadarService(api=FakeAPI())
+    assert radar._direct_trade_snapshot("TEST", "SPBFUT") is None
