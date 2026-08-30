@@ -3,52 +3,36 @@
 **Дата актуализации:** 30.08.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main`  
-**Текущий HEAD:** `e973948`  
-**Назначение:** read-only SPOT-first opportunity scanner / помощник для самостоятельной intraday-торговли фьючерсами Московской биржи.
+**Текущий HEAD:** `d57862d`  
+**Назначение:** read-only full-market opportunity scanner / помощник для самостоятельной intraday-торговли фьючерсами Московской биржи.
 
-> Главный принцип: сканер ищет **ГДЕ есть потенциальное преимущество**, а не торгует вместо пользователя. Пользователь самостоятельно выбирает конкретный фьючерс, вход, размер позиции и риск. Исполнение ордеров, SL/TP и position sizing отсутствуют.
+> Архитектор — ChatGPT, автор и владелец торговой идеи — пользователь. Главный принцип: сканер ищет **ГДЕ есть потенциальное преимущество**, а не торгует вместо пользователя. Исполнение ордеров, SL/TP и position sizing отсутствуют.
 
 ---
 
-## 1. ЦЕЛЬ ПОМОЩНИКА
+## 1. ЦЕЛЬ
 
-Ежедневно выделять **TOP-2/3 базовых SPOT-инструмента**, где одновременно наблюдаются:
-
-- устойчивый дневной тренд;
-- денежная активность, объём и оборот;
-- достаточная ликвидность;
-- относительная сила/слабость относительно рынка;
-- направленный money flow;
-- LONG/SHORT balance, только если есть достоверный источник;
-- качественный intraday setup;
-- подтверждённый trigger;
-- положительное историческое математическое ожидание после накопления достаточной статистики.
-
-Целевой сценарий:
+Ежедневно выделять лучшие текущие возможности по всему доступному рынку:
 
 ```text
-SPOT BASE ASSET
-      ↓
-MONEY / VOLUME / TURNOVER
-      ↓
-DAILY TREND 2 / 3 / 4 DAYS
-      ↓
-LIQUIDITY / ACTIVITY
-      ↓
-RELATIVE STRENGTH vs IMOEX2 / IRUS2
-      ↓
-LONG / SHORT BALANCE WHEN DATA IS AVAILABLE
-      ↓
-H1 STRUCTURE + M5 SETUP
-      ↓
-TRIGGER / STABILITY
-      ↓
-MATHEMATICAL EXPECTATION — AFTER VALIDATED HISTORY
-      ↓
-TOP 2–3 SPOT OPPORTUNITIES
-      ↓
-FUTURES MAPPING — REFERENCE ONLY
-      ↓
+SPOT EQUITIES
+OIL
+GOLD
+GAS
+USDRUB
+    ↓
+MONEY / ACTIVITY / LIQUIDITY
+    ↓
+TREND
+    ↓
+RELATIVE STRENGTH WHEN VALID
+    ↓
+SETUP / TRIGGER / STABILITY
+    ↓
+OPPORTUNITY RANKING
+    ↓
+TOP WATCHLIST
+    ↓
 USER DECIDES WHETHER / WHICH FUTURE TO TRADE
 ```
 
@@ -56,214 +40,28 @@ USER DECIDES WHETHER / WHICH FUTURE TO TRADE
 
 ---
 
-## 2. SPOT-FIRST / FUTURES BOUNDARY
+## 2. SPOT-FIRST / MACRO-DIRECT BOUNDARY
 
-Для обычного equity-пути фьючерс не определяет direction, daily trend, relative strength, SPOT eligibility, setup, trigger, readiness или SPOT ranking.
+Для обычного equity pipeline базовый актив — SPOT. Futures — только reference mapping и не подтверждают SPOT signal.
 
-Для `SIU6` и других валютных контрактов исходная архитектурная цель — анализировать базовый актив **USD/RUB SPOT**, а фьючерс использовать только как способ реализации выбранного пользователем сценария.
+Для `USD000SMALL / CETS_FX`, а также для OIL/GOLD/GAS, BCS может не отдавать пригодные SPOT candles. Поэтому существует явный `FUTURES_DIRECT` coverage layer.
 
-**Текущее техническое состояние macro-пути:** BCS в текущем доступном universe надёжно возвращает фьючерсные контракты, включая `Si*`, `USDRUBF`, `BR*`, `GD*`, `NG*`, но отдельный SPOT `USD000SMALL/CETS_FX` в текущих проверках не возвращает свечи. Поэтому для OIL/GOLD/GAS/USDRUB добавлен явный `FUTURES_DIRECT` fallback. Он не скрывается под видом SPOT: результат маркируется `FUTURES_DIRECT`, `spot_data_status=UNAVAILABLE_PROXY_TO_FUTURES`, а анализируемый инструмент — сам доступный фьючерсный контракт.
+`FUTURES_DIRECT` означает:
 
-**Важно:** `FUTURES_DIRECT` — временный/консервативный coverage layer, а не отмена SPOT-first архитектуры. Он не должен считаться эквивалентом полноценного SPOT pipeline.
+- анализируется сам доступный фьючерсный контракт;
+- `analysis_source = FUTURES_DIRECT`;
+- `spot_data_status = UNAVAILABLE_PROXY_TO_FUTURES`;
+- `mapping_method = FUTURES_DIRECT`;
+- синтетический SPOT не создаётся;
+- RS относительно IMOEX2/IRUS2 не придумывается.
 
----
-
-## 3. DAILY TREND — КАНОНИЧЕСКИЙ СЛОЙ
-
-`Program/services/daily_trend_profile_service.py` — deterministic network-free анализ завершённых дневных свечей.
-
-**Version: 1.1**
-
-Анализируются отдельные окна последних **2, 3 и 4 завершённых D-свечей**.
-
-Для каждого окна:
-
-- `direction`: `LONG / SHORT / NEUTRAL`;
-- `state`: `PERSISTENT / CONSISTENT / WEAK / MIXED`;
-- изменение цены;
-- положительные и отрицательные дневные переходы;
-- directional days;
-- `consistency_percent`.
-
-Aggregate direction является консервативным: одна короткая импульсная структура не должна переопределять более широкую картину. Для aggregate LONG/SHORT требуется подтверждение минимум двумя доступными окнами.
-
-Принцип:
-
-```text
-2 дня ↑ → ранний фактор
-3 дня ↑ → подтверждение устойчивости
-4 дня ↑ → дополнительное подтверждение продолжения
-
-2/3/4 дня ↓ → аналогично для SHORT
-```
-
-Один резкий день не считается устойчивым трендом автоматически.
-
-**Реализация:** сервис и regression coverage существуют и проходят тесты. Однако в текущем `FUTURES_DIRECT` macro fallback этот канонический 2/3/4-day profile ещё не является обязательным источником macro ranking; macro path пока использует расчёт базового radar на выбранном фьючерсном контракте.
+Это **coverage fallback**, а не ложное утверждение о полноценном SPOT-анализе.
 
 ---
 
-## 4. MORNING RADAR
+## 3. FULL-MARKET UNIVERSE
 
-`Program/services/morning_radar_service.py` остаётся источником завершённых D-свечей, daily direction, daily change, average daily money и money activity.
-
-Legacy `TREND_DAYS = 3` сохраняется для обратной совместимости. `DailyTrendProfileService` является дополнительным каноническим аналитическим слоем 2/3/4 дня и подготовлен для усиления финального SPOT ranking.
-
----
-
-## 5. MONEY / ACTIVITY / LIQUIDITY
-
-Используются/предусмотрены:
-
-- `price × volume`;
-- session money volume;
-- средний оборот завершённых дней;
-- money per minute;
-- activity ratio относительно собственной нормы;
-- liquidity filters.
-
-Абсолютный оборот сам по себе не является сигналом. Важна концентрация текущих денег, относительная активность, ликвидность и качество движения.
-
-**Статус:** для основного SPOT/equity pipeline слой реализован. Для macro `FUTURES_DIRECT` есть session money/activity и contract selection/liquidity данные, но они относятся к proxy-фьючерсу, а не к недоступному SPOT underlying.
-
----
-
-## 6. RELATIVE STRENGTH
-
-Benchmark: `IMOEX2 / IRUS2`.
-
-`relative_strength = instrument_return - benchmark_return`.
-
-- `STRONGER`: RS ≥ +0.20 п.п.;
-- `WEAKER`: RS ≤ −0.20 п.п.;
-- `NEUTRAL`: промежуточная зона;
-- `RS_UNAVAILABLE`: обязательные данные отсутствуют.
-
-LONG должен согласовываться с `STRONGER`, SHORT — с `WEAKER`. Синтетический RS запрещён.
-
-**Статус:** для обычного SPOT/equity candidate path RS является обязательным eligibility/ranking factor. Для `FUTURES_DIRECT` macro fallback RS явно `UNAVAILABLE`, benchmark `NOT_APPLICABLE_FOR_MACRO_DIRECT`; синтетический RS не создаётся. Следовательно, macro fallback не достигает полноты обычного SPOT ranking.
-
----
-
-## 7. SETUP / READINESS
-
-H1 задаёт контекст, M5 формирует сценарий.
-
-LONG: `H1 up → impulse → first pullback → stabilization → continuation`  
-SHORT: `H1 down → impulse → first rebound → stabilization → continuation`
-
-Lifecycle:
-
-```text
-WAIT → WATCH → ARMED → READY → CONFIRMED
-```
-
-`INVALIDATED` — terminal state текущего lifecycle.
-
-`READY/CONFIRMED` — аналитические состояния, не торговая команда.
-
-**Статус:** lifecycle и SPOT setup/readiness реализованы в основном pipeline. Macro fallback умеет запускать setup analysis и общий двухнаблюдательный lifecycle, но анализируется proxy-фьючерс; это отдельный режим и не должен быть смешан с canonical SPOT signal.
-
----
-
-## 8. TRIGGER / ANTI-CHURN
-
-Главный invariant:
-
-> Trigger level ≠ trigger activation.
-
-```text
-LONG  → spot_price >= entry_trigger
-SHORT → spot_price <= entry_trigger
-```
-
-`MorningTradingPipelineService` использует двухнаблюдательный stability gate: первое active observation → `ARMED`, второе → `READY`.
-
-Transient retreat не уничтожает lifecycle; explicit invalidation переводит его в `INVALIDATED`.
-
-**Статус:** реализовано и покрыто regression tests для live/historical trigger contract. Для macro fallback trigger технически считается по proxy price и поэтому маркируется как macro direct, а не как подтверждение реального SPOT trigger.
-
----
-
-## 9. SETUP QUALITY
-
-`setup_quality_service.py` содержит bounded deterministic quality scoring. Quality отделена от detection/lifecycle и не должна самостоятельно превращать setup в READY/CONFIRMED.
-
-**Статус:** реализовано. Macro fallback может использовать setup quality, но её источник — proxy-фьючерс.
-
----
-
-## 10. RANKING
-
-Основной SPOT ranking использует `candidate_score`, затем session-level `opportunity_score`.
-
-TOP ограничен тремя кандидатами и не заполняется искусственно.
-
-SPOT ranking не зависит от futures reference metrics. Directional RS является значимым directional factor / tie-break.
-
-Daily 2/3/4-day profile предназначен для усиления ranking как **устойчивость направления**, а не как прогноз гарантированной доходности.
-
-**Текущий macro ranking отличается:** `MacroMarketRadarService` имеет отдельный bounded score на основе proxy activity/money/movement/setup quality. Он сознательно не подменяет отсутствующий RS и не выдаёт macro proxy за полноценный SPOT candidate. Это рабочий coverage fallback, но не финальная архитектурная точка.
-
----
-
-## 11. EVENT RISK
-
-`moex_event_risk` является жёстким SPOT eligibility gate до candidate formation/mapping.
-
-Сильный однодневный выброс без устойчивой структуры не должен автоматически становиться качественным кандидатом.
-
-**Статус:** основной SPOT/equity candidate path использует event-risk gate. В текущем `FUTURES_DIRECT` macro fallback отдельный полноценный macro event-risk gate ещё не является обязательным фильтром. Это один из следующих архитектурных gaps.
-
----
-
-## 12. HISTORICAL REPLAY / MATHEMATICAL EXPECTATION
-
-Historical replay: **READ ONLY / NO ORDERS**.
-
-Для будущего статистического слоя накапливаются:
-
-- число наблюдений;
-- win/loss;
-- average adverse excursion;
-- average favourable excursion;
-- средний результат;
-- payoff ratio;
-- hit rate;
-- expectancy;
-- LONG/SHORT breakdown;
-- liquidity/activity regimes;
-- 2/3/4-day trend regimes.
-
-До достаточной выборки expectancy не должна отображаться как доказанная вероятность прибыли.
-
-**Фактический статус:** полноценный production-слой математического ожидания в текущем `main` ещё не завершён. Historical replay/ranking/regression infrastructure существует, но validated live/historical expectancy engine с накоплением достаточной статистики пока является TODO.
-
----
-
-## 13. LONG / SHORT BALANCE
-
-Фактор используется только при наличии достоверных и своевременных данных. При отсутствии качественного источника значение — `UNAVAILABLE`; синтетическая оценка запрещена.
-
-**Фактический статус:** в текущем production pipeline отдельный подтверждённый источник LONG/SHORT balance не реализован. Значение должно оставаться `UNAVAILABLE`, а не заменяться расчётной догадкой. Это TODO при появлении качественного источника данных.
-
----
-
-## 14. FUTURES MAPPING
-
-Для обычного SPOT pipeline Futures — reference mapping выбранного SPOT-актива.
-
-До `signal_state ∈ {READY, CONFIRMED}` futures mapping очищается из результата. После READY/CONFIRMED могут быть показаны ticker, expiry, days-to-expiry и направление SPOT-сценария.
-
-Фьючерсы не подтверждают SPOT signal. Контракты с `days_to_expiry <= 3` исключаются из reference mapping.
-
-**Macro exception:** для OIL/GOLD/GAS/USDRUB при отсутствии usable SPOT source действует `FUTURES_DIRECT`. В этом режиме контракт не является reference mapping к доступному SPOT signal: он сам является анализируемым proxy-инструментом. Поля `analysis_source`, `spot_data_status` и `mapping_method` явно это показывают.
-
----
-
-## 15. FULL-MARKET COVERAGE
-
-`Program/services/market_trading_universe_service.py` определяет целевую universe:
+`Program/services/market_trading_universe_service.py` определяет группы:
 
 ```text
 MOEX_STOCK
@@ -273,184 +71,370 @@ GAS
 USDRUB
 ```
 
-Поддерживаются группы фьючерсов, включая:
+Текущий macro universe строится из BCS futures metadata. Для каждой группы выбираются ближайшие допустимые контракты, а контракты с `days_to_expiry <= 3` исключаются.
+
+Подтверждено реальным BCS screening 30.08.2026: доступны фьючерсные сделки по `BRV6`, `GDU6`, `NGU6`, `FFU6`; order-book для `GLU6` вернул HTTP 404, что трактуется как отсутствие конкретного источника, а не как отсутствие рынка.
+
+---
+
+## 4. DAILY TREND
+
+`Program/services/daily_trend_profile_service.py` — deterministic network-free слой завершённых D-свечей.
+
+Анализируются окна 2 / 3 / 4 завершённых дней:
+
+- direction: `LONG / SHORT / NEUTRAL`;
+- state: `PERSISTENT / CONSISTENT / WEAK / MIXED`;
+- price change;
+- directional days;
+- consistency.
+
+Для aggregate LONG/SHORT требуется подтверждение минимум двумя доступными окнами.
+
+Для обычного SPOT pipeline это канонический слой. Для `FUTURES_DIRECT` он используется, когда доступна пригодная daily history; отсутствие daily history не должно блокировать live macro coverage.
+
+---
+
+## 5. MORNING RADAR
+
+`morning_radar_service.py` и `instrument_morning_radar_service.py` обеспечивают SPOT/equity path:
+
+- завершённые D-свечи;
+- daily trend;
+- average daily money;
+- preliminary radar score;
+- setup preparation.
+
+Legacy `TREND_DAYS = 3` сохраняется только для обратной совместимости.
+
+---
+
+## 6. MONEY / ACTIVITY / LIQUIDITY
+
+Используются:
+
+- session money volume;
+- average daily money;
+- money per minute;
+- activity ratio;
+- futures contract selector;
+- liquidity score;
+- spread score;
+- expiry score;
+- turnover / trade count / depth, когда BCS их предоставляет.
+
+Для macro proxy эти показатели относятся к самому futures contract и не маскируются под SPOT.
+
+---
+
+## 7. RELATIVE STRENGTH
+
+Benchmark: `IMOEX2 / IRUS2`.
 
 ```text
-OIL    → BR / BRM / CL / WT / WTI
-GOLD   → GD / GOLD / GL / GOLDM / GLDRUBF
-GAS    → NG / NGM / FF / TTF
-USDRUB → SI / USDRUBF
+RS = instrument_return - benchmark_return
 ```
 
-`Program/services/macro_market_radar_service.py` и `full_market_pipeline_service.py` подключены к `Program/main.py`, поэтому текущий application path действительно содержит **акции + OIL/GOLD/GAS/USDRUB**.
+SPOT/equity path использует RS как directional factor.
 
-**Но:** coverage ≠ полная аналитическая эквивалентность. Акции идут через canonical SPOT-first candidate path; macro markets при отсутствии usable SPOT source идут через явно маркированный `FUTURES_DIRECT` fallback. Это сознательно зафиксировано как промежуточное состояние, а не скрытый architectural shortcut.
-
----
-
-## 16. TESTS / REGRESSION
-
-Тесты deterministic и не требуют BCS token, сети или live market data.
-
-Критический regression для daily trend проверяет, что:
+Для macro direct:
 
 ```text
-110 → 100 → 100   = SHORT для 3-дневного окна
-100 → 110 → 100 → 100 = NEUTRAL для 4-дневного окна
+relative_strength_status = UNAVAILABLE
+relative_strength_benchmark = NOT_APPLICABLE_FOR_MACRO_DIRECT
 ```
 
-Следовательно, единичный короткий импульс не создаёт aggregate SHORT.
-
-**Текущий baseline на commit `e973948`: `171 passed`**.
-
-Последняя добавленная regression coverage включает macro universe: четыре группы, expiry safety и явную маркировку `FUTURES_DIRECT`.
+Синтетический RS запрещён.
 
 ---
 
-## 17. REPOSITORY HYGIENE
+## 8. SETUP / READINESS
 
-Удалены локальные/legacy артефакты:
-
-- `*.bak`;
-- `.DS_Store`;
-- `.pytest_cache`;
-- `__pycache__`;
-- старые `Logs`;
-- `Docs/historical_replay`;
-- ранее удалённые legacy production files.
-
-Production services не удаляются только потому, что они не импортируются напрямую из `main.py`: часть используется historical replay, diagnostics и regression tests.
-
----
-
-## 18. INSTALLED `.APP`
-
-Bundle:
-
-`/Users/ilshatmac/Applications/Trader_7_12 Pro.app`
+Canonical SPOT model:
 
 ```text
-CFBundleName:                Trader_7_12 Pro
-Version:                     1.4
-Bundle ID:                   com.trader712.pro
-Architecture:                Mach-O x86_64
+H1 context
+   ↓
+M5 setup
+   ↓
+trigger
+   ↓
+stability
+   ↓
+WAIT → WATCH → ARMED → READY → CONFIRMED
 ```
 
-`.app` является тонким launcher bundle и использует канонический каталог:
+LONG: impulse → first pullback → continuation.  
+SHORT: impulse → first rebound → continuation.
 
-`/Users/ilshatmac/Documents/Trader_7_12`
+`READY/CONFIRMED` — аналитические состояния, не торговые команды.
 
-Launcher устанавливает `PYTHONPATH=$ROOT/Program` и запускает текущий `Program/main.py`.
-
-BCS refresh token берётся из macOS Keychain и не хранится в Git, app bundle или plist.
-
-`.app` не содержит отдельную копию Python проекта.
+Macro direct может использовать тот же setup service на proxy futures, но результат всегда остаётся `FUTURES_DIRECT`.
 
 ---
 
-## 19. RC UI
+## 9. TRIGGER / ANTI-CHURN
 
-`Program/watchlist_ui.py` содержит русский SPOT radar UI:
+Главный invariant:
 
-- `SPOT-РАДАР ВОЗМОЖНОСТЕЙ`;
-- `ОЦЕНКА ВОЗМОЖНОСТИ`;
-- `СИЛА СЦЕНАРИЯ`;
-- `РЕКОМЕНДАЦИЯ`;
-- `ДЕНЬГИ И АКТИВНОСТЬ`;
-- `ОТНОСИТЕЛЬНАЯ СИЛА`;
-- `СЕТАП И ТРИГГЕР`.
-
-Оценка возможности — рейтинг модели, не статистическая вероятность.
-
----
-
-## 20. ARCHITECTURAL AUDIT — 30.08.2026
-
-Аудит выполнен непосредственно против текущего `main` на commit `e973948`, а не против старого состояния паспорта.
-
-### Реализовано и подтверждено
-
-- SPOT-first pipeline для equity universe;
-- full-market universe с группами `MOEX_STOCK / OIL / GOLD / GAS / USDRUB`;
-- macro direct fallback с явной маркировкой источника;
-- deterministic daily trend 2/3/4 дня;
-- money/activity/liquidity components;
-- relative strength contract для SPOT path;
-- H1/M5 setup infrastructure;
-- trigger contract и двухнаблюдательный stability gate;
-- setup quality scoring;
-- event-risk gate для canonical SPOT candidate path;
-- futures contract selection/mapping infrastructure;
-- historical replay/regression infrastructure;
-- read-only architecture без автоматических ордеров;
-- application integration через `FullMarketPipelineService`;
-- regression baseline: **171 passed**.
-
-### Реализовано частично / архитектурно ограничено
-
-1. **OIL/GOLD/GAS/USDRUB:** coverage уже подключён в приложение, но при недоступности SPOT source анализируется доступный dated futures proxy (`FUTURES_DIRECT`). Это не полноценный SPOT analysis.
-2. **Macro daily trend:** macro fallback пока не требует канонического 2/3/4-day profile как обязательного ranking factor.
-3. **Macro RS:** остаётся `UNAVAILABLE`, без синтетического RS.
-4. **Macro event risk:** нет полноценного отдельного обязательного macro event-risk gate.
-5. **Macro ranking:** используется отдельный bounded proxy score, а не полностью унифицированный SPOT candidate score.
-6. **Macro trigger/setup:** lifecycle реализован, но уровни рассчитываются по proxy-фьючерсу.
-
-### Не завершено / TODO
-
-1. Найти и подключить стабильный исторический/live SPOT источник для `USD/RUB`, а также проверить эквивалентные корректные SPOT источники для OIL/GOLD/GAS.
-2. После появления usable SPOT source перевести macro markets с `FUTURES_DIRECT` на canonical SPOT-first analysis без изменения пользовательской архитектуры.
-3. Встроить `DailyTrendProfileService` 2/3/4 в обязательный final ranking для всех поддерживаемых SPOT markets.
-4. Завершить validated historical expectancy engine и накопление статистики по режимам.
-5. Добавить отдельный достоверный LONG/SHORT balance source, только если появится качественный источник.
-6. Провести реальные controlled live scans на выходных/торговых сессиях и сравнить фактические данные BCS с ожидаемым pipeline contract.
-7. После серии наблюдений отдельно валидировать стабильность ranking, trigger/readiness и фактическую полезность TOP-2/3.
-
-### Архитектурные запреты, которые сохраняются
-
-- не встраивать в код цель `20 000 ₽/день` как торговый параметр;
-- не превращать scanner score в вероятность прибыли;
-- не давать futures определять SPOT direction;
-- не создавать synthetic RS или synthetic LONG/SHORT balance;
-- не скрывать отсутствие SPOT data под фальшивой маркировкой `SPOT`;
-- не добавлять автоматическое исполнение ордеров;
-- не добавлять SL/TP/position sizing как часть scanner decision engine;
-- не раздувать TOP искусственно до трёх инструментов при отсутствии качественных кандидатов.
-
----
-
-## 21. CURRENT CHECKPOINT — 30.08.2026
-
-Последовательность последних значимых изменений:
+> Trigger level ≠ trigger activation.
 
 ```text
-3cdf903  Document RC app architecture and runtime audit
-18ef865  Remove obsolete legacy production files
-...
-802e1c8  Add regression coverage for single-window daily impulse
-3386b5a  Fix daily trend impulse regression test data
-2bc94ab  Update project passport after daily trend regression fix
-e973948  Group macro contracts by market before liquidity-aware selection
+LONG  → price >= trigger
+SHORT → price <= trigger
 ```
 
-На локальной машине после синхронизации необходимо выполнить:
+`MorningTradingPipelineService` использует двухнаблюдательный stability gate.
 
-```bash
-git pull --ff-only origin main
-python3 -m compileall -q Program
-PYTHONPATH=Program python3 -m pytest -q
-```
+Для macro direct trigger, если сформирован, относится к proxy futures и не является SPOT confirmation.
 
-**Фактически подтверждено 30.08.2026:**
+---
+
+## 10. EVENT RISK
+
+Для canonical SPOT path `moex_event_risk` является eligibility gate.
+
+Для macro direct отдельный полноценный macro event-risk gate остаётся следующим архитектурным усилением. Нельзя скрывать этот gap под SPOT event-risk semantics.
+
+---
+
+## 11. RANKING
+
+SPOT:
 
 ```text
-HEAD = e9739481d9ee574e450feb51f4f6ff0d88bbf461
+candidate_score
+→ session_rank_score
+→ opportunity_score
+→ signal priority
+```
+
+Macro direct использует отдельный bounded score на основе доступных:
+
+- activity;
+- money;
+- directional movement;
+- setup quality.
+
+Macro direct **не получает искусственный RS**.
+
+TOP не заполняется искусственно: отсутствие качественных кандидатов допустимо.
+
+---
+
+## 12. LIVE MACRO INTRADAY FALLBACK — НОВОЕ
+
+30.08.2026 реальный weekend screening показал архитектурный дефект: macro futures реально торговались и BCS возвращал trades, но `MacroMarketRadarService` пытался вызвать неподходящий метод на верхнем radar object и затем отбрасывал macro candidates.
+
+Исправлено в `macro_market_radar_service.py`:
+
+1. Сначала используется canonical `analyze()` внутреннего instrument radar.
+2. Если daily radar не даёт direction, запускается явный `_direct_trade_snapshot()`.
+3. Fallback использует BCS `last-trades` за текущие 30 минут.
+4. Направление определяется только по фактическому изменению first → last trade:
+   - рост → LONG;
+   - падение → SHORT;
+   - без движения → кандидат не создаётся.
+5. Fallback маркируется:
+
+```text
+macro_analysis_status = INTRADAY_PROXY
+analysis_source = FUTURES_DIRECT
+spot_data_status = UNAVAILABLE_PROXY_TO_FUTURES
+```
+
+6. Если BCS не даёт quantity/volume, это не подменяется выдуманным оборотом.
+7. Полученный proxy money используется только как дополнительный direct-macro activity input.
+
+Это исправление предназначено именно для live/weekend futures sessions.
+
+---
+
+## 13. FULL MARKET PIPELINE
+
+`Program/services/full_market_pipeline_service.py`:
+
+```text
+MorningTradingPipelineService
+          │
+          ├── canonical SPOT/equity path
+          │
+          └── MacroMarketRadarService
+                  ├── OIL
+                  ├── GOLD
+                  ├── GAS
+                  └── USDRUB
+          │
+          ↓
+      unified ranking
+          ↓
+      TOP watchlist
+```
+
+Публичный метод полного сканера:
+
+```python
+FullMarketPipelineService().scan(limit=3)
+```
+
+Метода `run()` у этого класса нет и добавлять фиктивный API не требуется.
+
+---
+
+## 14. OUTPUT CONTRACT
+
+Full-market output явно показывает:
+
+- `analysis_source`;
+- `macro_analysis_status`;
+- `spot_data_status`;
+- `spot_group / market_group`;
+- `futures_ticker`;
+- `futures_expiry`;
+- direction;
+- signal state;
+- setup;
+- trigger;
+- opportunity score.
+
+Диагностика содержит:
+
+```text
+SPOT candidates
+MACRO candidates
+TOTAL candidates
+SELECTED
+READY
+CONFIRMED
+WATCH
+WAIT
+MACRO_SOURCES
+```
+
+Вывод не утверждает, что весь scanner является только SPOT-only pipeline.
+
+---
+
+## 15. FUTURES MAPPING
+
+Canonical SPOT:
+
+- futures mapping появляется только после SPOT readiness;
+- futures не подтверждают SPOT signal;
+- expiry safety обязателен.
+
+Macro direct:
+
+- futures contract сам является анализируемым proxy;
+- это не mapping к подтверждённому SPOT signal.
+
+---
+
+## 16. HISTORICAL REPLAY / EXPECTANCY
+
+Historical replay остаётся READ ONLY / NO ORDERS.
+
+Production mathematical-expectancy engine с достаточной validated sample history пока **TODO**.
+
+Нельзя отображать expectancy как доказанную вероятность прибыли до достаточной статистики.
+
+---
+
+## 17. LONG / SHORT BALANCE
+
+При отсутствии качественного источника значение остаётся `UNAVAILABLE`.
+
+Синтетическая оценка LONG/SHORT balance запрещена.
+
+---
+
+## 18. TESTS / REGRESSION
+
+Тесты deterministic и не требуют BCS token.
+
+До macro live-fallback исправления на `main` было подтверждено:
+
+```text
+171 passed
 compileall = 0
-171 passed in 2.23s
-branch = main
-HEAD == origin/main
 ```
 
-Следующий локальный контроль после обновления паспорта должен снова подтвердить `171 passed` и чистый `git status`.
+После добавления двух macro fallback regression tests ожидаемый полный suite — **173 tests**. Это должно быть подтверждено локальным запуском после `git pull`.
+
+Новые regression cases:
+
+- macro universe: четыре группы;
+- expiry safety;
+- explicit `FUTURES_DIRECT` marking;
+- intraday proxy LONG direction;
+- insufficient trades → no proxy candidate.
+
+CI workflow `.github/workflows/spot-first-validation.yml` выполняет `compileall` и `pytest -q Program`.
+
+---
+
+## 19. REPOSITORY HYGIENE
+
+Одна рабочая ветка:
+
+```text
+main
+```
+
+Без лишних рабочих веток для текущей разработки.
+
+`PROJECT_PASSPORT.md` — единственный проектный MD-паспорт и источник архитектурного checkpoint.
+
+BCS refresh token не хранится в Git; используется локальная environment variable `BCS_REFRESH_TOKEN`.
+
+---
+
+## 20. RC APP / UI
+
+`Program/watchlist_ui.py` и установленный RC `.app` являются интерфейсным слоем.
+
+`.app` не должен содержать отдельную копию Python production проекта.
+
+UI не является источником торговой логики: canonical services остаются в `Program/services`.
+
+---
+
+## 21. ARCHITECTURAL GAPS / NEXT STEPS
+
+### P1 — Macro analytical parity
+
+Сделать полноценный macro-specific trend profile 2/3/4-day там, где доступна futures history, не выдавая его за SPOT.
+
+### P1 — Macro event risk
+
+Добавить отдельный direct-macro event-risk contract.
+
+### P1 — Macro setup quality
+
+Усилить proxy futures H1/M5 setup так, чтобы `WAIT/WATCH/READY/CONFIRMED` имели ту же строгость, но с macro-specific semantics.
+
+### P2 — Validated expectancy
+
+Закончить historical expectancy engine после накопления достаточной статистики.
+
+### P2 — LONG/SHORT balance
+
+Подключать только при появлении достоверного своевременного источника.
+
+### P3 — Data-quality observability
+
+Для каждого market group хранить причину:
+
+```text
+AVAILABLE
+UNAVAILABLE
+PROXY
+NO_TRADES
+NO_DAILY_HISTORY
+NO_ORDER_BOOK
+```
+
+Отсутствие одного endpoint не должно молча превращаться в `NO_CANDIDATE`.
 
 ---
 
@@ -458,20 +442,51 @@ HEAD == origin/main
 
 Проект находится в стадии **контролируемого пользовательского тестирования**, а не доказанной прибыльности.
 
-Сканер не гарантирует ежедневную прибыль и не доказывает цель `20 000 ₽+` в день. Эта цифра является пользовательской целевой метрикой/примером желаемого результата и **не является параметром scanner engine**.
+Сканер:
 
-Перед переходом к существенным объёмам необходимы историческая валидация expectancy и серия paper/small-size наблюдений.
+- не гарантирует ежедневную прибыль;
+- не гарантирует доходность;
+- не открывает сделки;
+- не рассчитывает position sizing;
+- не назначает SL/TP как торговое решение пользователя;
+- не подменяет самостоятельное решение владельца проекта.
 
-Практический принцип:
+Целевая доходность пользователя не является параметром scanner engine.
+
+---
+
+## 23. CURRENT CHECKPOINT
+
+На 30.08.2026 установлено:
 
 ```text
-SCANNER FINDS OPPORTUNITY
-        ↓
-USER CHECKS CONTEXT
-        ↓
-USER DECIDES FUTURES / ENTRY / RISK
-        ↓
-NO AUTOMATIC ORDERS
+BCS authorization              OK
+Full-market universe           OK
+OIL futures data               OK
+GOLD futures data              OK (order-book may be unavailable per contract)
+GAS futures data               OK
+USDRUB futures metadata        OK
+USD000SMALL direct candles     UNAVAILABLE in observed BCS endpoint
+FUTURES_DIRECT fallback        IMPLEMENTED
+Weekend intraday fallback      IMPLEMENTED
+Full-market scan API           scan()
+Orders / execution             ABSENT
 ```
 
-**Главное архитектурное состояние на 30.08.2026:** продукт уже является рабочим RC full-market scanner с покрытием акций и четырёх macro-групп, но macro coverage пока использует честно маркированный futures proxy там, где BCS не отдаёт usable SPOT source. Следующий этап — не менять идею сканера, а довести macro SPOT data path и затем унифицировать ranking/expectancy без нарушения SPOT-first контракта.
+Последний исправляющий commit:
+
+```text
+d57862d  Add regression coverage for macro intraday fallback
+```
+
+После синхронизации локального `main` обязательный контроль:
+
+```bash
+cd ~/Documents/Trader_7_12
+git pull --ff-only origin main
+python3 -m compileall -q Program
+PYTHONPATH=Program python3 -m pytest -q Program
+git status --short --branch
+```
+
+**Архитектурный принцип:** сначала корректность и прозрачность данных, затем ranking; coverage не должен достигаться ценой скрытой подмены SPOT данными futures.
