@@ -4,8 +4,11 @@ from services.two_phase_futures_morning_radar_service import TwoPhaseFuturesMorn
 class _FakeSpotUniverse:
     def load(self):
         return [
+            {"spot_ticker": "SBER", "spot_class_code": "SMAL", "spot_instrument_type": "STOCK"},
+            {"spot_ticker": "SBER", "spot_class_code": "SPBRU", "spot_instrument_type": "STOCK"},
             {"spot_ticker": "SBER", "spot_class_code": "TQBR", "spot_instrument_type": "STOCK"},
             {"spot_ticker": "GAZP", "spot_class_code": "TQBR", "spot_instrument_type": "STOCK"},
+            {"spot_ticker": "GAZP", "spot_class_code": "SPBRU", "spot_instrument_type": "STOCK"},
         ]
 
 
@@ -27,12 +30,19 @@ def _service():
     return service
 
 
-def test_direct_spot_universe_is_independent_from_futures():
+def test_direct_spot_universe_is_independent_from_futures_and_uses_canonical_tqbr():
     service = _service()
     spots = service._load_direct_spot_universe()
     assert [(item["spot_ticker"], item["spot_class_code"]) for item in spots] == [("SBER", "TQBR")]
     assert spots[0]["spot_universe"] == "IMOEX"
     assert spots[0]["mapping_method"] == "DIRECT_SPOT_UNIVERSE"
+
+
+def test_non_tqbr_stock_boards_are_excluded_from_imoex():
+    service = _service()
+    spots = service._load_direct_spot_universe()
+    assert all(item["spot_class_code"] == "TQBR" for item in spots)
+    assert all(item["spot_ticker"] == "SBER" for item in spots)
 
 
 def test_futures_mapping_is_not_called_for_waiting_spot_candidate():
