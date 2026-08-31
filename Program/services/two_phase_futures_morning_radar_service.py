@@ -19,7 +19,7 @@ from services.spot_universe_service import SpotUniverseService
 class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
     """FAST SPOT screen -> DEEP SPOT analysis -> readiness -> futures mapping."""
 
-    VERSION = "1.5"
+    VERSION = "1.6"
     PRELIMINARY_WORKERS = 2
     DEEP_SPOT_LIMIT = 5
     DEEP_DIRECTION_LIMIT = 4
@@ -100,7 +100,7 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
         return selected[0] if isinstance(selected, list) and selected else None
 
     def _load_direct_spot_universe(self):
-        """Load IMOEX equities from SPOT metadata without touching futures."""
+        """Load canonical IMOEX TQBR equities directly from SPOT metadata."""
         try:
             spots = self.spot_universe_service.load()
         except Exception as exc:
@@ -117,20 +117,21 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
             if not isinstance(item, dict):
                 continue
             ticker = str(item.get("spot_ticker") or "").strip().upper()
-            class_code = str(item.get("spot_class_code") or "").strip()
-            instrument_type = str(item.get("spot_instrument_type") or "").upper()
+            class_code = str(item.get("spot_class_code") or "").strip().upper()
+            instrument_type = str(item.get("spot_instrument_type") or "").strip().upper()
             if not ticker or not class_code or ticker not in imoex:
                 continue
-            if instrument_type != "STOCK" and class_code.upper() != "TQBR":
+            # BCS may return the same stock separately for SMAL/SPBRU/TQBR.
+            # IMOEX equity screening must use the canonical MOEX TQBR board.
+            if instrument_type != "STOCK" or class_code != "TQBR":
                 continue
-            key = (ticker, class_code)
-            if key in seen:
+            if ticker in seen:
                 continue
-            seen.add(key)
+            seen.add(ticker)
             result.append(
                 {
                     "spot_ticker": ticker,
-                    "spot_class_code": class_code,
+                    "spot_class_code": "TQBR",
                     "spot_group": "MOEX_STOCK",
                     "spot_universe": "IMOEX",
                     "market_universe": "IMOEX",
@@ -142,6 +143,8 @@ class TwoPhaseFuturesMorningRadarService(FuturesMorningRadarService):
                     "futures_expiry": None,
                 }
             )
+        result.sort(key=lambda item: item["spot_ticker"])
+        print(f"IMOEX CANONICAL SPOT: {len(result)} TQBR constituents loaded")
         return result
 
     def _prepare_universe(self, mappings):
