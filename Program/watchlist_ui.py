@@ -1,4 +1,4 @@
-"""Trader_7_12 Pro — canonical SPOT opportunity watchlist UI."""
+"""Trader_7_12 Pro — canonical SPOT + macro opportunity watchlist UI."""
 
 from html import escape
 
@@ -20,6 +20,7 @@ SIGNAL_STATE_LABELS = {
     "WAIT": "ОЖИДАНИЕ",
     "READY": "ГОТОВ — ТРИГГЕР АКТИВЕН",
     "CONFIRMED": "ПОДТВЕРЖДЁН SPOT",
+    "ARMED": "ТРИГГЕР ВЗВЕДЁН — ЖДЁМ АКТИВАЦИЮ",
 }
 
 REASON_LABELS = {
@@ -49,8 +50,10 @@ def _scenario_grade(score):
     return "СЛАБЫЙ"
 
 
-def _action_label(signal_state, trigger_active):
+def _action_label(signal_state, trigger_active, is_macro=False):
     state = str(signal_state or "WAIT").upper()
+    if is_macro and state not in {"READY", "CONFIRMED"}:
+        return "НАБЛЮДАТЬ — MACRO/FUTURES PROXY, SPOT-СИГНАЛ НЕ СФОРМИРОВАН"
     if state == "CONFIRMED":
         return "СЦЕНАРИЙ ПОДТВЕРЖДЁН — РЕШЕНИЕ О ВХОДЕ ПРИНИМАЕТ ПОЛЬЗОВАТЕЛЬ"
     if state == "READY":
@@ -63,12 +66,12 @@ def _action_label(signal_state, trigger_active):
 class WatchlistTraderWindow(TraderWindow):
     """Read-only GUI bound to the SPOT-first watchlist contract."""
 
-    VERSION = "1.5"
+    VERSION = "1.6"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
-        self.setWindowTitle("Trader_7_12 Pro — SPOT-радар возможностей")
-        self.subtitle.setText("SPOT • НАПРАВЛЕНИЕ • ДЕНЬГИ • RS • СЕТАП • ТРИГГЕР • ГОТОВНОСТЬ")
+        self.setWindowTitle("Trader_7_12 Pro — радар возможностей")
+        self.subtitle.setText("SPOT • MACRO • НАПРАВЛЕНИЕ • ДЕНЬГИ • RS • СЕТАП • ТРИГГЕР • ГОТОВНОСТЬ")
 
     def _scan_finished(self, results):
         self.scan_button.setEnabled(True)
@@ -87,7 +90,7 @@ class WatchlistTraderWindow(TraderWindow):
         lines = [
             "<pre style='font-family:Menlo,Monaco,monospace;font-size:14px;color:#dfe3e7'>",
             "═" * 86,
-            "TRADER_7_12 PRO — SPOT-РАДАР ВОЗМОЖНОСТЕЙ",
+            "TRADER_7_12 PRO — РАДАР ВОЗМОЖНОСТЕЙ",
             "═" * 86,
             "",
             f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
@@ -104,6 +107,8 @@ class WatchlistTraderWindow(TraderWindow):
             ])
         else:
             for idx, item in enumerate(results, start=1):
+                is_macro = str(item.get("analysis_source") or "SPOT").upper() == "FUTURES_DIRECT"
+                source_label = "MACRO / FUTURES DIRECT" if is_macro else "SPOT / IMOEX"
                 direction = _label(DIRECTION_LABELS, item.get("direction"))
                 setup = _label(SETUP_LABELS, item.get("setup"))
                 setup_state = _label(SETUP_STATE_LABELS, item.get("setup_state"))
@@ -113,26 +118,42 @@ class WatchlistTraderWindow(TraderWindow):
                 opportunity = item.get("opportunity_score", item.get("session_rank_score", 0))
                 trigger_present = bool(item.get("trigger_present"))
                 trigger_active = bool(item.get("trigger_active"))
+                if is_macro:
+                    activity_label = "НЕТ SPOT-ДАННЫХ — FUTURES PROXY"
+                    price_label = "MACRO ЦЕНА"
+                    average_label = "MACRO СРЕДНИЙ ₽×V"
+                    session_label = "MACRO СЕССИЯ ₽×V"
+                    pace_label = "MACRO ₽×V/МИН"
+                    change_label = "ИЗМЕНЕНИЕ MACRO"
+                else:
+                    activity_label = _activity_label(item)
+                    price_label = "SPOT ЦЕНА"
+                    average_label = "SPOT СРЕДНИЙ ₽×V"
+                    session_label = "SPOT СЕССИЯ ₽×V"
+                    pace_label = "SPOT ₽×V/МИН"
+                    change_label = "ИЗМЕНЕНИЕ SPOT"
+
                 lines.extend([
                     "",
                     f"████  #{idx}  {escape(str(item.get('spot_ticker') or '—'))}  ████",
+                    f"ИСТОЧНИК:           {source_label}",
                     f"НАПРАВЛЕНИЕ:       {direction}",
                     f"ОЦЕНКА ВОЗМОЖНОСТИ: {_number(opportunity, 1)} / 100",
                     f"СИЛА СЦЕНАРИЯ:     {_scenario_grade(opportunity)}",
                     f"ОЦЕНКА СЕССИИ:     {_number(item.get('session_rank_score'), 1)} / 100",
                     f"RS:                 {rs}",
-                    f"АКТИВНОСТЬ SPOT:    {_activity_label(item)}",
+                    f"АКТИВНОСТЬ:         {activity_label}",
                     f"СЕТАП:              {setup}",
                     f"СОСТОЯНИЕ СЕТАПА:   {setup_state}",
                     f"СОСТОЯНИЕ СИГНАЛА:  {signal_state}",
-                    f"РЕКОМЕНДАЦИЯ:       {_action_label(signal_state_raw, trigger_active)}",
+                    f"РЕКОМЕНДАЦИЯ:       {_action_label(signal_state_raw, trigger_active, is_macro)}",
                     "",
-                    f"SPOT ТИКЕР:         {escape(str(item.get('spot_ticker') or '—'))}",
-                    f"SPOT ЦЕНА:          {_number(item.get('spot_price'), 4)}",
-                    f"SPOT СРЕДНИЙ ₽×V:   {_money(item.get('spot_average_daily_money'))}",
-                    f"SPOT СЕССИЯ ₽×V:    {_money(item.get('spot_money_volume'))}",
-                    f"SPOT ₽×V/МИН:       {_money(item.get('spot_money_per_minute'))}",
-                    f"ИЗМЕНЕНИЕ SPOT:     {_number(item.get('spot_change_percent'), 2)}%",
+                    f"ТИКЕР:              {escape(str(item.get('spot_ticker') or '—'))}",
+                    f"{price_label}:          {_number(item.get('spot_price'), 4)}",
+                    f"{average_label}:   {_money(item.get('spot_average_daily_money'))}",
+                    f"{session_label}:    {_money(item.get('spot_money_volume'))}",
+                    f"{pace_label}:       {_money(item.get('spot_money_per_minute'))}",
+                    f"{change_label}:     {_number(item.get('spot_change_percent'), 2)}%",
                     f"RS:                 {_number(item.get('relative_strength'), 3)} п.п.",
                     f"RS SCORE:           {_number(item.get('relative_strength_score'), 1)} / 100",
                     "",
@@ -141,10 +162,10 @@ class WatchlistTraderWindow(TraderWindow):
                     f"ТРИГГЕР УРОВНЯ:     {_number(item.get('entry_trigger'), 4)}",
                     f"ТРИГГЕР:            {'АКТИВЕН' if trigger_active else 'ОЖИДАЕТ'}",
                     f"ТРИГГЕР УРОВЕНЬ:    {'ЕСТЬ' if trigger_present else 'НЕТ'}",
-                    f"SPOT ГОТОВ:         {'ДА' if signal_state_raw == 'READY' else 'НЕТ'}",
-                    f"SPOT ПОДТВЕРЖДЁН:   {'ДА' if signal_state_raw == 'CONFIRMED' else 'НЕТ'}",
+                    f"SPOT ГОТОВ:         {'НЕТ — MACRO PROXY' if is_macro else ('ДА' if signal_state_raw == 'READY' else 'НЕТ')}",
+                    f"SPOT ПОДТВЕРЖДЁН:   {'НЕТ — MACRO PROXY' if is_macro else ('ДА' if signal_state_raw == 'CONFIRMED' else 'НЕТ')}",
                     "",
-                    "ФЬЮЧЕРС:            ТОЛЬКО СОПОСТАВЛЕНИЕ",
+                    "ФЬЮЧЕРС:            ТОЛЬКО СОПОСТАВЛЕНИЕ" if not is_macro else "ФЬЮЧЕРС:            ИСТОЧНИК MACRO PROXY",
                     "ФЬЮЧЕРС ИЗ СИГНАЛА:  НЕ ИСПОЛЬЗУЕТСЯ",
                     "ФЬЮЧЕРС В РЕЙТИНГЕ: НЕТ",
                     f"ПРИЧИНА:             {escape(_signal_reason(item.get('signal_state_reason')))}",
@@ -156,7 +177,8 @@ class WatchlistTraderWindow(TraderWindow):
             lines.extend([
                 "",
                 "ДИАГНОСТИКА ОТБОРА:",
-                f"РАДАР={diagnostics.get('radar_results', 0)}  "
+                f"SPOT={diagnostics.get('spot_candidates', diagnostics.get('radar_results', 0))}  "
+                f"MACRO={diagnostics.get('macro_candidates', 0)}  "
                 f"КАНДИДАТЫ={diagnostics.get('candidates', 0)}  "
                 f"ОТОБРАНО={diagnostics.get('selected', 0)}  "
                 f"ГОТОВ={diagnostics.get('ready', 0)}  "
@@ -167,15 +189,11 @@ class WatchlistTraderWindow(TraderWindow):
 
         lines.extend([
             "",
-            "ЦЕПОЧКА: НАПРАВЛЕНИЕ → СЕТАП → ТРИГГЕР → ГОТОВНОСТЬ/ПОДТВЕРЖДЕНИЕ → ФЬЮЧЕРСЫ",
+            "ЦЕПОЧКА: SPOT → НАПРАВЛЕНИЕ → ДЕНЬГИ/RS → СЕТАП → ТРИГГЕР → ГОТОВНОСТЬ → ФЬЮЧЕРСЫ",
             "",
-            "НАПРАВЛЕНИЕ определяется только по SPOT.",
-            "ДЕНЬГИ и АКТИВНОСТЬ — по реальному SPOT-обороту и ₽×V/мин относительно нормы.",
-            "RS — относительная сила/слабость к рыночному benchmark.",
-            "СЕТАП и ТРИГГЕР определяются только по SPOT-структуре и уровням.",
-            "ГОТОВ = SPOT-сетап сформирован, триггер активирован и пройдена проверка стабильности.",
-            "ПОДТВЕРЖДЁН = SPOT-сценарий подтверждён собственной SPOT-структурой.",
-            "Фьючерсы — только справочное сопоставление; они не подтверждают и не блокируют SPOT.",
+            "Для акций направление, деньги, RS, сетап, триггер и готовность определяются только по SPOT.",
+            "MACRO/FUTURES DIRECT показывается отдельно и не выдаётся за SPOT-данные.",
+            "Фьючерсы для SPOT-кандидата — только справочное сопоставление после SPOT-readiness.",
             "ОЦЕНКА ВОЗМОЖНОСТИ — детерминированный рейтинг радарной модели, а не статистическая вероятность исхода.",
             "Для реальной вероятности нужна отдельная историческая калибровка результатов по будущему движению.",
             "Пользователь самостоятельно выбирает фьючерс, график, точку входа и риск.",
