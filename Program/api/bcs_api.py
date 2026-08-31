@@ -17,7 +17,7 @@ BCS API
 from datetime import datetime, timedelta, timezone
 import threading
 
-from config import REFRESH_TOKEN
+from config import get_refresh_token, save_refresh_token
 from api.request_helper import RequestHelper
 
 
@@ -70,6 +70,11 @@ class BCSAPI:
         if self.access_token:
             return True
 
+        refresh_token = get_refresh_token()
+        if not refresh_token:
+            print("❌ BCS refresh token is not configured")
+            return False
+
         url = (
             "https://be.broker.ru/"
             "trade-api-keycloak/"
@@ -79,13 +84,23 @@ class BCSAPI:
         payload = {
             "client_id": "trade-api-read",
             "grant_type": "refresh_token",
-            "refresh_token": REFRESH_TOKEN
+            "refresh_token": refresh_token
         }
         r = RequestHelper.post(url, data=payload)
         if r.status_code == 200:
-            self.access_token = r.json().get("access_token")
+            data = r.json()
+            self.access_token = data.get("access_token")
+            # Keycloak/BCS may rotate the refresh token. Persist the newest
+            # value locally so the next process/session continues seamlessly.
+            rotated_token = data.get("refresh_token")
+            if rotated_token:
+                save_refresh_token(rotated_token)
+            elif not __import__("os").getenv("BCS_REFRESH_TOKEN"):
+                # The token was already loaded from the local secure file.
+                # Keep that file as the source of truth.
+                pass
             print("✅ Авторизация БКС успешна")
-            return True
+            return bool(self.access_token)
         print(r.text)
         return False
 
