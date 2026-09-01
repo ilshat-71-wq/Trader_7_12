@@ -29,6 +29,8 @@ class FakeHistoryService:
             {"time": "2026-08-17T16:05:00Z", "money_volume": 100_000},
             {"time": "2026-08-17T16:10:00Z", "money_volume": 200_000},
             {"time": "2026-08-17T16:15:00Z", "money_volume": 300_000},
+            {"time": "2026-08-17T16:50:00Z", "money_volume": 100_000},
+            {"time": "2026-08-17T16:55:00Z", "money_volume": 300_000},
         ]
 
 
@@ -39,11 +41,11 @@ def test_evening_window():
     )
     result = service.calculate("BR", "SPBRU", session="EVENING")
     assert result["session"] == "EVENING"
-    assert result["money_volume"] == 600_000
+    assert result["money_volume"] == 1_000_000
     assert result["elapsed_minutes"] == 60
     assert result["expected_minutes"] == 290
-    assert result["recent_money_volume"] == 600_000
-    assert result["recent_money_per_minute"] == 10_000
+    assert result["recent_money_volume"] == 400_000
+    assert result["recent_money_per_minute"] == 26_666.67
     assert result["recent_money_minutes"] == 15
 
 
