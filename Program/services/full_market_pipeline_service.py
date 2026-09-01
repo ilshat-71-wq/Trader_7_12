@@ -16,7 +16,7 @@ from services.session_money_volume_service import SessionMoneyVolumeService
 class FullMarketPipelineService(MorningTradingPipelineService):
     """Scan the broad market while keeping SPOT trade radar separate from macro watch."""
 
-    VERSION = "1.4"
+    VERSION = "1.5"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -101,9 +101,6 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             item["signal_state"] = "WAIT"
             item["futures_selection_reason"] = "MACRO_DIRECT_WATCH_ONLY"
 
-        # IMPORTANT CONTRACT:
-        # `scan()` returns only SPOT/equity trade-radar candidates. Macro remains
-        # available through diagnostics for a separate UI watch section.
         base.sort(
             key=lambda item: (
                 self._signal_priority(item.get("signal_state")),
@@ -147,11 +144,12 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 "analysis_source": "FUTURES_DIRECT",
             })
 
+        rank_diagnostics = getattr(self.candidate_service, "last_rank_diagnostics", {}) or {}
         self._last_scan_diagnostics = {
             "session": self.session_service.get_session(),
             "stock_universe_total": len(stock_money_ranked),
             "stock_money_screened": len(stock_money_ranked),
-            "stock_deep_analyzed": len(base or []),
+            "stock_deep_analyzed": rank_diagnostics.get("input", len(base or [])),
             "spot_candidates": len(base or []),
             "macro_candidates": len(macro or []),
             "candidates": len(base or []),
@@ -160,6 +158,10 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             "confirmed": sum(1 for x in base if x.get("signal_state") == "CONFIRMED"),
             "watch": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WATCH"),
             "wait": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WAIT"),
+            "money_leader_count": rank_diagnostics.get("money_leaders", 0),
+            "candidate_accepted": rank_diagnostics.get("accepted", 0),
+            "candidate_rejected": rank_diagnostics.get("rejected", 0),
+            "candidate_rejections": dict(rank_diagnostics.get("rejections", {}) or {}),
             "macro_sources": sorted({str(x.get("macro_analysis_status") or "UNKNOWN") for x in macro}),
             "active_money_leaders": active_leaders,
             "macro_watch": macro_watch,
@@ -214,12 +216,19 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 f"ALL_TQBR={diagnostics.get('stock_universe_total', 0)} "
                 f"MONEY_SCREENED={diagnostics.get('stock_money_screened', 0)} "
                 f"DEEP={diagnostics.get('stock_deep_analyzed', 0)} "
+                f"MONEY_LEADERS={diagnostics.get('money_leader_count', 0)} "
+                f"ACCEPTED={diagnostics.get('candidate_accepted', 0)} "
+                f"REJECTED={diagnostics.get('candidate_rejected', 0)} "
                 f"SPOT={diagnostics.get('spot_candidates', 0)} "
                 f"MACRO_WATCH={diagnostics.get('macro_candidates', 0)} "
                 f"SELECTED_SPOT={diagnostics.get('selected', 0)} "
                 f"READY={diagnostics.get('ready', 0)} "
                 f"CONFIRMED={diagnostics.get('confirmed', 0)}"
             )
+            if diagnostics.get("candidate_rejections"):
+                print("REJECTIONS: " + ", ".join(
+                    f"{key}={value}" for key, value in sorted(diagnostics["candidate_rejections"].items())
+                ))
         else:
             print("NO SPOT WATCHLIST CANDIDATES")
         print()
