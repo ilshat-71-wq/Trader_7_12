@@ -66,7 +66,7 @@ def _action_label(signal_state, trigger_active, is_macro=False):
 class WatchlistTraderWindow(TraderWindow):
     """Read-only GUI bound to the SPOT-first watchlist contract."""
 
-    VERSION = "1.6"
+    VERSION = "1.7"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -99,16 +99,45 @@ class WatchlistTraderWindow(TraderWindow):
             "",
         ]
 
+        # The money-first screen is always useful, even when no instrument has
+        # yet passed the expensive direction/setup/readiness stage. It is shown
+        # as discovery data, never as a trade signal.
+        leaders = diagnostics.get("active_money_leaders", []) if diagnostics else []
+        if leaders:
+            lines.extend([
+                "",
+                "████  TOP ACTIVE MONEY — TQBR  ████",
+                "",
+                f"{'RANK':>4}  {'TICKER':<10} {'SESSION ₽×V':>18} {'₽×V/МИН':>16}",
+                "-" * 58,
+            ])
+            for row in leaders:
+                lines.append(
+                    f"{int(row.get('rank') or 0):>4}  "
+                    f"{escape(str(row.get('spot_ticker') or '—')):<10} "
+                    f"{_money(row.get('spot_session_money')):>18} "
+                    f"{_money(row.get('spot_money_per_minute')):>16}"
+                )
+            lines.extend([
+                "",
+                "Это текущая денежная активность рынка. Она НЕ является сигналом LONG/SHORT.",
+                "Следующий этап: направление → RS → сетап → триггер → стабильность.",
+                "",
+                "─" * 86,
+            ])
+
         if not results:
             lines.extend([
+                "",
                 "НЕТ КАНДИДАТОВ В СПИСКЕ НАБЛЮДЕНИЯ",
                 "",
                 "В текущей сессии нет SPOT-активов, прошедших обязательные проверки отбора.",
+                "Но TOP ACTIVE MONEY выше показывает, где сейчас находится основная активность.",
             ])
         else:
             for idx, item in enumerate(results, start=1):
                 is_macro = str(item.get("analysis_source") or "SPOT").upper() == "FUTURES_DIRECT"
-                source_label = "MACRO / FUTURES DIRECT" if is_macro else "SPOT / IMOEX"
+                source_label = "MACRO / FUTURES DIRECT" if is_macro else "SPOT / TQBR"
                 direction = _label(DIRECTION_LABELS, item.get("direction"))
                 setup = _label(SETUP_LABELS, item.get("setup"))
                 setup_state = _label(SETUP_STATE_LABELS, item.get("setup_state"))
@@ -177,9 +206,11 @@ class WatchlistTraderWindow(TraderWindow):
             lines.extend([
                 "",
                 "ДИАГНОСТИКА ОТБОРА:",
+                f"ALL_TQBR={diagnostics.get('stock_universe_total', 0)}  "
+                f"MONEY_SCREENED={diagnostics.get('stock_money_screened', 0)}  "
+                f"DEEP={diagnostics.get('stock_deep_analyzed', 0)}  "
                 f"SPOT={diagnostics.get('spot_candidates', diagnostics.get('radar_results', 0))}  "
                 f"MACRO={diagnostics.get('macro_candidates', 0)}  "
-                f"КАНДИДАТЫ={diagnostics.get('candidates', 0)}  "
                 f"ОТОБРАНО={diagnostics.get('selected', 0)}  "
                 f"ГОТОВ={diagnostics.get('ready', 0)}  "
                 f"ПОДТВЕРЖДЁН={diagnostics.get('confirmed', 0)}  "
@@ -189,13 +220,13 @@ class WatchlistTraderWindow(TraderWindow):
 
         lines.extend([
             "",
-            "ЦЕПОЧКА: SPOT → НАПРАВЛЕНИЕ → ДЕНЬГИ/RS → СЕТАП → ТРИГГЕР → ГОТОВНОСТЬ → ФЬЮЧЕРСЫ",
+            "ЦЕПОЧКА: ALL TQBR → MONEY-FIRST → TOP ACTIVE → SPOT DIRECTION → RS → SETUP → TRIGGER → READINESS",
             "",
+            "TOP ACTIVE MONEY показывает текущую активность и не является торговым сигналом.",
             "Для акций направление, деньги, RS, сетап, триггер и готовность определяются только по SPOT.",
             "MACRO/FUTURES DIRECT показывается отдельно и не выдаётся за SPOT-данные.",
             "Фьючерсы для SPOT-кандидата — только справочное сопоставление после SPOT-readiness.",
             "ОЦЕНКА ВОЗМОЖНОСТИ — детерминированный рейтинг радарной модели, а не статистическая вероятность исхода.",
-            "Для реальной вероятности нужна отдельная историческая калибровка результатов по будущему движению.",
             "Пользователь самостоятельно выбирает фьючерс, график, точку входа и риск.",
             "Это информационный радар: исполнение ордеров, стоп-лосс, тейк-профит и расчёт позиции отсутствуют.",
             "═" * 86,
