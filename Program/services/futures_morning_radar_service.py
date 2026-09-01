@@ -43,6 +43,7 @@ class FuturesMorningRadarService:
         self._mapping_cache = None
         self._mapping_cache_at = 0.0
         self._price_stability_cache = {}
+        self._last_scan_diagnostics = {}
 
     @staticmethod
     def _activity_ratio(current_money, average_daily_money, elapsed_minutes, expected_minutes):
@@ -152,9 +153,20 @@ class FuturesMorningRadarService:
 
     def scan(self, mappings=None, limit=None):
         """Run the complete SPOT analysis first; futures are mapping-only afterwards."""
+        self._last_scan_diagnostics = {
+            "input_mappings": 0,
+            "spot_groups": 0,
+            "radar_errors": 0,
+            "deep_results": 0,
+            "candidate_accepted": 0,
+            "candidate_rejected": 0,
+            "candidate_rejections": {},
+        }
         if mappings is None: mappings=self._load_mappings_cached()
         if not isinstance(mappings,list): return []
         grouped=self._spot_mapping_groups(mappings)
+        self._last_scan_diagnostics["input_mappings"] = len(mappings)
+        self._last_scan_diagnostics["spot_groups"] = len(grouped)
         results=[]; radar_cache={}; money_cache={}; setup_cache={}
         session=self.session_service.get_session(); trading_date=self.session_service.get_trading_day()
         for radar_key, spot_mappings in grouped.items():
@@ -163,7 +175,9 @@ class FuturesMorningRadarService:
                 try: radar_cache[radar_key]=self.radar_service.analyze(spot_ticker,spot_class_code)
                 except Exception as exc: radar_cache[radar_key]={"version":self.VERSION,"status":"ERROR","error":str(exc)}
             radar=radar_cache[radar_key]
-            if not isinstance(radar,dict) or str(radar.get("status","")).upper()=="ERROR": continue
+            if not isinstance(radar,dict) or str(radar.get("status","")).upper()=="ERROR":
+                self._last_scan_diagnostics["radar_errors"] += 1
+                continue
             price_stability=self._price_stability(spot_ticker,spot_class_code,radar.get("last_close",0),trading_date)
             if radar_key not in setup_cache:
                 try: setup_cache[radar_key]=self.spot_setup_service.analyze(spot_ticker,spot_class_code,direction=radar.get("direction"),session=session,trading_date=trading_date)
@@ -178,9 +192,21 @@ class FuturesMorningRadarService:
             spot_money_ratio=current_spot_money/average_spot_money if average_spot_money>0 else 0.0
             spot_session_activity_ratio=self._activity_ratio(current_spot_money,average_spot_money,elapsed_minutes,expected_minutes)
             result=dict(radar)
-            result.update({"pipeline_version":self.VERSION,"futures_ticker":"","futures_class_code":"","futures_expiry":None,"days_to_expiry":None,"selection_score":None,"liquidity_score":None,"spread_score":None,"expiry_score":None,"spread_percent":None,"turnover_30m":None,"trade_count_30m":None,"depth_notional":None,"bid":None,"ask":None,"last":None,"futures_selection_version":None,"futures_selection_reason":"WAITING_FOR_SPOT_READINESS","futures_selection_candidates":None,"spot_ticker":spot_ticker,"spot_class_code":spot_class_code,"spot_name":representative.get("spot_name",""),"spot_type":representative.get("spot_type",""),"mapping_method":representative.get("mapping_method"),"market_session":session,"spot_money_volume":round(current_spot_money,2),"spot_average_daily_money":round(average_spot_money,2),"spot_money_ratio":round(spot_money_ratio,4),"spot_session_activity_ratio":spot_session_activity_ratio,"spot_money_per_minute":round(float(session_money.get("money_per_minute",0) or 0),2),"session_elapsed_minutes":elapsed_minutes,"session_expected_minutes":expected_minutes,"moex_event_risk":bool(price_stability.get("moex_event_risk")),"moex_da_trigger_inferred":bool(price_stability.get("moex_da_trigger_inferred")),"moex_da_trigger_percent":float(price_stability.get("moex_da_trigger_percent",20.0) or 20.0),"moex_da_window_minutes":int(price_stability.get("moex_da_window_minutes",10) or 10),"moex_weekend_band_percent":float(price_stability.get("moex_weekend_band_percent",3.0) or 3.0),"moex_weekend_band_near":bool(price_stability.get("moex_weekend_band_near")),"moex_weekend_band_hit":bool(price_stability.get("moex_weekend_band_hit")),"moex_max_abs_move_percent":float(price_stability.get("moex_max_abs_move_percent",0.0) or 0.0),"moex_price_stability_state":price_stability.get("moex_price_stability_state","NORMAL"),"moex_price_stability_reason":price_stability.get("moex_price_stability_reason",""),"moex_candles_loaded":int(price_stability.get("moex_candles_loaded",0) or 0),"moex_data_status":price_stability.get("moex_data_status","NO_DATA"),"setup":spot_setup.get("setup",radar.get("setup","NONE")),"setup_direction":spot_setup.get("setup_direction",radar.get("setup_direction",radar.get("direction","NONE"))),"setup_state":spot_setup.get("setup_state",radar.get("setup_state","WAIT")),"setup_phase":spot_setup.get("setup_phase","UNKNOWN"),"setup_quality_score":float(spot_setup.get("setup_quality_score",0) or 0),"impulse_percent":float(spot_setup.get("impulse_percent",0) or 0),"retracement_percent":float(spot_setup.get("retracement_percent",0) or 0),"retracement_ratio":float(spot_setup.get("retracement_ratio",0) or 0),"consolidation_candles":int(spot_setup.get("consolidation_candles",0) or 0),"entry_trigger":float(spot_setup.get("entry_trigger",radar.get("entry_trigger",0)) or 0),"previous_high":float(spot_setup.get("previous_high",radar.get("previous_high",0)) or 0),"previous_low":float(spot_setup.get("previous_low",radar.get("previous_low",0)) or 0),"impulse_high":float(spot_setup.get("impulse_high",0) or 0),"impulse_low":float(spot_setup.get("impulse_low",0) or 0)})
+            result.update({"pipeline_version":self.VERSION,"futures_ticker":"","futures_class_code":"","futures_expiry":None,"days_to_expiry":None,"selection_score":None,"liquidity_score":None,"spread_score":None,"expiry_score":None,"spread_percent":None,"turnover_30m":None,"trade_count_30m":None,"depth_notional":None,"bid":None,"ask":None,"last":None,"futures_selection_version":None,"futures_selection_reason":"WAITING_FOR_SPOT_READINESS","futures_selection_candidates":None,"spot_ticker":spot_ticker,"spot_class_code":spot_class_code,"spot_name":representative.get("spot_name",""),"spot_type":representative.get("spot_type",""),"mapping_method":representative.get("mapping_method"),"market_session":session,"spot_money_volume":round(current_spot_money,2),"spot_average_daily_money":round(average_spot_money,2),"spot_money_ratio":round(spot_money_ratio,4),"spot_session_activity_ratio":spot_session_activity_ratio,"spot_money_per_minute":round(float(session_money.get("money_per_minute",0) or 0),2),"session_elapsed_minutes":elapsed_minutes,"session_expected_minutes":expected_minutes,"moex_event_risk":bool(price_stability.get("moex_event_risk")),"moex_da_trigger_inferred":bool(price_stability.get("moex_da_trigger_inferred")),"moex_da_trigger_percent":float(price_stability.get("moex_da_trigger_percent",20.0) or 20.0),"moex_da_window_minutes":int(price_stability.get("moex_da_window_minutes",10) or 10),"moex_weekend_band_percent":float(price_stability.get("moex_weekend_band_percent",3.0) or 3.0),"moex_weekend_band_near":bool(price_stability.get("moex_weekend_band_near")),"moex_weekend_band_hit":bool(price_stability.get("moex_weekend_band_hit")),"moex_max_abs_move_percent":float(price_stability.get("moex_max_abs_move_percent",0.0) or 0.0),"moex_price_stability_state":price_stability.get("moex_price_stability_state","NORMAL"),"moex_price_stability_reason":price_stability.get("moex_price_stability_reason",""),"moex_candles_loaded":int(price_stability.get("moex_candles_loaded",0) or 0),"moex_data_status":price_stability.get("moex_data_status","NO_DATA"),"setup":spot_setup.get("setup",radar.get("setup","NONE")),"setup_direction":spot_setup.get("setup_direction",radar.get("setup_direction",radar.get("direction","NONE"))),"setup_state":spot_setup.get("setup_state",radar.get("setup_state","WAIT")),"setup_phase":spot_setup.get("setup_phase","UNKNOWN"),"setup_quality_score":float(spot_setup.get("setup_quality_score",0) or 0),"impulse_percent":float(spot_setup.get("impulse_percent",0) or 0),"retracement_percent":float(spot_setup.get("retracement_percent",0) or 0),"retracement_ratio":float(spot_setup.get("retracement_ratio",0) or 0),"consolidation_candles":int(spot_setup.get("consolidation_candles",0) or 0),"entry_trigger":float(spot_setup.get("entry_trigger",radar.get("entry_trigger",0)) or 0),"previous_high":float(spot_setup.get("previous_high",radar.get("previous_high",0) or 0)),"previous_low":float(spot_setup.get("previous_low",radar.get("previous_low",0) or 0)),"impulse_high":float(spot_setup.get("impulse_high",0) or 0),"impulse_low":float(spot_setup.get("impulse_low",0) or 0)})
+            rejection = FuturesTradeCandidateService.rejection_reason(result)
+            if rejection is not None:
+                self._last_scan_diagnostics["candidate_rejected"] += 1
+                counts = self._last_scan_diagnostics["candidate_rejections"]
+                counts[rejection] = counts.get(rejection, 0) + 1
+                continue
             candidate=FuturesTradeCandidateService.build_candidate(result)
-            if candidate is None: continue
+            if candidate is None:
+                self._last_scan_diagnostics["candidate_rejected"] += 1
+                counts = self._last_scan_diagnostics["candidate_rejections"]
+                counts["UNKNOWN"] = counts.get("UNKNOWN", 0) + 1
+                continue
+            self._last_scan_diagnostics["candidate_accepted"] += 1
+            self._last_scan_diagnostics["deep_results"] += 1
             result["candidate_score"]=candidate["candidate_score"]
             if self._spot_ready_for_mapping(result):
                 selected=self._select_futures_mapping(spot_mappings)
