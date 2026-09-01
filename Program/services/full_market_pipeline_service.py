@@ -16,7 +16,7 @@ from services.session_money_volume_service import SessionMoneyVolumeService
 class FullMarketPipelineService(MorningTradingPipelineService):
     """Scan the broad market while keeping SPOT trade radar separate from macro watch."""
 
-    VERSION = "1.6"
+    VERSION = "1.7"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -174,7 +174,14 @@ class FullMarketPipelineService(MorningTradingPipelineService):
         }
         if selected:
             selected[0]["scan_diagnostics"] = dict(self._last_scan_diagnostics)
-        return selected
+            return selected
+
+        return [{
+            "analysis_source": "FUTURES_DIRECT",
+            "selection_role": "DIAGNOSTICS_ONLY",
+            "signal_state": "WAIT",
+            "scan_diagnostics": dict(self._last_scan_diagnostics),
+        }]
 
     @staticmethod
     def print_results(results):
