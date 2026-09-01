@@ -30,10 +30,27 @@ REASON_LABELS = {
     "—": "—",
 }
 
+REJECTION_LABELS = {
+    "NO_DIRECTION": "нет подтверждённого направления LONG/SHORT",
+    "EVENT_RISK": "обнаружен event-risk",
+    "RS_UNAVAILABLE": "Relative Strength недоступен",
+    "RS_AGAINST_LONG": "RS не подтверждает LONG",
+    "RS_AGAINST_SHORT": "RS не подтверждает SHORT",
+    "WRONG_SPOT_GROUP": "инструмент не относится к целевой SPOT-группе",
+    "SETUP_DATA_ERROR": "ошибка или отсутствие данных для SPOT-сетапа",
+    "INVALID_SETUP_STATE": "некорректное состояние сетапа",
+    "INVALID_RADAR": "некорректный результат радара",
+}
+
 
 def _signal_reason(value):
     text = str(value or "—")
     return REASON_LABELS.get(text, text)
+
+
+def _rejection_reason(value):
+    text = str(value or "—")
+    return REJECTION_LABELS.get(text, text)
 
 
 def _scenario_grade(score):
@@ -64,7 +81,7 @@ def _action_label(signal_state, trigger_active):
 class WatchlistTraderWindow(TraderWindow):
     """Read-only GUI bound to the SPOT-first watchlist contract."""
 
-    VERSION = "1.8"
+    VERSION = "1.9"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -85,8 +102,6 @@ class WatchlistTraderWindow(TraderWindow):
         if results and isinstance(results[0], dict):
             diagnostics = results[0].get("scan_diagnostics") or diagnostics
 
-        # Defensive UI gate: the main result list is SPOT-only. Macro is rendered
-        # in its own watch section below, even if an upstream caller passes mixed data.
         results = [
             item for item in (results or [])
             if str(item.get("analysis_source") or "SPOT").upper() != "FUTURES_DIRECT"
@@ -222,6 +237,9 @@ class WatchlistTraderWindow(TraderWindow):
                 f"ALL_TQBR={diagnostics.get('stock_universe_total', 0)}  "
                 f"MONEY_SCREENED={diagnostics.get('stock_money_screened', 0)}  "
                 f"DEEP={diagnostics.get('stock_deep_analyzed', 0)}  "
+                f"MONEY_LEADERS={diagnostics.get('money_leader_count', 0)}  "
+                f"ACCEPTED={diagnostics.get('candidate_accepted', 0)}  "
+                f"REJECTED={diagnostics.get('candidate_rejected', 0)}  "
                 f"SPOT={diagnostics.get('spot_candidates', 0)}  "
                 f"MACRO_WATCH={diagnostics.get('macro_candidates', 0)}  "
                 f"SELECTED_SPOT={diagnostics.get('selected', 0)}  "
@@ -230,6 +248,11 @@ class WatchlistTraderWindow(TraderWindow):
                 f"WATCH={diagnostics.get('watch', 0)}  "
                 f"WAIT={diagnostics.get('wait', 0)}",
             ])
+            rejections = diagnostics.get("candidate_rejections", {}) or {}
+            if rejections:
+                lines.append("ПРИЧИНЫ ОТКЛОНЕНИЯ: " + "; ".join(
+                    f"{_rejection_reason(key)}={value}" for key, value in sorted(rejections.items())
+                ))
 
         lines.extend([
             "",
