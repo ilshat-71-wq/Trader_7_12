@@ -2,10 +2,10 @@
 
 The production scanner must not restrict equity discovery to IMOEX.  This
 service loads the complete canonical MOEX TQBR stock universe and ranks every
-instrument by money traded in the active session before expensive trend/setup
-analysis is performed.
+instrument by very-recent money/activity first, with session pace and total
+session money as secondary context before expensive trend/setup analysis.
 
-The service is discovery-only.  It never places orders and never treats the
+The service is discovery-only. It never places orders and never treats the
 money ranking as a trading signal by itself.
 """
 
@@ -14,7 +14,7 @@ import time
 
 
 class BroadMarketMoneyScannerService:
-    VERSION = "1.0"
+    VERSION = "1.1"
     MONEY_WORKERS = 4
     CACHE_SECONDS = 90
     MAX_STOCKS_FOR_DEEP_ANALYSIS = 25
@@ -75,6 +75,9 @@ class BroadMarketMoneyScannerService:
                 "error": type(exc).__name__,
                 "money_volume": 0.0,
                 "money_per_minute": 0.0,
+                "recent_money_volume": 0.0,
+                "recent_money_per_minute": 0.0,
+                "recent_money_minutes": 0,
                 "elapsed_minutes": 0,
                 "expected_minutes": 0,
             }
@@ -89,12 +92,21 @@ class BroadMarketMoneyScannerService:
             "status": "OK",
             "money_volume": number(data.get("money_volume")),
             "money_per_minute": number(data.get("money_per_minute")),
+            "recent_money_volume": number(data.get("recent_money_volume")),
+            "recent_money_per_minute": number(data.get("recent_money_per_minute")),
+            "recent_money_minutes": int(number(data.get("recent_money_minutes"))),
             "elapsed_minutes": int(number(data.get("elapsed_minutes"))),
             "expected_minutes": int(number(data.get("expected_minutes"))),
         }
 
     def rank_current_money(self, force=False):
-        """Rank the complete stock universe by current-session money/pace."""
+        """Rank all TQBR stocks by activity happening now.
+
+        Primary rank = rolling 15-minute money per minute.  This is deliberately
+        different from cumulative session turnover: a stock that was very active
+        at the open but has gone quiet should fall behind a stock attracting money
+        right now.  Session pace/turnover remain tie-breakers and diagnostics.
+        """
         now = time.monotonic()
         if not force and self._cache is not None and now - self._cache_at < self.CACHE_SECONDS:
             return [dict(x) for x in self._cache]
@@ -123,6 +135,9 @@ class BroadMarketMoneyScannerService:
                     "money_scan_status": money.get("status", "ERROR"),
                     "spot_session_money": round(float(money.get("money_volume", 0) or 0), 2),
                     "spot_money_per_minute": round(float(money.get("money_per_minute", 0) or 0), 2),
+                    "spot_recent_money": round(float(money.get("recent_money_volume", 0) or 0), 2),
+                    "spot_recent_money_per_minute": round(float(money.get("recent_money_per_minute", 0) or 0), 2),
+                    "recent_money_minutes": int(money.get("recent_money_minutes", 0) or 0),
                     "session_elapsed_minutes": int(money.get("elapsed_minutes", 0) or 0),
                     "session_expected_minutes": int(money.get("expected_minutes", 0) or 0),
                 })
@@ -130,8 +145,10 @@ class BroadMarketMoneyScannerService:
 
         ranked.sort(
             key=lambda x: (
-                float(x.get("spot_session_money", 0) or 0),
+                float(x.get("spot_recent_money_per_minute", 0) or 0),
+                float(x.get("spot_recent_money", 0) or 0),
                 float(x.get("spot_money_per_minute", 0) or 0),
+                float(x.get("spot_session_money", 0) or 0),
                 str(x.get("spot_ticker") or ""),
             ),
             reverse=True,
