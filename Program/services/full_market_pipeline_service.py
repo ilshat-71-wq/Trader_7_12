@@ -16,7 +16,7 @@ from services.session_money_volume_service import SessionMoneyVolumeService
 class FullMarketPipelineService(MorningTradingPipelineService):
     """Scan the broad market while keeping SPOT trade radar separate from macro watch."""
 
-    VERSION = "1.5"
+    VERSION = "1.6"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,16 +53,12 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             stock_money_ranked = list(mappings or [])
             deep_mappings = list(mappings or [])
 
-        # Equity trade radar: SPOT only.
         base = super().scan(
             mappings=deep_mappings,
             confirmations=confirmations,
             limit=None,
         )
 
-        # Macro is deliberately a separate watch layer. It is never merged into
-        # the equity candidate ranking and therefore can never become #1 simply
-        # because a futures proxy score is numerically larger.
         macro = self.macro_radar.scan(limit=None)
 
         money_by_ticker = {
@@ -130,6 +126,16 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 "money_scan_status": row.get("money_scan_status", "ERROR"),
             })
 
+        candidate_diag = getattr(self.candidate_service, "last_rank_diagnostics", {}) or {}
+        radar_diag = getattr(self.radar_service, "_last_scan_diagnostics", {}) or {}
+        rejection_counts = dict(radar_diag.get("candidate_rejections", {}) or {})
+        if not rejection_counts:
+            rejection_counts = dict(candidate_diag.get("rejections", {}) or {})
+
+        deep_analyzed = radar_diag.get("spot_groups", candidate_diag.get("input", len(base or [])))
+        accepted = radar_diag.get("candidate_accepted", candidate_diag.get("accepted", len(base or [])))
+        rejected = radar_diag.get("candidate_rejected", candidate_diag.get("rejected", 0))
+
         macro_watch = []
         for rank, item in enumerate(macro[:10], start=1):
             macro_watch.append({
@@ -144,12 +150,11 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 "analysis_source": "FUTURES_DIRECT",
             })
 
-        rank_diagnostics = getattr(self.candidate_service, "last_rank_diagnostics", {}) or {}
         self._last_scan_diagnostics = {
             "session": self.session_service.get_session(),
             "stock_universe_total": len(stock_money_ranked),
             "stock_money_screened": len(stock_money_ranked),
-            "stock_deep_analyzed": rank_diagnostics.get("input", len(base or [])),
+            "stock_deep_analyzed": deep_analyzed,
             "spot_candidates": len(base or []),
             "macro_candidates": len(macro or []),
             "candidates": len(base or []),
@@ -158,10 +163,11 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             "confirmed": sum(1 for x in base if x.get("signal_state") == "CONFIRMED"),
             "watch": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WATCH"),
             "wait": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WAIT"),
-            "money_leader_count": rank_diagnostics.get("money_leaders", 0),
-            "candidate_accepted": rank_diagnostics.get("accepted", 0),
-            "candidate_rejected": rank_diagnostics.get("rejected", 0),
-            "candidate_rejections": dict(rank_diagnostics.get("rejections", {}) or {}),
+            "money_leader_count": candidate_diag.get("money_leaders", radar_diag.get("spot_groups", 0)),
+            "candidate_accepted": accepted,
+            "candidate_rejected": rejected,
+            "candidate_rejections": rejection_counts,
+            "radar_errors": radar_diag.get("radar_errors", 0),
             "macro_sources": sorted({str(x.get("macro_analysis_status") or "UNKNOWN") for x in macro}),
             "active_money_leaders": active_leaders,
             "macro_watch": macro_watch,
@@ -223,7 +229,8 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 f"MACRO_WATCH={diagnostics.get('macro_candidates', 0)} "
                 f"SELECTED_SPOT={diagnostics.get('selected', 0)} "
                 f"READY={diagnostics.get('ready', 0)} "
-                f"CONFIRMED={diagnostics.get('confirmed', 0)}"
+                f"CONFIRMED={diagnostics.get('confirmed', 0)} "
+                f"RADAR_ERRORS={diagnostics.get('radar_errors', 0)}"
             )
             if diagnostics.get("candidate_rejections"):
                 print("REJECTIONS: " + ", ".join(
