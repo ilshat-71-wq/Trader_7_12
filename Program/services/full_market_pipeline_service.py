@@ -10,6 +10,8 @@ available for those markets.
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
 from services.macro_market_radar_service import MacroMarketRadarService
 from services.broad_market_money_scanner_service import BroadMarketMoneyScannerService
+from services.spot_universe_service import SpotUniverseService
+from services.session_money_volume_service import SessionMoneyVolumeService
 
 
 class FullMarketPipelineService(MorningTradingPipelineService):
@@ -21,16 +23,31 @@ class FullMarketPipelineService(MorningTradingPipelineService):
         super().__init__(*args, **kwargs)
         radar = self.radar_service
         api = getattr(radar, "api", None) or getattr(getattr(radar, "mapping_service", None), "api", None)
+        # Broad-market discovery must be independent from optional
+        # futures-radar attributes.  Always guarantee a real SPOT universe
+        # and a real session-money service before constructing the scanner.
+        session_money_service = getattr(radar, "session_money_service", None)
+        if session_money_service is None:
+            session_money_service = SessionMoneyVolumeService(
+                history_service=getattr(radar, "history_service", None),
+                session_service=self.session_service,
+            )
+
+        spot_universe_service = getattr(radar, "spot_universe_service", None)
+        if spot_universe_service is None:
+            spot_universe_service = SpotUniverseService(api=api)
+
         self.macro_radar = MacroMarketRadarService(
             api=api,
             radar_service=radar,
             session_service=self.session_service,
-            session_money_service=getattr(radar, "session_money_service", None),
+            session_money_service=session_money_service,
             setup_service=getattr(radar, "spot_setup_service", None),
         )
+
         self.broad_money_scanner = BroadMarketMoneyScannerService(
-            spot_universe_service=getattr(radar, "spot_universe_service", None),
-            session_money_service=getattr(radar, "session_money_service", None),
+            spot_universe_service=spot_universe_service,
+            session_money_service=session_money_service,
             session_service=self.session_service,
         )
 
@@ -64,6 +81,10 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             item["market_group"] = "MOEX_STOCK"
             item["money_rank"] = money.get("money_rank")
             item["spot_session_money"] = money.get("spot_session_money", item.get("spot_money_volume", 0))
+            item["spot_money_per_minute"] = money.get(
+                "spot_money_per_minute",
+                item.get("spot_money_per_minute", 0),
+            )
             item["money_scan_status"] = money.get("money_scan_status", "DEEP")
             item["broad_stock_universe"] = True
 
