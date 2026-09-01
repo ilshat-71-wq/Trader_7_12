@@ -84,15 +84,7 @@ STOCK + TQBR + MOEX
 
 ### Macro
 
-`MarketTradingUniverseService` классифицирует динамические futures metadata:
-
-```text
-OIL       → BR / BRM / CL / WT / WTI
-GOLD      → GD / GL / GOLD / GLDRUBF
-GAS       → NG / NGM / FF / TTF
-USDRUB    → SI / USDRUBF
-FX        → EUR/RUB, CNY/RUB, KZT/RUB families
-```
+`MarketTradingUniverseService` классифицирует динамические futures metadata.
 
 Контракты без пригодной даты экспирации и контракты с `days_to_expiry <= 3` исключаются.
 
@@ -100,7 +92,7 @@ FX        → EUR/RUB, CNY/RUB, KZT/RUB families
 
 ---
 
-## 4. MONEY-FIRST DISCOVERY — НОВОЕ ОСНОВНОЕ ПРАВИЛО
+## 4. MONEY-FIRST DISCOVERY
 
 `Program/services/broad_market_money_scanner_service.py`.
 
@@ -111,18 +103,6 @@ FX        → EUR/RUB, CNY/RUB, KZT/RUB families
 3. рассчитывается `money_per_minute`;
 4. все акции сортируются по фактической денежной активности текущей сессии;
 5. только наиболее активные получают дорогой deep analysis.
-
-Это устраняет прежнее ограничение:
-
-```text
-IMOEX 46 → deep analysis
-```
-
-и заменяет его на:
-
-```text
-ALL TQBR → MONEY SCREEN → TOP ACTIVE → DEEP ANALYSIS
-```
 
 По умолчанию в deep stage передаются первые 25 инструментов money ranking. Это **не ограничение universe** — это ограничение дорогой аналитической стадии после полного money-screen.
 
@@ -208,20 +188,11 @@ relative_strength_benchmark = NOT_APPLICABLE_FOR_MACRO_DIRECT
 
 ## 8. MACRO DIRECT
 
-`Program/services/macro_market_radar_service.py`.
-
 Macro coverage работает независимо от equity SPOT path.
 
-Для каждой macro group выбираются текущие пригодные dated futures. Затем используются:
+Для каждой macro group выбираются текущие пригодные dated futures. Затем используются daily radar, explicit intraday fallback, current money/activity, directional movement, setup quality и liquidity/expiry information.
 
-- daily radar, если есть usable history;
-- explicit intraday last-trades fallback, если daily direction недоступен;
-- current money/activity;
-- directional movement;
-- setup quality;
-- liquidity/expiry information.
-
-`INTRADAY_PROXY` строится только из фактического first → last trade movement. Нет trades / нет direction → кандидат не создаётся.
+Нет trades / нет direction → кандидат не создаётся.
 
 ---
 
@@ -247,9 +218,7 @@ Live pipeline использует двухнаблюдательный stabilit
 Итоговый full-market ranking объединяет:
 
 ```text
-SPOT candidates
-+
-MACRO FUTURES_DIRECT candidates
+SPOT candidates + MACRO FUTURES_DIRECT candidates
         ↓
 SESSION RANK
         ↓
@@ -303,7 +272,39 @@ Scanner read-only.
 
 ---
 
-## 12. UI / OUTPUT
+## 12. LIVE OPERATING WINDOW
+
+Основное окно поиска активных инструментов пользователя:
+
+```text
+07:00 → 13:00 MSK
+```
+
+Рекомендуемый live cadence:
+
+```text
+07:00
+07:30
+08:00
+08:30
+09:00
+09:30
+10:00
+10:30
+11:00
+11:30
+12:00
+12:30
+13:00 контрольная точка
+```
+
+Это **окно поиска и наблюдения**, а не приказ открыть или закрыть сделку. После 13:00 рынок не считается недоступным; просто приоритет нового поиска переносится на следующий торговый цикл.
+
+Аукцион открытия не должен смешиваться с нормальным session-money потоком.
+
+---
+
+## 13. UI / OUTPUT
 
 UI должен показывать не только «лучший сигнал», а происхождение данных.
 
@@ -313,6 +314,7 @@ UI должен показывать не только «лучший сигна
 ALL_TQBR_STOCKS
 MONEY RANK
 SESSION MONEY
+MONEY/MIN
 DIRECTION
 RS
 SETUP
@@ -333,7 +335,7 @@ SETUP
 TRIGGER
 ```
 
-Diagnostics теперь должны позволять видеть:
+Diagnostics:
 
 ```text
 ALL_TQBR
@@ -351,7 +353,7 @@ MACRO_SOURCES
 
 ---
 
-## 13. BCS AUTHORIZATION
+## 14. BCS AUTHORIZATION
 
 BCS access token живёт только в процессе.
 
@@ -362,23 +364,19 @@ Refresh token хранится локально вне Git:
 chmod 600
 ```
 
-BCSAPI использует process-wide shared client и повторно не авторизует вложенные сервисы без необходимости.
-
-Refresh token автоматически ротируется и сохраняется локально при выдаче нового значения.
-
 Секреты в Git запрещены.
 
 ---
 
-## 14. TESTS / REGRESSION
+## 15. TESTS / REGRESSION
 
 Тесты deterministic и не требуют реального BCS token.
 
 Последний подтверждённый локальный checkpoint пользователя:
 
 ```text
-177 passed
-compileall = 0
+182 passed
+compile=0
 ```
 
 Критические regression areas:
@@ -392,13 +390,12 @@ compileall = 0
 - persistent BCS refresh token;
 - full-market macro output;
 - no synthetic RS for macro;
-- signal stability / anti-churn.
-
-После текущего изменения необходимо локально подтвердить новый полный suite перед следующим live screening.
+- signal stability / anti-churn;
+- full-market money-first dependency wiring.
 
 ---
 
-## 15. REPOSITORY HYGIENE
+## 16. REPOSITORY HYGIENE
 
 Разработка ведётся только в:
 
@@ -414,7 +411,7 @@ main
 
 ---
 
-## 16. CURRENT ARCHITECTURAL GAPS
+## 17. CURRENT ARCHITECTURAL GAPS
 
 ### P1 — Broad-market speed
 
@@ -447,7 +444,7 @@ NO_ORDER_BOOK
 
 ---
 
-## 17. OPERATING SAFETY
+## 18. OPERATING SAFETY
 
 Проект находится в стадии контролируемого пользовательского тестирования.
 
@@ -462,7 +459,7 @@ NO_ORDER_BOOK
 
 ---
 
-## 18. CHECKPOINT 01.09.2026
+## 19. CHECKPOINT 01.09.2026
 
 ```text
 Repository                    ilshat-71-wq/Trader_7_12
@@ -482,6 +479,9 @@ Macro FUTURES_DIRECT           implemented
 No synthetic macro RS          enforced
 Read-only scanner              enforced
 Order execution                absent
+Primary discovery window       07:00-13:00 MSK
+Live cadence                   30 minutes
+User trade decision            external to scanner
 ```
 
 **Главная цель текущей версии:** не искать несколько заранее известных тикеров, а каждый торговый день сначала определить, **где в реальном рынке сегодня находятся большие деньги и высокая активность**, затем направлять дорогой технический анализ именно туда и только после готового SPOT-сценария выбирать соответствующий фьючерс.
