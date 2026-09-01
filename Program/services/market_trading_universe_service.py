@@ -1,26 +1,28 @@
-"""Unified tradable SPOT universe for Trader_7_12 Pro.
+"""Unified tradable market universe for Trader_7_12 Pro.
 
-Universe = current IMOEX equities + four independent macro markets:
-OIL, GOLD, GAS and USDRUB.
-
-The service does not invent instruments. It only classifies already-valid
-Futures -> SPOT mappings and keeps the configured market groups.
+Equities are discovered from the complete canonical MOEX TQBR universe.
+Macro groups are classified from current BCS futures metadata so the scanner
+can cover oil, gold, gas and multiple RUB currency futures without a fixed
+instrument list.
 """
 
 
 class MarketTradingUniverseService:
-    VERSION = "1.0"
+    VERSION = "1.1"
 
     IMOEX = "IMOEX"
     OIL = "OIL"
     GOLD = "GOLD"
     GAS = "GAS"
     USDRUB = "USDRUB"
+    FX = "FX"
 
-    MACRO_GROUPS = (OIL, GOLD, GAS, USDRUB)
-    TARGET_GROUPS = ("MOEX_STOCK", OIL, GOLD, GAS, USDRUB)
+    MACRO_GROUPS = (OIL, GOLD, GAS, USDRUB, FX)
+    TARGET_GROUPS = ("MOEX_STOCK", OIL, GOLD, GAS, USDRUB, FX)
 
-    # MOEX/BCS short futures codes. The suffix contains the expiry month/year.
+    # BCS/MOEX futures prefixes.  The suffix normally contains the
+    # conventional month/year expiry code.  Classification is deliberately
+    # broad because BCS metadata can expose several contract families.
     FUTURES_PREFIX_GROUPS = {
         "BR": OIL,
         "BRM": OIL,
@@ -38,6 +40,15 @@ class MarketTradingUniverseService:
         "TTF": GAS,
         "SI": USDRUB,
         "USDRUBF": USDRUB,
+        "EU": FX,
+        "ER": FX,
+        "EUR": FX,
+        "EURRUBF": FX,
+        "CNY": FX,
+        "CNYRUBF": FX,
+        "CR": FX,
+        "KZT": FX,
+        "KZTRUBF": FX,
     }
 
     @classmethod
@@ -45,7 +56,6 @@ class MarketTradingUniverseService:
         ticker = str(futures_ticker or "").strip().upper()
         if not ticker:
             return None
-        # Longest prefixes first to avoid GLDRUBF being treated as GL.
         for prefix in sorted(cls.FUTURES_PREFIX_GROUPS, key=len, reverse=True):
             if ticker.startswith(prefix):
                 return cls.FUTURES_PREFIX_GROUPS[prefix]
