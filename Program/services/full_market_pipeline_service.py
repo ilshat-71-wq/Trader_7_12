@@ -1,8 +1,9 @@
-"""Full-market read-only scanner: all TQBR stocks + direct macro futures.
+"""Full-market read-only scanner: all TQBR stocks + separate macro futures watch.
 
 Discovery is money-first: every canonical TQBR stock is screened for current
 session money/pace, then only the most active stocks receive expensive trend/RS/setup
-analysis. OIL/GOLD/GAS/FX remain a separate FUTURES_DIRECT coverage layer.
+analysis. OIL/GOLD/GAS/FX remain a separate FUTURES_DIRECT watch layer and are never
+returned as equity trade-radar candidates.
 """
 
 from services.morning_trading_pipeline_service import MorningTradingPipelineService
@@ -13,9 +14,9 @@ from services.session_money_volume_service import SessionMoneyVolumeService
 
 
 class FullMarketPipelineService(MorningTradingPipelineService):
-    """Scan the broad market and return the best current opportunities."""
+    """Scan the broad market while keeping SPOT trade radar separate from macro watch."""
 
-    VERSION = "1.3"
+    VERSION = "1.4"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -44,11 +45,6 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             session_service=self.session_service,
         )
 
-    @staticmethod
-    def _source_priority(item):
-        source = str(item.get("analysis_source") or "SPOT").upper()
-        return 2 if source == "SPOT" else 1
-
     def scan(self, mappings=None, confirmations=None, limit=3):
         if mappings is None:
             stock_money_ranked = self.broad_money_scanner.rank_current_money()
@@ -57,11 +53,16 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             stock_money_ranked = list(mappings or [])
             deep_mappings = list(mappings or [])
 
+        # Equity trade radar: SPOT only.
         base = super().scan(
             mappings=deep_mappings,
             confirmations=confirmations,
             limit=None,
         )
+
+        # Macro is deliberately a separate watch layer. It is never merged into
+        # the equity candidate ranking and therefore can never become #1 simply
+        # because a futures proxy score is numerically larger.
         macro = self.macro_radar.scan(limit=None)
 
         money_by_ticker = {
@@ -75,15 +76,15 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             item["spot_universe"] = "ALL_TQBR_STOCKS"
             item["market_universe"] = "ALL_TQBR_STOCKS"
             item["market_group"] = "MOEX_STOCK"
+            item["analysis_source"] = "SPOT"
             item["money_rank"] = money.get("money_rank")
             item["spot_session_money"] = money.get("spot_session_money", item.get("spot_money_volume", 0))
             item["spot_money_per_minute"] = money.get("spot_money_per_minute", item.get("spot_money_per_minute", 0))
             item["money_scan_status"] = money.get("money_scan_status", "DEEP")
             item["broad_stock_universe"] = True
+            item["selection_role"] = "SPOT_TRADE_RADAR"
 
-        combined = list(base or []) + list(macro or [])
-        for item in combined:
-            item.setdefault("analysis_source", "SPOT")
+        for item in base:
             item.setdefault("spot_data_status", "AVAILABLE")
             item.setdefault("opportunity_score", item.get("candidate_score", 0))
             item.setdefault("session_rank_score", item.get("candidate_score", 0))
@@ -91,9 +92,6 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             item.setdefault("setup_state", "WAIT")
 
         for item in macro:
-            # Macro is useful information, but it is not an equity SPOT signal.
-            # Keep it explicitly watch-only so a high proxy score cannot look
-            # like a trade-ready SPOT candidate.
             self._advance_signal_state(item)
             item["market_session"] = self.session_service.get_session()
             item["session_rank_score"] = self._session_rank_score(item, item["market_session"])
@@ -103,12 +101,11 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             item["signal_state"] = "WAIT"
             item["futures_selection_reason"] = "MACRO_DIRECT_WATCH_ONLY"
 
-        # Real SPOT equity candidates have priority over macro direct/proxy
-        # records. Macro never fills the top of the equity trading radar merely
-        # because its numerical score is higher.
-        combined.sort(
+        # IMPORTANT CONTRACT:
+        # `scan()` returns only SPOT/equity trade-radar candidates. Macro remains
+        # available through diagnostics for a separate UI watch section.
+        base.sort(
             key=lambda item: (
-                self._source_priority(item),
                 self._signal_priority(item.get("signal_state")),
                 float(item.get("opportunity_score", item.get("candidate_score", 0)) or 0),
                 float(item.get("candidate_score", 0) or 0),
@@ -121,7 +118,7 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             reverse=True,
         )
 
-        selected = combined[: max(0, int(limit or 0))]
+        selected = base[: max(0, int(limit or 0))]
         for rank, item in enumerate(selected, start=1):
             item["rank"] = rank
             item["pipeline_version"] = self.VERSION
@@ -136,6 +133,20 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                 "money_scan_status": row.get("money_scan_status", "ERROR"),
             })
 
+        macro_watch = []
+        for rank, item in enumerate(macro[:10], start=1):
+            macro_watch.append({
+                "rank": rank,
+                "ticker": item.get("spot_ticker") or item.get("ticker") or "",
+                "direction": item.get("direction"),
+                "score": item.get("opportunity_score", 0),
+                "setup": item.get("setup"),
+                "session_money": item.get("spot_money_volume", item.get("macro_session_money", 0)),
+                "money_per_minute": item.get("spot_money_per_minute", item.get("macro_money_per_minute", 0)),
+                "signal_state": "WAIT",
+                "analysis_source": "FUTURES_DIRECT",
+            })
+
         self._last_scan_diagnostics = {
             "session": self.session_service.get_session(),
             "stock_universe_total": len(stock_money_ranked),
@@ -143,14 +154,15 @@ class FullMarketPipelineService(MorningTradingPipelineService):
             "stock_deep_analyzed": len(base or []),
             "spot_candidates": len(base or []),
             "macro_candidates": len(macro or []),
-            "candidates": len(combined),
+            "candidates": len(base or []),
             "selected": len(selected),
-            "ready": sum(1 for x in combined if x.get("signal_state") == "READY"),
-            "confirmed": sum(1 for x in combined if x.get("signal_state") == "CONFIRMED"),
-            "watch": sum(1 for x in combined if str(x.get("setup_state") or "").upper() == "WATCH"),
-            "wait": sum(1 for x in combined if str(x.get("setup_state") or "").upper() == "WAIT"),
+            "ready": sum(1 for x in base if x.get("signal_state") == "READY"),
+            "confirmed": sum(1 for x in base if x.get("signal_state") == "CONFIRMED"),
+            "watch": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WATCH"),
+            "wait": sum(1 for x in base if str(x.get("setup_state") or "").upper() == "WAIT"),
             "macro_sources": sorted({str(x.get("macro_analysis_status") or "UNKNOWN") for x in macro}),
             "active_money_leaders": active_leaders,
+            "macro_watch": macro_watch,
         }
         if selected:
             selected[0]["scan_diagnostics"] = dict(self._last_scan_diagnostics)
@@ -160,22 +172,21 @@ class FullMarketPipelineService(MorningTradingPipelineService):
     def print_results(results):
         print()
         print("=" * 170)
-        print("TRADER_7_12 PRO - FULL MARKET: ALL TQBR STOCKS + OIL + GOLD + GAS + FX")
+        print("TRADER_7_12 PRO - SPOT TRADE RADAR + SEPARATE MACRO WATCH")
         print("=" * 170)
         print()
-        print(f"{'RANK':<6}{'ASSET':<12}{'SOURCE':<18}{'DIR':<8}{'SIGNAL':<12}{'SETUP':<18}{'TRIGGER':>12}{'MONEY RANK':>12}{'SCORE':>9}")
+        print(f"{'RANK':<6}{'SPOT':<12}{'SOURCE':<14}{'DIR':<8}{'SIGNAL':<12}{'SETUP':<18}{'TRIGGER':>12}{'MONEY RANK':>12}{'SCORE':>9}")
         print("-" * 170)
         for item in results:
-            money_rank = item.get("money_rank", "-")
             print(
                 f"{item.get('rank', '-'): <6}"
                 f"{item.get('spot_ticker', '-'): <12}"
-                f"{item.get('analysis_source', '-'): <18}"
+                f"{'SPOT / TQBR':<14}"
                 f"{item.get('direction', '-'): <8}"
                 f"{item.get('signal_state', 'WAIT'): <12}"
                 f"{str(item.get('setup', '-')):<18}"
                 f"{float(item.get('entry_trigger', 0) or 0):>12.4f}"
-                f"{str(money_rank):>12}"
+                f"{str(item.get('money_rank', '-')):>12}"
                 f"{float(item.get('opportunity_score', item.get('candidate_score', 0)) or 0):>9.2f}"
             )
         diagnostics = results[0].get("scan_diagnostics") if results and isinstance(results[0], dict) else None
@@ -189,24 +200,31 @@ class FullMarketPipelineService(MorningTradingPipelineService):
                     f"pace={float(row.get('spot_money_per_minute', 0) or 0):>12,.0f}"
                 )
             print()
+            print("MACRO / FUTURES WATCH — НЕ ТОРГОВЫЙ SPOT-РЕЙТИНГ")
+            for row in diagnostics.get("macro_watch", []):
+                print(
+                    f"{int(row.get('rank') or 0):>3}. {str(row.get('ticker') or ''):<10} "
+                    f"dir={str(row.get('direction') or '-'):<6} "
+                    f"money={float(row.get('session_money', 0) or 0):>16,.0f} "
+                    f"pace={float(row.get('money_per_minute', 0) or 0):>12,.0f}"
+                )
+            print()
             print(
                 "DIAGNOSTICS: "
                 f"ALL_TQBR={diagnostics.get('stock_universe_total', 0)} "
                 f"MONEY_SCREENED={diagnostics.get('stock_money_screened', 0)} "
                 f"DEEP={diagnostics.get('stock_deep_analyzed', 0)} "
-                f"MACRO={diagnostics.get('macro_candidates', 0)} "
-                f"TOTAL={diagnostics.get('candidates', 0)} "
-                f"SELECTED={diagnostics.get('selected', 0)} "
+                f"SPOT={diagnostics.get('spot_candidates', 0)} "
+                f"MACRO_WATCH={diagnostics.get('macro_candidates', 0)} "
+                f"SELECTED_SPOT={diagnostics.get('selected', 0)} "
                 f"READY={diagnostics.get('ready', 0)} "
-                f"CONFIRMED={diagnostics.get('confirmed', 0)} "
-                f"WATCH={diagnostics.get('watch', 0)} "
-                f"WAIT={diagnostics.get('wait', 0)}"
+                f"CONFIRMED={diagnostics.get('confirmed', 0)}"
             )
         else:
-            print("NO WATCHLIST CANDIDATES")
+            print("NO SPOT WATCHLIST CANDIDATES")
         print()
-        print("STOCKS: all canonical MOEX TQBR stocks are money-screened first; only the most active receive deep SPOT analysis.")
-        print("MACRO: OIL/GOLD/GAS/FX are explicit FUTURES_DIRECT coverage when usable SPOT data is unavailable.")
-        print("Macro proxy is watch-only and cannot outrank a real SPOT equity candidate.")
-        print("Futures are reference-only for equities and do not confirm SPOT signals. Scanner is read-only.")
+        print("SPOT radar: all canonical TQBR stocks are money-screened first; only the most active receive deep SPOT analysis.")
+        print("Futures are not trade candidates here. After a valid SPOT scenario, the user selects the corresponding futures contract.")
+        print("Macro OIL/GOLD/GAS/FX is a separate FUTURES_DIRECT watch layer and cannot become a SPOT trade signal.")
+        print("Scanner is read-only: no order execution, position sizing, stop-loss or take-profit automation.")
         print("=" * 170)
