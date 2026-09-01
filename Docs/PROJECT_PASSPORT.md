@@ -23,9 +23,13 @@ TOP ACTIVE TODAY
         ↓
 SPOT DIRECTION / RS / SETUP / TRIGGER / STABILITY
         ↓
-TOP TRADE WATCHLIST
+SPOT TRADE WATCHLIST
         ↓
 USER CHOOSES THE FUTURE TO TRADE
+
+MACRO OIL / GOLD / GAS / FX
+        ↓
+SEPARATE FUTURES_DIRECT WATCH
 ```
 
 `opportunity_score` — рейтинг модели, **не вероятность прибыли**.
@@ -36,18 +40,19 @@ USER CHOOSES THE FUTURE TO TRADE
 
 ### Equity path
 
-**SPOT является источником направления, денег/активности, RS, setup, trigger и readiness. Futures — только mapping/reference после SPOT readiness.**
+**SPOT является единственным источником направления, денег/активности, RS, setup, trigger и readiness для equity trade radar. Futures — только mapping/reference после SPOT readiness.**
 
 Фьючерс не подтверждает направление SPOT и не меняет RS, setup, readiness или ranking.
 
 ### Macro path
 
-Если пригодный SPOT для OIL/GOLD/GAS/FX недоступен, используется явный `FUTURES_DIRECT`. Такой источник никогда не маскируется под SPOT.
+Если пригодный SPOT для OIL/GOLD/GAS/FX недоступен, используется явный `FUTURES_DIRECT`. Такой источник никогда не маскируется под SPOT и никогда не попадает в equity trade ranking.
 
 ```text
 analysis_source = FUTURES_DIRECT
 spot_data_status = UNAVAILABLE_PROXY_TO_FUTURES
 relative_strength_status = UNAVAILABLE
+selection_role = MACRO_WATCH
 ```
 
 Синтетический SPOT и искусственный RS запрещены.
@@ -82,7 +87,7 @@ STOCK + TQBR
 
 1. загрузить весь TQBR universe;
 2. для каждой акции получить текущий session money volume;
-3. рассчитать `money_per_minute`;
+3. рассчитать `money_per_minute` и recent activity;
 4. отсортировать по текущей денежной активности;
 5. первые активные инструменты направить в deep SPOT analysis.
 
@@ -92,6 +97,8 @@ STOCK + TQBR
 money_rank
 spot_session_money
 spot_money_per_minute
+recent_money_volume
+recent_money_per_minute
 money_scan_status
 spot_universe = ALL_TQBR_STOCKS
 ```
@@ -138,7 +145,7 @@ WAIT / WATCH / READY / CONFIRMED
 FUTURES MAPPING
 ```
 
-Futures mapping появляется только после SPOT readiness/active trigger согласно canonical gate.
+Futures mapping появляется только после SPOT readiness/active trigger согласно canonical gate и является справочной привязкой, а не частью SPOT signal calculation.
 
 ---
 
@@ -164,9 +171,9 @@ Macro coverage работает независимо от equity SPOT path.
 
 Используются текущие пригодные dated futures, daily radar при наличии, explicit intraday fallback, session money/activity, directional movement, setup quality и liquidity/expiry information.
 
-Но **macro direct/proxy не является equity SPOT signal**.
+Macro direct/proxy является **отдельным наблюдательным слоем**. Он не является equity SPOT signal и не может занять место SPOT-кандидата в основном рейтинге.
 
-В пользовательском радаре macro имеет роль `MACRO_WATCH` и не должен вытеснять реальные SPOT equity candidates только из-за более высокого числового proxy-score.
+В UI macro показывается как `MACRO / FUTURES WATCH — ОТДЕЛЬНО`.
 
 ---
 
@@ -189,17 +196,17 @@ Live pipeline использует двухнаблюдательный stabilit
 
 ## 10. FULL-MARKET RANKING
 
-Приоритет пользовательского радара:
+Приоритет пользовательского торгового радара:
 
 ```text
-REAL SPOT EQUITY CANDIDATES
+REAL SPOT EQUITY CANDIDATES ONLY
         ↓
 signal state / opportunity / activity / money
         ↓
-MACRO FUTURES_DIRECT WATCH
+USER CHOOSES CORRESPONDING FUTURES CONTRACT
 ```
 
-Macro proxy не может занять место equity SPOT-кандидата только потому, что его proxy score выше.
+Macro futures не смешиваются с equity ranking. Даже высокий proxy-score macro не может стать `#1` SPOT-кандидатом.
 
 Одновременно money-first leaderboard остаётся доступным отдельно и всегда показывает текущих лидеров TQBR.
 
@@ -220,7 +227,9 @@ TOP ACTIVE → DEEP SPOT
         ↓
 DIRECTION → RS → SETUP → TRIGGER → READINESS
         ↓
-FUTURES MAPPING
+SPOT TRADE RADAR
+        ↓
+FUTURES MAPPING / USER SELECTION
 
 PLUS
 
@@ -228,7 +237,9 @@ MacroMarketRadarService
         ↓
 OIL / GOLD / GAS / FX
         ↓
-FUTURES_DIRECT / MACRO_WATCH
+FUTURES_DIRECT
+        ↓
+SEPARATE MACRO WATCH
 ```
 
 Публичный вызов:
@@ -236,6 +247,8 @@ FUTURES_DIRECT / MACRO_WATCH
 ```python
 FullMarketPipelineService().scan(limit=3)
 ```
+
+`scan()` возвращает **только SPOT/equity trade-radar candidates**. Macro доступен через diagnostics/UI watch layer.
 
 Scanner read-only.
 
@@ -264,7 +277,7 @@ Scanner read-only.
 
 ## 13. UI / OUTPUT
 
-UI обязан различать два уровня:
+UI обязан различать три уровня:
 
 ### Discovery
 
@@ -279,18 +292,18 @@ SESSION ₽×V
 ### Trade radar
 
 ```text
-SPOT
+SPOT / TQBR
 DIRECTION
 RS
 SETUP
 TRIGGER
 READINESS
-FUTURES MAPPING
 ```
 
-### Macro
+### Macro watch
 
 ```text
+MACRO / FUTURES WATCH — ОТДЕЛЬНО
 FUTURES_DIRECT
 MACRO GROUP
 CONTRACT
@@ -301,6 +314,8 @@ TRIGGER
 ```
 
 Macro proxy не должен выглядеть как подтверждённый SPOT trade signal.
+
+Фьючерс для equity-кандидата показывается только как справочное сопоставление после SPOT readiness; пользователь самостоятельно выбирает контракт.
 
 ---
 
@@ -323,18 +338,24 @@ chmod 600
 
 Тесты deterministic и не требуют реального BCS token.
 
-Последний подтверждённый локальный checkpoint пользователя перед текущей архитектурной правкой:
+Последний подтверждённый локальный checkpoint пользователя:
 
 ```text
 182 passed
 compile=0
 ```
 
+После изменения разделения SPOT/MACRO необходимо повторно подтвердить этот checkpoint локальным полным прогоном перед следующим live-тестом.
+
 Критические regression areas:
 
 - canonical TQBR board selection;
 - ALL-TQBR money-first screening;
+- recent money activity metrics;
 - SPOT universe independent from futures mapping;
+- `scan()` returns only SPOT equity trade candidates;
+- macro futures excluded from equity ranking;
+- macro watch remains visible separately;
 - futures mapping deferred until SPOT readiness;
 - macro universe groups;
 - expiry safety;
@@ -343,7 +364,6 @@ compile=0
 - no synthetic macro RS;
 - signal stability / anti-churn;
 - full-market money-first dependency wiring;
-- separation of macro proxy from equity trade ranking;
 - visible TOP ACTIVE MONEY even when no SPOT trade candidate is ready.
 
 ---
@@ -420,18 +440,21 @@ Project MD                      Docs/PROJECT_PASSPORT.md only
 BCS persistent auth             implemented
 Dynamic TQBR universe           implemented
 ALL-TQBR money-first screen     implemented
+Recent money activity           implemented
 TOP ACTIVE MONEY UI             implemented
 Deep active-stock analysis      implemented
 SPOT-first direction/RS/setup   implemented
-Deferred futures mapping        implemented
+Equity SPOT-only ranking        enforced
+Deferred futures mapping        enforced
+User chooses futures             enforced
 OIL coverage                    implemented
 GOLD coverage                   implemented
 GAS coverage                    implemented
 USD/RUB coverage                implemented
-EUR/CNY/KZT FX coverage        implemented
-Macro FUTURES_DIRECT            implemented
-Macro proxy separated           implemented
-No synthetic macro RS           enforced
+EUR/CNY/KZT FX coverage         implemented
+Macro FUTURES_DIRECT             implemented
+Macro watch separation          enforced
+No synthetic macro RS            enforced
 Read-only scanner               enforced
 Order execution                 absent
 Primary discovery window        07:00-13:00 MSK
@@ -439,4 +462,4 @@ Live cadence                    30 minutes
 User trade decision             external to scanner
 ```
 
-**Главная цель текущей версии:** каждый торговый день сначала определить, **где прямо сейчас находятся деньги и высокая активность**, затем направить технический анализ именно туда и только после валидного SPOT-сценария сопоставлять соответствующий фьючерс. Macro/futures proxy остаётся отдельным наблюдательным слоем и не должен создавать ложное ощущение готового SPOT-сигнала.
+**Главная цель текущей версии:** каждый торговый день сначала определить, **где прямо сейчас находятся деньги и высокая активность**, затем направить технический анализ именно туда. Основной торговый радар показывает только SPOT/TQBR-сценарии. После валидного SPOT-сценария пользователь самостоятельно выбирает соответствующий фьючерс. OIL/GOLD/GAS/FX остаются отдельным macro/futures наблюдательным слоем и не создают ложного SPOT-сигнала.
