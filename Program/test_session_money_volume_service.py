@@ -1,4 +1,4 @@
-"""Tests for current-session SPOT money volume."""
+"""Tests for current-session SPOT money volume and recent activity."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -42,6 +42,9 @@ def test_evening_window():
     assert result["money_volume"] == 600_000
     assert result["elapsed_minutes"] == 60
     assert result["expected_minutes"] == 290
+    assert result["recent_money_volume"] == 600_000
+    assert result["recent_money_per_minute"] == 10_000
+    assert result["recent_money_minutes"] == 15
 
 
 def test_closed_session_returns_zero():
@@ -52,6 +55,7 @@ def test_closed_session_returns_zero():
     result = service.calculate("BR", "SPBRU", session="CLOSED")
     assert result["money_volume"] == 0.0
     assert result["elapsed_minutes"] == 0
+    assert result["recent_money_volume"] == 0.0
 
 
 if __name__ == "__main__":
