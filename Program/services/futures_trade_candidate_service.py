@@ -8,13 +8,14 @@ from services.market_trading_universe_service import MarketTradingUniverseServic
 
 
 class FuturesTradeCandidateService:
-    VERSION = "2.0"
+    VERSION = "2.1"
     MONEY_LEADER_SHORTLIST = 20
     TARGET_SPOT_GROUPS = MarketTradingUniverseService.TARGET_GROUPS
 
     def __init__(self, confirmation_service=None):
         # Kept for backward-compatible construction; intentionally unused.
         self.confirmation_service = None
+        self.last_rank_diagnostics = {}
 
     @staticmethod
     def _float(value, default=0.0):
@@ -75,35 +76,49 @@ class FuturesTradeCandidateService:
         return round(max(0.0, min(score, 100.0)), 2)
 
     @classmethod
-    def build_candidate(cls, radar, confirmation=None):
+    def rejection_reason(cls, radar):
+        """Return the first deterministic reason a SPOT radar item is not eligible."""
         if not isinstance(radar, dict):
-            return None
+            return "INVALID_RADAR"
 
         direction = cls._direction(radar)
         if direction not in {"LONG", "SHORT"}:
-            return None
+            return "NO_DIRECTION"
         if bool(radar.get("moex_event_risk")):
-            return None
+            return "EVENT_RISK"
 
         rs_status = str(radar.get("relative_strength_status") or "").upper()
         if rs_status not in {"OK", "AVAILABLE"}:
-            return None
+            return "RS_UNAVAILABLE"
         rs = cls._float(radar.get("relative_strength"))
         if direction == "LONG" and rs <= 0.0:
-            return None
+            return "RS_AGAINST_LONG"
         if direction == "SHORT" and rs >= 0.0:
-            return None
+            return "RS_AGAINST_SHORT"
 
         if cls._spot_group(radar) not in cls.TARGET_SPOT_GROUPS:
-            return None
+            return "WRONG_SPOT_GROUP"
 
         setup_phase = str(radar.get("setup_phase") or "UNKNOWN").upper()
         if setup_phase in {"NO_SESSION_CANDLES", "SETUP_ERROR"} or radar.get("setup_error"):
-            return None
+            return "SETUP_DATA_ERROR"
 
         setup_state = str(radar.get("setup_state") or "WAIT").upper()
         if setup_state not in {"WAIT", "WATCH", "READY", "CONFIRMED"}:
-            setup_state = "WAIT"
+            return "INVALID_SETUP_STATE"
+
+        return None
+
+    @classmethod
+    def build_candidate(cls, radar, confirmation=None):
+        if cls.rejection_reason(radar) is not None:
+            return None
+
+        direction = cls._direction(radar)
+        rs_status = str(radar.get("relative_strength_status") or "").upper()
+        rs = cls._float(radar.get("relative_strength"))
+        setup_phase = str(radar.get("setup_phase") or "UNKNOWN").upper()
+        setup_state = str(radar.get("setup_state") or "WAIT").upper()
 
         return {
             "version": cls.VERSION,
@@ -111,7 +126,6 @@ class FuturesTradeCandidateService:
             "direction": direction,
             "spot_group": cls._spot_group(radar),
             "market_group": cls._spot_group(radar),
-            # Futures are reference-only mapping data.
             "futures_ticker": radar.get("futures_ticker"),
             "futures_class_code": radar.get("futures_class_code"),
             "futures_expiry": radar.get("futures_expiry"),
@@ -193,12 +207,18 @@ class FuturesTradeCandidateService:
 
     @classmethod
     def _directional_rs_tiebreak(cls, item):
-        """Return RS in the candidate's trade direction for deterministic tie-breaking."""
         direction = str(item.get("direction") or "").upper()
         rs = cls._float(item.get("relative_strength"))
         return rs if direction == "LONG" else -rs if direction == "SHORT" else 0.0
 
     def rank(self, radar_results, confirmations=None, limit=3):
+        self.last_rank_diagnostics = {
+            "input": 0,
+            "money_leaders": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "rejections": {},
+        }
         if not isinstance(radar_results, list):
             return []
         if limit is not None:
@@ -206,11 +226,22 @@ class FuturesTradeCandidateService:
             if limit < 0:
                 raise ValueError("limit must be >= 0")
 
+        self.last_rank_diagnostics["input"] = len(radar_results)
+        money_leaders = self._select_money_leader_radars(radar_results)
+        self.last_rank_diagnostics["money_leaders"] = len(money_leaders)
+
         candidates = []
-        for radar in self._select_money_leader_radars(radar_results):
+        for radar in money_leaders:
+            reason = self.rejection_reason(radar)
+            if reason is not None:
+                self.last_rank_diagnostics["rejected"] += 1
+                rejections = self.last_rank_diagnostics["rejections"]
+                rejections[reason] = rejections.get(reason, 0) + 1
+                continue
             candidate = self.build_candidate(radar)
             if candidate is not None:
                 candidates.append(candidate)
+                self.last_rank_diagnostics["accepted"] += 1
 
         candidates.sort(
             key=lambda item: (
@@ -238,4 +269,5 @@ class FuturesTradeCandidateService:
 
         for rank, candidate in enumerate(selected, start=1):
             candidate["rank"] = rank
+        self.last_rank_diagnostics["selected"] = len(selected)
         return selected
