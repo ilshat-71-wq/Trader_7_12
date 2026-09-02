@@ -1,7 +1,7 @@
 """Trader_7_12 Pro — current-session market-attention scanner."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 
 from services.spot_universe_service import SpotUniverseService
 from services.history_candle_service import HistoryCandleService
@@ -16,6 +16,8 @@ class MarketAttentionScannerService:
     STOCK_DEEP_LIMIT = 40
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
+    SCAN_START = time(7, 0)
+    SCAN_END = time(13, 0)
     BENCHMARKS = ("IMOEX2", "IRUS2")
     MACRO_ALIASES = {
         "GOLD": ("GLDRUB_TOM",),
@@ -96,8 +98,7 @@ class MarketAttentionScannerService:
         if len(candles) < 2:
             return None
         candles.sort(key=lambda x: str(x.get("time") or ""))
-        first = self._f(candles[0].get("close"))
-        last = self._f(candles[-1].get("close"))
+        first = self._f(candles[0].get("close")); last = self._f(candles[-1].get("close"))
         if first <= 0 or last <= 0:
             return None
         total_money = sum(max(0.0, self._f(x.get("money_volume", x.get("volume")))) for x in candles)
@@ -154,12 +155,12 @@ class MarketAttentionScannerService:
             return []
         info = self.session.get_session_info()
         session_name = str(info.get("session") or "MORNING").upper()
-        window = self.session.get_window()
-        if not window:
-            window = (self.session.MORNING_START, self.session.MAIN_START)
         trading_date = self.session.get_trading_day()
         now = self.session.now()
-        session_start = window[0]
+        if now.time() < self.SCAN_START or now.time() >= self.SCAN_END:
+            self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "scan_window": "07:00-13:00 MSK"}
+            return []
+        session_start = self.SCAN_START
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
 
@@ -211,7 +212,8 @@ class MarketAttentionScannerService:
             row["pipeline_version"] = self.VERSION
         self._last_scan_diagnostics = {
             "status": "OK", "session": session_name, "trading_date": str(trading_date),
-            "universe_total": len(universe), "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
+            "scan_window": "07:00-13:00 MSK", "universe_total": len(universe),
+            "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
             "analyzed": len(results), "benchmark": benchmark_ticker,
             "benchmark_change_percent": benchmark_change, "selected": len(selected),
             "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
