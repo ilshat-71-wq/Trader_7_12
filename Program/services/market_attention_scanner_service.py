@@ -13,7 +13,6 @@ class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
     VERSION = "2.0"
-    STOCK_DEEP_LIMIT = 40
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     SCAN_START = time(7, 0)
@@ -68,6 +67,9 @@ class MarketAttentionScannerService:
                 continue
             ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
             code = str(row.get("classCode") or row.get("class_code") or "").strip()
+            instrument_kind = str(row.get("type") or row.get("instrumentType") or row.get("securityType") or "").upper()
+            if "FUT" in instrument_kind or "DERIV" in instrument_kind:
+                continue
             if not ticker or not code or ticker in seen:
                 continue
             for group, aliases in self.MACRO_ALIASES.items():
@@ -163,7 +165,6 @@ class MarketAttentionScannerService:
         session_start = self.SCAN_START
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
-
         results = []
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
             futures = [pool.submit(self._analyze_one, item, trading_date, session_start, now) for item in universe]
@@ -218,6 +219,7 @@ class MarketAttentionScannerService:
             "benchmark_change_percent": benchmark_change, "selected": len(selected),
             "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "SHORT_CANDIDATE"), None),
+            "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
         }
         return selected
