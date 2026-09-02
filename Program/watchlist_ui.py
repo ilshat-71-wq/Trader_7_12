@@ -121,4 +121,3 @@ class WatchlistTraderWindow(TraderWindow):
             "</div></div>",
         ])
         self.result_box.setHtml("".join(html))
-'''
