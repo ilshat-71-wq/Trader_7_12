@@ -1,18 +1,6 @@
-"""
-Trader_7_12 Pro
+"""Trader_7_12 Pro — main launcher.
 
-Main launcher
-
-Версия 1.0
-
-Запуск:
-- подключение BCS API
-- загрузка рынка
-- запуск полного opportunity watchlist интерфейса
-- SPOT equities + direct macro coverage: OIL/GOLD/GAS/USDRUB
-
-Если BCS временно недоступен, интерфейс всё равно запускается
-для просмотра.
+Read-only market-attention scanner. No order execution and no futures analysis.
 """
 
 import sys
@@ -21,12 +9,11 @@ from PySide6.QtWidgets import QApplication
 
 from market.market_loader import MarketLoader
 from watchlist_ui import WatchlistTraderWindow
-from services.full_market_pipeline_service import FullMarketPipelineService
+from services.market_attention_scanner_service import MarketAttentionScannerService
 
 
 def main():
-    print("🚀 Запуск Trader_7_12 Pro")
-
+    print("🚀 Запуск Trader_7_12 Pro — Market Attention Radar")
     loader = MarketLoader()
     try:
         connected = loader.connect()
@@ -34,21 +21,15 @@ def main():
         connected = False
         print(f"⚠️ БКС временно недоступен: {exc}")
 
-    if not connected:
-        print("⚠️ Интерфейс запускается в режиме просмотра")
-    else:
-        print("✅ БКС подключён")
-        print("ℹ️ Сканирование включает акции + OIL/GOLD/GAS/USDRUB")
-
+    print("✅ БКС подключён" if connected else "⚠️ Интерфейс запускается в режиме просмотра")
     app = QApplication(sys.argv)
     window = WatchlistTraderWindow(scanner_enabled=connected)
     if connected:
         try:
-            window.scanner = FullMarketPipelineService()
+            window.scanner = MarketAttentionScannerService()
         except Exception as exc:
-            print(f"⚠️ Полный сканер не инициализирован: {type(exc).__name__}: {exc}")
+            print(f"⚠️ Сканер не инициализирован: {type(exc).__name__}: {exc}")
     window.show()
-
     sys.exit(app.exec())
 
 

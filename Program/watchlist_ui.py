@@ -1,271 +1,124 @@
-"""Trader_7_12 Pro — canonical SPOT + separate macro watchlist UI."""
+"""Trader_7_12 Pro — professional read-only market-attention dashboard."""
 
 from html import escape
 
-from ui import (
-    TraderWindow,
-    DIRECTION_LABELS,
-    SETUP_LABELS,
-    SETUP_STATE_LABELS,
-    SESSION_LABELS,
-    _label,
-    _money,
-    _number,
-    _rs_label,
-    _activity_label,
-)
+from PySide6.QtCore import QThread
+
+from ui import TraderWindow, MarketScanWorker
 
 
-SIGNAL_STATE_LABELS = {
-    "WAIT": "ОЖИДАНИЕ",
-    "READY": "ГОТОВ — ТРИГГЕР АКТИВЕН",
-    "CONFIRMED": "ПОДТВЕРЖДЁН SPOT",
-    "ARMED": "ТРИГГЕР ВЗВЕДЁН — ЖДЁМ АКТИВАЦИЮ",
-}
-
-REASON_LABELS = {
-    "SPOT setup is not ready": "SPOT-сетап ещё не сформирован",
-    "trigger active; waiting for stability": "триггер активен; ожидаем стабильность",
-    "SPOT setup is armed and the directional trigger is active": "SPOT-сетап сформирован и направленный триггер активен",
-    "—": "—",
-}
-
-REJECTION_LABELS = {
-    "NO_DIRECTION": "нет подтверждённого направления LONG/SHORT",
-    "EVENT_RISK": "обнаружен event-risk",
-    "RS_UNAVAILABLE": "Relative Strength недоступен",
-    "RS_AGAINST_LONG": "RS не подтверждает LONG",
-    "RS_AGAINST_SHORT": "RS не подтверждает SHORT",
-    "WRONG_SPOT_GROUP": "инструмент не относится к целевой SPOT-группе",
-    "SETUP_DATA_ERROR": "ошибка или отсутствие данных для SPOT-сетапа",
-    "INVALID_SETUP_STATE": "некорректное состояние сетапа",
-    "INVALID_RADAR": "некорректный результат радара",
-}
-
-
-def _signal_reason(value):
-    text = str(value or "—")
-    return REASON_LABELS.get(text, text)
-
-
-def _rejection_reason(value):
-    text = str(value or "—")
-    return REJECTION_LABELS.get(text, text)
-
-
-def _scenario_grade(score):
+def _num(value, digits=2):
     try:
-        value = float(score or 0)
+        return f"{float(value):,.{digits}f}".replace(",", " ")
     except (TypeError, ValueError):
-        value = 0.0
-    if value >= 75:
-        return "ОЧЕНЬ СИЛЬНЫЙ"
-    if value >= 60:
-        return "СИЛЬНЫЙ"
-    if value >= 45:
-        return "СРЕДНИЙ"
-    return "СЛАБЫЙ"
+        return "—"
 
 
-def _action_label(signal_state, trigger_active):
-    state = str(signal_state or "WAIT").upper()
-    if state == "CONFIRMED":
-        return "СЦЕНАРИЙ ПОДТВЕРЖДЁН — РЕШЕНИЕ О ВХОДЕ ПРИНИМАЕТ ПОЛЬЗОВАТЕЛЬ"
-    if state == "READY":
-        return "СЦЕНАРИЙ ГОТОВ — ПРОВЕРИТЬ ТОЧКУ ВХОДА И РИСК"
-    if trigger_active:
-        return "НАБЛЮДАТЬ — ТРИГГЕР ЕСТЬ, НО НУЖНА СТАБИЛЬНОСТЬ"
-    return "ЖДАТЬ — ТРИГГЕР НЕ АКТИВЕН"
+def _money(value):
+    try:
+        value = float(value or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if abs(value) >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f} млрд ₽"
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:.1f} млн ₽"
+    return f"{value:,.0f} ₽".replace(",", " ")
 
 
 class WatchlistTraderWindow(TraderWindow):
-    """Read-only GUI bound to the SPOT-first watchlist contract."""
-
-    VERSION = "1.9"
+    VERSION = "2.0"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
-        self.setWindowTitle("Trader_7_12 Pro — радар возможностей")
-        self.subtitle.setText("SPOT • MONEY • НАПРАВЛЕНИЕ • RS • СЕТАП • ТРИГГЕР • ГОТОВНОСТЬ • MACRO WATCH")
+        self.setWindowTitle("Trader_7_12 Pro — Market Attention Radar")
+        self.subtitle.setText("MARKET ATTENTION • MONEY FLOW • RS • CURRENT SESSION • READ-ONLY")
+        self.result_box.setStyleSheet("font-size:15px;")
+
+    def run_market_scan(self):
+        if not self.scanner_enabled:
+            self.result_box.setText("БКС недоступен. Сканирование временно отключено.")
+            return
+        if self.scan_thread is not None and self.scan_thread.isRunning():
+            return
+        self.scan_button.setEnabled(False)
+        self._start_scan_animation()
+        try:
+            if self.scanner is None:
+                from services.market_attention_scanner_service import MarketAttentionScannerService
+                self.scanner = MarketAttentionScannerService()
+            self.scan_thread = QThread(self)
+            self.scan_worker = MarketScanWorker(self.scanner, limit=3)
+            self.scan_worker.moveToThread(self.scan_thread)
+            self.scan_thread.started.connect(self.scan_worker.run)
+            self.scan_worker.finished.connect(self._scan_finished)
+            self.scan_worker.failed.connect(self._scan_failed)
+            self.scan_worker.finished.connect(self.scan_thread.quit)
+            self.scan_worker.failed.connect(self.scan_thread.quit)
+            self.scan_thread.finished.connect(self._scan_thread_finished)
+            self.scan_thread.start()
+        except Exception as exc:
+            self._scan_failed(f"{type(exc).__name__}: {exc}")
+
+    def _card(self, item, role):
+        long_side = role == "LONG_CANDIDATE"
+        accent = "#8fd694" if long_side else "#e58b8b"
+        label = "LONG" if long_side else "SHORT"
+        relation = escape(str(item.get("market_relation") or "—"))
+        ticker = escape(str(item.get("spot_ticker") or "—"))
+        rs = item.get("relative_strength")
+        rs_text = "—" if rs is None else f"{float(rs):+.2f} п.п."
+        return f"""
+        <div style="border:1px solid #394149;border-radius:14px;padding:18px;margin:10px 0;background:#171b20;">
+          <div style="font-size:15px;color:{accent};font-weight:800;letter-spacing:1px;">{label} CANDIDATE</div>
+          <div style="font-size:32px;font-weight:900;margin-top:3px;">{ticker}</div>
+          <div style="color:#9fa8b1;margin:2px 0 14px;">{escape(str(item.get('market_group') or '—'))} • {relation}</div>
+          <table width="100%" cellspacing="0" cellpadding="3">
+            <tr><td><b>Цена</b></td><td align="right">{_num(item.get('price'),4)}</td><td><b>Изменение</b></td><td align="right" style="color:{accent};font-weight:800;">{_num(item.get('change_percent'),2)}%</td></tr>
+            <tr><td><b>RS</b></td><td align="right">{rs_text}</td><td><b>ATTENTION</b></td><td align="right" style="font-weight:800;">{_num(item.get('attention_score'),1)}/100</td></tr>
+            <tr><td><b>₽×V сессии</b></td><td align="right">{_money(item.get('session_money'))}</td><td><b>₽×V/мин</b></td><td align="right">{_money(item.get('recent_money_per_minute'))}</td></tr>
+            <tr><td><b>Ускорение потока</b></td><td align="right">{_num(item.get('money_acceleration'),1)}%</td><td><b>Источник</b></td><td align="right">BASE / SPOT</td></tr>
+          </table>
+        </div>"""
 
     def _scan_finished(self, results):
         self.scan_button.setEnabled(True)
         self._stop_scan_animation()
-
         info = self.session_service.get_session_info()
-        session = info.get("session", "CLOSED")
-        session_name = SESSION_LABELS.get(session, session)
-
-        diagnostics = {}
-        if self.scanner is not None:
-            diagnostics = getattr(self.scanner, "_last_scan_diagnostics", {}) or {}
-        if results and isinstance(results[0], dict):
-            diagnostics = results[0].get("scan_diagnostics") or diagnostics
-
-        results = [
-            item for item in (results or [])
-            if str(item.get("analysis_source") or "SPOT").upper() != "FUTURES_DIRECT"
+        diagnostics = getattr(self.scanner, "_last_scan_diagnostics", {}) or {}
+        results = results or []
+        benchmark = diagnostics.get("benchmark") or "—"
+        change = diagnostics.get("benchmark_change_percent")
+        market_text = "—" if change is None else f"{benchmark} {float(change):+.2f}%"
+        long_item = next((x for x in results if x.get("selection_role") == "LONG_CANDIDATE"), None)
+        short_item = next((x for x in results if x.get("selection_role") == "SHORT_CANDIDATE"), None)
+        watch = [x for x in results if x not in (long_item, short_item)]
+        html = [
+            "<div style='font-family:\"Helvetica Neue\",Arial;color:#e6e9ed;'>",
+            f"<div style='font-size:12px;color:#89939d;letter-spacing:1px;'>TRADER_7_12 PRO • {info.get('date','—')} • МСК {info.get('time','—')}</div>",
+            f"<div style='font-size:22px;font-weight:800;margin-top:5px;'>{info.get('label','РЫНОК')}</div>",
+            f"<div style='font-size:14px;color:#aab2b9;margin:4px 0 14px;'>MARKET BENCHMARK: <b>{escape(market_text)}</b> • текущая сессия</div>",
         ]
-
-        lines = [
-            "<pre style='font-family:Menlo,Monaco,monospace;font-size:14px;color:#dfe3e7'>",
-            "═" * 86,
-            "TRADER_7_12 PRO — РАДАР ВОЗМОЖНОСТЕЙ",
-            "═" * 86,
-            "",
-            f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
-            "",
-            "ГДЕ ДЕНЬГИ • ГДЕ СИЛА/СЛАБОСТЬ • ГДЕ СФОРМИРОВАЛСЯ SPOT-СЦЕНАРИЙ",
-            "",
-        ]
-
-        leaders = diagnostics.get("active_money_leaders", []) if diagnostics else []
-        if leaders:
-            lines.extend([
-                "",
-                "████  TOP ACTIVE MONEY — TQBR  ████",
-                "",
-                f"{'RANK':>4}  {'TICKER':<10} {'SESSION ₽×V':>18} {'₽×V/МИН':>16}",
-                "-" * 58,
-            ])
-            for row in leaders:
-                lines.append(
-                    f"{int(row.get('rank') or 0):>4}  "
-                    f"{escape(str(row.get('spot_ticker') or '—')):<10} "
-                    f"{_money(row.get('spot_session_money')):>18} "
-                    f"{_money(row.get('spot_money_per_minute')):>16}"
-                )
-            lines.extend([
-                "",
-                "Это текущая денежная активность рынка. Она НЕ является сигналом LONG/SHORT.",
-                "Следующий этап: направление → RS → сетап → триггер → стабильность.",
-                "",
-                "─" * 86,
-            ])
-
-        macro_watch = diagnostics.get("macro_watch", []) if diagnostics else []
-        if macro_watch:
-            lines.extend([
-                "",
-                "████  MACRO / FUTURES WATCH — ОТДЕЛЬНО  ████",
-                "",
-                "Это наблюдение за OIL/GOLD/GAS/FX. Эти контракты НЕ являются SPOT-кандидатами основного рейтинга.",
-                "",
-            ])
-            for row in macro_watch:
-                direction = _label(DIRECTION_LABELS, row.get("direction"))
-                lines.append(
-                    f"{int(row.get('rank') or 0):>3}. "
-                    f"{escape(str(row.get('ticker') or '—')):<10} "
-                    f"{direction:<8} "
-                    f"money={_money(row.get('session_money')):>16} "
-                    f"pace={_money(row.get('money_per_minute')):>12} "
-                    f"score={_number(row.get('score'), 1):>6}"
-                )
-            lines.extend([
-                "",
-                "MACRO/FUTURES WATCH не участвует в SPOT trade ranking и не даёт торговую команду.",
-                "─" * 86,
-            ])
-
-        if not results:
-            lines.extend([
-                "",
-                "НЕТ SPOT-КАНДИДАТОВ В СПИСКЕ НАБЛЮДЕНИЯ",
-                "",
-                "В текущей сессии нет SPOT-активов, прошедших обязательные проверки отбора.",
-                "Но TOP ACTIVE MONEY выше показывает, где сейчас находится основная активность.",
-            ])
-        else:
-            for idx, item in enumerate(results, start=1):
-                source_label = "SPOT / TQBR"
-                direction = _label(DIRECTION_LABELS, item.get("direction"))
-                setup = _label(SETUP_LABELS, item.get("setup"))
-                setup_state = _label(SETUP_STATE_LABELS, item.get("setup_state"))
-                signal_state_raw = str(item.get("signal_state") or "WAIT").upper()
-                signal_state = SIGNAL_STATE_LABELS.get(signal_state_raw, "ОЖИДАНИЕ")
-                rs = _rs_label(item)
-                opportunity = item.get("opportunity_score", item.get("session_rank_score", 0))
-                trigger_present = bool(item.get("trigger_present"))
-                trigger_active = bool(item.get("trigger_active"))
-                activity_label = _activity_label(item)
-
-                lines.extend([
-                    "",
-                    f"████  #{idx}  {escape(str(item.get('spot_ticker') or '—'))}  ████",
-                    f"ИСТОЧНИК:           {source_label}",
-                    f"НАПРАВЛЕНИЕ:       {direction}",
-                    f"ОЦЕНКА ВОЗМОЖНОСТИ: {_number(opportunity, 1)} / 100",
-                    f"СИЛА СЦЕНАРИЯ:     {_scenario_grade(opportunity)}",
-                    f"ОЦЕНКА СЕССИИ:     {_number(item.get('session_rank_score'), 1)} / 100",
-                    f"RS:                 {rs}",
-                    f"АКТИВНОСТЬ:         {activity_label}",
-                    f"СЕТАП:              {setup}",
-                    f"СОСТОЯНИЕ СЕТАПА:   {setup_state}",
-                    f"СОСТОЯНИЕ СИГНАЛА:  {signal_state}",
-                    f"РЕКОМЕНДАЦИЯ:       {_action_label(signal_state_raw, trigger_active)}",
-                    "",
-                    f"ТИКЕР:              {escape(str(item.get('spot_ticker') or '—'))}",
-                    f"SPOT ЦЕНА:          {_number(item.get('spot_price'), 4)}",
-                    f"SPOT СРЕДНИЙ ₽×V:   {_money(item.get('spot_average_daily_money'))}",
-                    f"SPOT СЕССИЯ ₽×V:    {_money(item.get('spot_money_volume'))}",
-                    f"SPOT ₽×V/МИН:       {_money(item.get('spot_money_per_minute'))}",
-                    f"ИЗМЕНЕНИЕ SPOT:     {_number(item.get('spot_change_percent'), 2)}%",
-                    f"RS:                 {_number(item.get('relative_strength'), 3)} п.п.",
-                    f"RS SCORE:           {_number(item.get('relative_strength_score'), 1)} / 100",
-                    "",
-                    f"ЛОКАЛЬНЫЙ МАКСИМУМ: {_number(item.get('previous_high'), 4)}",
-                    f"ЛОКАЛЬНЫЙ МИНИМУМ:  {_number(item.get('previous_low'), 4)}",
-                    f"ТРИГГЕР УРОВНЯ:     {_number(item.get('entry_trigger'), 4)}",
-                    f"ТРИГГЕР:            {'АКТИВЕН' if trigger_active else 'ОЖИДАЕТ'}",
-                    f"ТРИГГЕР УРОВЕНЬ:    {'ЕСТЬ' if trigger_present else 'НЕТ'}",
-                    f"SPOT ГОТОВ:         {'ДА' if signal_state_raw == 'READY' else 'НЕТ'}",
-                    f"SPOT ПОДТВЕРЖДЁН:   {'ДА' if signal_state_raw == 'CONFIRMED' else 'НЕТ'}",
-                    "",
-                    "ФЬЮЧЕРС:            ТОЛЬКО СОПОСТАВЛЕНИЕ ПОСЛЕ SPOT-ГОТОВНОСТИ",
-                    "ФЬЮЧЕРС ИЗ СИГНАЛА:  НЕ ИСПОЛЬЗУЕТСЯ",
-                    "ФЬЮЧЕРС В РЕЙТИНГЕ: НЕТ",
-                    f"ПРИЧИНА:             {escape(_signal_reason(item.get('signal_state_reason')))}",
-                    "",
-                    "─" * 86,
-                ])
-
-        if diagnostics:
-            lines.extend([
-                "",
-                "ДИАГНОСТИКА ОТБОРА:",
-                f"ALL_TQBR={diagnostics.get('stock_universe_total', 0)}  "
-                f"MONEY_SCREENED={diagnostics.get('stock_money_screened', 0)}  "
-                f"DEEP={diagnostics.get('stock_deep_analyzed', 0)}  "
-                f"MONEY_LEADERS={diagnostics.get('money_leader_count', 0)}  "
-                f"ACCEPTED={diagnostics.get('candidate_accepted', 0)}  "
-                f"REJECTED={diagnostics.get('candidate_rejected', 0)}  "
-                f"SPOT={diagnostics.get('spot_candidates', 0)}  "
-                f"MACRO_WATCH={diagnostics.get('macro_candidates', 0)}  "
-                f"SELECTED_SPOT={diagnostics.get('selected', 0)}  "
-                f"READY={diagnostics.get('ready', 0)}  "
-                f"CONFIRMED={diagnostics.get('confirmed', 0)}  "
-                f"WATCH={diagnostics.get('watch', 0)}  "
-                f"WAIT={diagnostics.get('wait', 0)}",
-            ])
-            rejections = diagnostics.get("candidate_rejections", {}) or {}
-            if rejections:
-                lines.append("ПРИЧИНЫ ОТКЛОНЕНИЯ: " + "; ".join(
-                    f"{_rejection_reason(key)}={value}" for key, value in sorted(rejections.items())
-                ))
-
-        lines.extend([
-            "",
-            "ЦЕПОЧКА: ALL TQBR → MONEY-FIRST → TOP ACTIVE → SPOT DIRECTION → RS → SETUP → TRIGGER → READINESS",
-            "",
-            "TOP ACTIVE MONEY показывает текущую активность и не является торговым сигналом.",
-            "Для акций направление, деньги, RS, сетап, триггер и готовность определяются только по SPOT.",
-            "MACRO/FUTURES DIRECT показывается отдельным наблюдательным слоем и не входит в SPOT-рейтинг.",
-            "Фьючерс для SPOT-кандидата — только справочное сопоставление; пользователь самостоятельно выбирает контракт.",
-            "ОЦЕНКА ВОЗМОЖНОСТИ — детерминированный рейтинг радарной модели, а не статистическая вероятность исхода.",
-            "Пользователь самостоятельно выбирает фьючерс, график, точку входа и риск.",
-            "Это информационный радар: исполнение ордеров, стоп-лосс, тейк-профит и расчёт позиции отсутствуют.",
-            "═" * 86,
-            "</pre>",
+        if long_item:
+            html.append(self._card(long_item, "LONG_CANDIDATE"))
+        if short_item:
+            html.append(self._card(short_item, "SHORT_CANDIDATE"))
+        if watch:
+            html.append("<div style='font-size:14px;font-weight:800;margin:16px 0 7px;color:#aab57d;'>ЕЩЁ В ПОЛЕ ЗРЕНИЯ</div>")
+            html.append("<table width='100%' cellspacing='0' cellpadding='7' style='background:#171b20;border:1px solid #394149;'><tr style='color:#89939d;'><th align='left'>Актив</th><th>Изм.</th><th>RS</th><th>₽×V/мин</th><th>Attention</th></tr>")
+            for item in watch:
+                rs = item.get("relative_strength")
+                rs_text = "—" if rs is None else f"{float(rs):+.2f}"
+                html.append(f"<tr><td><b>{escape(str(item.get('spot_ticker') or '—'))}</b></td><td align='right'>{_num(item.get('change_percent'),2)}%</td><td align='right'>{rs_text}</td><td align='right'>{_money(item.get('recent_money_per_minute'))}</td><td align='right'>{_num(item.get('attention_score'),1)}</td></tr>")
+            html.append("</table>")
+        if not long_item and not short_item:
+            html.append("<div style='padding:18px;border:1px solid #394149;border-radius:12px;background:#171b20;'>Недостаточно свежих данных для честного LONG/SHORT отбора. Сканер не подменяет отсутствующие данные фьючерсами.</div>")
+        html.extend([
+            "<div style='margin-top:16px;color:#89939d;font-size:12px;'>",
+            f"UNIVERSE {diagnostics.get('universe_total',0)} • ANALYZED {diagnostics.get('analyzed',0)} • STOCKS {diagnostics.get('stocks_total',0)}",
+            "<br>Сильнее рынка → LONG; слабее рынка → SHORT.",
+            "<br>Сканер только анализирует рынок. Исполнение сделок и выбор инструмента остаются за пользователем.",
+            "</div></div>",
         ])
-        self.result_box.setHtml("\n".join(lines))
+        self.result_box.setHtml("".join(html))
+'''
