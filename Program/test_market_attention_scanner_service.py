@@ -77,10 +77,10 @@ def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
     return scanner
 
 
-def _row(ticker, change, money):
+def _row(ticker, change, money, acceleration=0.0):
     return {"spot_ticker": ticker, "spot_class_code": "TQBR", "market_group": "STOCK", "change_percent": change,
             "session_money": money, "money_per_minute": money / 180.0, "recent_money": money / 3.0,
-            "recent_money_per_minute": money / 45.0, "money_acceleration": 0.0, "data_status": "AVAILABLE"}
+            "recent_money_per_minute": money / 45.0, "money_acceleration": acceleration, "data_status": "AVAILABLE"}
 
 
 def test_strong_on_up_market_is_long(monkeypatch):
@@ -260,3 +260,18 @@ def test_coverage_diagnostics_report_partial_scan(monkeypatch):
     assert scanner._last_scan_diagnostics["coverage_percent"] == 50.0
     assert scanner._last_scan_diagnostics["skipped_total"] == 1
     assert scanner._last_scan_diagnostics["skip_samples"]["INSUFFICIENT_M5"] == ["B"]
+
+
+def test_acceleration_score_is_relative_and_bounded(monkeypatch):
+    rows = [
+        _row("LOW", 0.2, 2_000_000, acceleration=-80.0),
+        _row("MID", 0.3, 2_000_000, acceleration=5.0),
+        _row("HIGH", 0.4, 2_000_000, acceleration=50.8),
+        _row("EXTREME", 0.5, 2_000_000, acceleration=5000.0),
+    ]
+    scanner = _scanner(monkeypatch, rows, 0.0)
+    result = scanner.scan(limit=4)
+    by_ticker = {row["spot_ticker"]: row for row in result}
+    assert by_ticker["LOW"]["attention_score"] < by_ticker["HIGH"]["attention_score"]
+    assert by_ticker["HIGH"]["attention_score"] < by_ticker["EXTREME"]["attention_score"]
+    assert all(0.0 <= row["attention_score"] <= 100.0 for row in result)
