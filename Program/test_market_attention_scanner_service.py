@@ -130,3 +130,21 @@ def test_benchmark_uses_live_quote_when_m5_is_missing(monkeypatch):
     assert ticker == "IMOEX2"
     assert code == "SNDX"
     assert round(change, 4) == 1.5
+
+
+def test_stale_benchmark_quote_is_rejected(monkeypatch):
+    class StaleQuoteAPI(FakeAPI):
+        def get_instruments_by_tickers(self, tickers):
+            return [{"ticker": "IMOEX2", "classCode": "SNDX"}]
+
+        def get_instruments(self, instrument_type="FUTURES"):
+            return []
+
+        def get_quotes(self, instruments):
+            return {"records": [{"ticker": "IMOEX2", "classCode": "SNDX", "open": 100.0, "last": 101.5,
+                                  "dateTime": "2026-09-02T06:00:00.000Z"}]}
+
+    session = FakeSession()
+    scanner = MarketAttentionScannerService(api=StaleQuoteAPI(), session_service=session, history_service=object())
+    monkeypatch.setattr(scanner, "_candles", lambda *args: [])
+    assert scanner._benchmark(session.get_trading_day(), session.now(), session.MORNING_START) == (None, None, None)
