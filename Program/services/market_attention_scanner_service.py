@@ -52,6 +52,7 @@ class MarketAttentionScannerService:
         spots = SpotUniverseService(api=self.api).load()
         universe = []
         seen = set()
+        seen_tickers = set()
         for row in spots:
             if row.get("spot_instrument_type") == "STOCK" and row.get("spot_class_code") == "TQBR":
                 item = dict(row)
@@ -59,6 +60,7 @@ class MarketAttentionScannerService:
                 key = (item["spot_ticker"], item["spot_class_code"])
                 if key not in seen:
                     seen.add(key)
+                    seen_tickers.add(item["spot_ticker"])
                     universe.append(item)
 
         alias_pool = tuple(dict.fromkeys(x for group in self.MACRO_ALIASES.values() for x in group))
@@ -70,11 +72,12 @@ class MarketAttentionScannerService:
             instrument_kind = str(row.get("type") or row.get("instrumentType") or row.get("securityType") or "").upper()
             if "FUT" in instrument_kind or "DERIV" in instrument_kind:
                 continue
-            if not ticker or not code or ticker in seen:
+            if not ticker or not code or ticker in seen_tickers:
                 continue
             for group, aliases in self.MACRO_ALIASES.items():
                 if ticker in {x.upper() for x in aliases}:
-                    seen.add(ticker)
+                    seen.add((ticker, code))
+                    seen_tickers.add(ticker)
                     universe.append({
                         "spot_ticker": ticker, "spot_class_code": code,
                         "spot_group": group, "market_group": group,
