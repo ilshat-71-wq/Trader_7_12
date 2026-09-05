@@ -127,17 +127,27 @@ class MarketAttentionScannerService:
                 "data_status": "AVAILABLE"}
 
     def _benchmark(self, trading_date, now, session_start):
-        for row in self._metadata_by_alias(self.BENCHMARKS):
+        """Resolve benchmark deterministically: IMOEX2 first, IRUS2 only as fallback."""
+        rows = self._metadata_by_alias(self.BENCHMARKS)
+        by_ticker = {}
+        for row in rows:
             if not isinstance(row, dict):
                 continue
             ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
             code = str(row.get("classCode") or row.get("class_code") or "").strip()
-            if not ticker or not code:
+            if ticker and code:
+                by_ticker[ticker] = (ticker, code)
+
+        start = datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE).astimezone(timezone.utc)
+        end = now.astimezone(timezone.utc)
+        for requested in self.BENCHMARKS:
+            instrument = by_ticker.get(requested)
+            if not instrument:
                 continue
-            candles = self._candles(ticker, code,
-                datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE).astimezone(timezone.utc),
-                now.astimezone(timezone.utc))
+            ticker, code = instrument
+            candles = self._candles(ticker, code, start, end)
             if len(candles) >= 2:
+                candles.sort(key=lambda x: str(x.get("time") or ""))
                 first = self._f(candles[0].get("close")); last = self._f(candles[-1].get("close"))
                 if first > 0 and last > 0:
                     return ticker, code, (last / first - 1.0) * 100.0
@@ -167,14 +177,9 @@ class MarketAttentionScannerService:
             return []
 
         session_start = self.SCAN_START
-        # Build metadata first. It is cheap and gives diagnostics even when
-        # the market-data endpoint is temporarily unavailable.
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
 
-        # Never spend hundreds of HTTP candle requests when the benchmark is
-        # unavailable: without it, the scanner is explicitly forbidden from
-        # producing directional LONG/SHORT selections.
         if benchmark_change is None:
             self._last_scan_diagnostics = {
                 "status": "BENCHMARK_UNAVAILABLE",
