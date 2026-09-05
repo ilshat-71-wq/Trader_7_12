@@ -62,7 +62,7 @@ COMPACT WATCHLIST
 
 Каждый анализируемый инструмент сравнивается с индексом рынка Московской биржи.
 
-Приоритет:
+Приоритет benchmark:
 
 ```text
 1. IMOEX2
@@ -75,9 +75,27 @@ COMPACT WATCHLIST
 RS = asset_current_session_return - benchmark_current_session_return
 ```
 
-Если оба benchmark недоступны или не имеют достаточных свежих M5 данных, directional LONG/SHORT selection запрещён.
+### Источник benchmark
 
-IMOEX2 является корректным benchmark для дополнительных сессий: MOEX отдельно рассчитывает его во время ДСВД; с 26.09.2026 расчёт семейства индексов будет расширен на все дополнительные сессии, поэтому архитектура сохраняет приоритет именно текущего IMOEX2. 
+Для выбранного benchmark применяется следующая лестница получения данных:
+
+```text
+BCS metadata
+      ↓
+BCS M5 candles
+      ↓ если M5 benchmark недоступен
+BCS current quote: session open → current price
+      ↓ если quote также непригоден
+benchmark unavailable
+```
+
+Quote fallback не является заменой индекса: используется тот же реальный `IMOEX2` или `IRUS2`, только другой способ получения его текущей сессионной доходности.
+
+Quote принимается только при наличии цены открытия, текущей цены и приемлемой свежести timestamp. Синтетический benchmark, futures proxy и вычисление индекса из компонентов запрещены.
+
+Если оба benchmark недоступны или не имеют достаточных свежих данных, directional LONG/SHORT selection запрещён.
+
+IMOEX2 является корректным benchmark для дополнительных сессий. MOEX указывает, что IMOEX2 рассчитывается во время дополнительных сессий; с 26.09.2026 расчёт индексов акций будет расширен на все дополнительные торговые сессии.
 
 ## 5. Market Attention
 
@@ -116,7 +134,7 @@ SHORT:
 
 MOEX проводит дополнительные торговые сессии выходного дня (ДСВД) на фондовом рынке в субботу/воскресенье с 09:50 до 19:00 МСК, кроме дат, объявленных Биржей неторговыми. ДСВД является частью следующего обычного торгового дня.
 
-Для 2026 года текущая календарная модель учитывает опубликованные изменения: 12–13 сентября и 24–25 октября остаются неторговыми выходными; 28–29 ноября стали неторговыми из-за переноса технических работ; 5–6 декабря, напротив, стали торговыми выходными.
+Для 2026 года текущая календарная модель учитывает опубликованные изменения: 12–13 сентября и 24–25 октября остаются неторговыми выходными; 28–29 ноября стали неторговыми из-за переноса технических работ; 5–6 декабря стали торговыми выходными.
 
 ```text
 обычный день:
@@ -194,6 +212,7 @@ futures confirmation
 synthetic SPOT
 synthetic RS
 FUTURES_DIRECT fallback
+synthetic benchmark
 ```
 
 Если реального base/spot источника нет: `data_status = UNAVAILABLE`.
@@ -228,6 +247,9 @@ git pull --ff-only
 - no futures instruments enter the universe;
 - GOLD/USDRUB use real SPOT metadata;
 - unavailable OIL/GAS are not replaced by futures;
+- BCS M5 benchmark is preferred;
+- BCS live quote can supply the same real benchmark when M5 is unavailable;
+- stale benchmark quote is rejected;
 - 05.09.2026 10:44 MSK → `WEEKEND_SESSION`;
 - 09:49:59 before DSVD → `CLOSED`;
 - 09:50:00 DSVD → `WEEKEND_SESSION`;
@@ -251,11 +273,12 @@ PYTHONPATH=Program python3 -m pytest -q Program
 
 1. Проверка фактического BCS metadata для `IMOEX2` / `IRUS2` и канонических base/spot-инструментов.
 2. Проверка живого M5-потока в торговый день и на ДСВД.
-3. Контроль, что каждый LONG/SHORT имеет benchmark и RS относительно `IMOEX2` или `IRUS2`.
-4. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
-5. Измерение полного scan time и сетевой нагрузки.
-6. При необходимости переход на BCS WebSocket для текущих M5 данных.
-7. Компактный output: 1 LONG, 1 SHORT, максимум 1 ATTENTION_WATCH.
+3. Проверка BCS live quote fallback для benchmark.
+4. Контроль, что каждый LONG/SHORT имеет benchmark и RS относительно `IMOEX2` или `IRUS2`.
+5. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
+6. Измерение полного scan time и сетевой нагрузки.
+7. При необходимости переход на BCS WebSocket для текущих M5 данных.
+8. Компактный output: 1 LONG, 1 SHORT, максимум 1 ATTENTION_WATCH.
 
 Все изменения сохраняют read-only contract, обновляют этот паспорт и проходят compile + полный pytest.
 
@@ -266,10 +289,12 @@ Repository:              ilshat-71-wq/Trader_7_12
 Branch:                  main ONLY
 Project MD:              Docs/PROJECT_PASSPORT.md ONLY
 Scanner:                 Market Attention Radar
+Pipeline version:        2.1
 Runtime data:            BASE/SPOT only
 Equity universe:         ALL TQBR (filtered by actual session availability)
 Macro groups:            GOLD / OIL / GAS / USDRUB
 Benchmark priority:      IMOEX2 → IRUS2 fallback
+Benchmark source:        BCS M5 → BCS live quote
 Benchmark mandatory:     YES for directional selection
 Primary timeframe:       M5
 Recent flow window:      15 min
@@ -287,4 +312,4 @@ BCS candle client:       shared / bounded concurrency / cache / timeout
 Git synchronization:     GitHub main is canonical
 ```
 
-**Главная цель версии 2.0:** быстро и честно показать, где находится максимальное текущее внимание рынка, и отделить сильнейший относительно `IMOEX2/IRUS2` актив от слабейшего — без фьючерсной логики и без ложных прокси.
+**Главная цель версии 2.1:** быстро и честно показать, где находится максимальное текущее внимание рынка, и отделить сильнейший относительно `IMOEX2/IRUS2` актив от слабейшего — без фьючерсной логики и без ложных прокси.
