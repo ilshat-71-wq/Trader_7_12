@@ -111,6 +111,31 @@ def test_weekend_scan_uses_dswd_start(monkeypatch):
     assert scanner._last_scan_diagnostics["scan_window"] == "09:50-13:00 MSK"
 
 
+def test_benchmark_uses_nested_bcs_class_code_and_m5(monkeypatch):
+    class NestedMetadataAPI(FakeAPI):
+        def get_instruments_by_tickers(self, tickers):
+            return [{"ticker": "IMOEX2", "boards": [{"classCode": "INDX", "exchange": "MOEX"}], "subTitle": "IMOEX2"}]
+
+        def get_instruments(self, instrument_type="FUTURES"):
+            return []
+
+    session = FakeSession()
+    scanner = MarketAttentionScannerService(api=NestedMetadataAPI(), session_service=session, history_service=object())
+    captured = {}
+
+    def candles(ticker, code, start, end):
+        captured["ticker"] = ticker
+        captured["code"] = code
+        return [{"time": "2026-09-02T07:00:00Z", "close": 100.0}, {"time": "2026-09-02T07:05:00Z", "close": 101.0}]
+
+    monkeypatch.setattr(scanner, "_candles", candles)
+    ticker, code, change = scanner._benchmark(session.get_trading_day(), session.now(), session.MORNING_START)
+    assert ticker == "IMOEX2"
+    assert code == "INDX"
+    assert round(change, 4) == 1.0
+    assert captured == {"ticker": "IMOEX2", "code": "INDX"}
+
+
 def test_benchmark_uses_live_quote_when_m5_is_missing(monkeypatch):
     class QuoteAPI(FakeAPI):
         def get_instruments_by_tickers(self, tickers):
