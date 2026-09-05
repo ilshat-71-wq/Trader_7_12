@@ -1,10 +1,11 @@
 import time
 import threading
 import requests
+from requests.adapters import HTTPAdapter
 
 
 class RequestHelper:
-    """Small HTTP helper with bounded retry and global request-start throttling."""
+    """Small HTTP helper with bounded retry, pooling and global request throttling."""
 
     MAX_RETRIES = 1
     RETRY_DELAY = 0.2
@@ -15,6 +16,7 @@ class RequestHelper:
     REQUEST_INTERVAL = 0.15
     _rate_lock = threading.Lock()
     _last_request_at = 0.0
+    _session_local = threading.local()
 
     RETRY_HTTP_CODES = {
         429,
@@ -33,6 +35,18 @@ class RequestHelper:
     )
 
     @classmethod
+    def _session(cls):
+        """Reuse TCP/TLS connections per worker thread instead of handshaking every request."""
+        session = getattr(cls._session_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8, max_retries=0)
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            cls._session_local.session = session
+        return session
+
+    @classmethod
     def _wait_for_request_slot(cls):
         """Rate-limit request starts without serializing response handling."""
         with cls._rate_lock:
@@ -45,12 +59,12 @@ class RequestHelper:
     @classmethod
     def _get_with_limit(cls, url, headers=None, params=None, timeout=None):
         cls._wait_for_request_slot()
-        return requests.get(url, headers=headers, params=params, timeout=timeout)
+        return cls._session().get(url, headers=headers, params=params, timeout=timeout)
 
     @classmethod
     def _post_with_limit(cls, url, headers=None, json=None, data=None, timeout=None):
         cls._wait_for_request_slot()
-        return requests.post(url, headers=headers, json=json, data=data, timeout=timeout)
+        return cls._session().post(url, headers=headers, json=json, data=data, timeout=timeout)
 
     @classmethod
     def post(cls, url, headers=None, json=None, data=None, timeout=None, max_retries=None):
