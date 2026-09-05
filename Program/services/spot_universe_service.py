@@ -77,6 +77,24 @@ class SpotUniverseService:
             return "MARKET_DRIVER"
         return "SPOT"
 
+    @staticmethod
+    def _weekend_flag(record):
+        """Read MOEX SECURITIES.WEEKENDSESSION from BCS metadata when exposed."""
+        if not isinstance(record, dict):
+            return None
+        for key in ("WEEKENDSESSION", "weekendSession", "weekend_session", "weekEndSession", "WeekEndSession"):
+            if key not in record:
+                continue
+            value = record.get(key)
+            if isinstance(value, bool):
+                return value
+            text = str(value).strip().upper()
+            if text in {"Y", "YES", "TRUE", "1", "T"}:
+                return True
+            if text in {"N", "NO", "FALSE", "0", "F"}:
+                return False
+        return None
+
     def _load_one(self, instrument_type):
         cached = self._cached(instrument_type)
         if cached is not None:
@@ -91,8 +109,15 @@ class SpotUniverseService:
         self._store(instrument_type, records)
         return instrument_type, records
 
-    def load(self):
-        """Return normalized SPOT instruments without consulting futures data."""
+    def load(self, weekend_session=False):
+        """Return normalized SPOT instruments without consulting futures data.
+
+        On MOEX DSWD, only securities explicitly admitted to the additional
+        weekend session are included. The exchange publishes this as
+        SECURITIES.WEEKENDSESSION. If an older BCS metadata response does not
+        expose the flag, the record is retained rather than silently discarded;
+        the scanner can then rely on actual M5 availability.
+        """
         if not getattr(self.api, "access_token", None):
             if not self.api.authorize():
                 return []
@@ -113,13 +138,19 @@ class SpotUniverseService:
                     class_code = self._class_code(item)
                     if not ticker or not class_code:
                         continue
-                    records.append({
+                    weekend_flag = self._weekend_flag(item) if kind == "STOCK" else None
+                    if weekend_session and kind == "STOCK" and weekend_flag is False:
+                        continue
+                    normalized = {
                         "spot_ticker": ticker,
                         "spot_class_code": class_code,
                         "spot_group": self._group(kind, item),
                         "spot_universe": "DYNAMIC_SPOT",
                         "spot_instrument_type": kind,
-                    })
+                    }
+                    if weekend_flag is not None:
+                        normalized["weekend_session"] = weekend_flag
+                    records.append(normalized)
 
         unique = {}
         for item in records:
