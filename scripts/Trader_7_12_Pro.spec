@@ -65,8 +65,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "Trader_7_12 Pro",
         "CFBundleName": "Trader_7_12 Pro",
-        "CFBundleShortVersionString": "2.2.3",
-        "CFBundleVersion": "2.2.3",
+        "CFBundleShortVersionString": "2.3.0",
+        "CFBundleVersion": "2.3.0",
         "CFBundleSourceCommit": BUILD_COMMIT,
         "LSMinimumSystemVersion": "12.0",
     },
