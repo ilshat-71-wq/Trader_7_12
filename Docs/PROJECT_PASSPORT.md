@@ -126,14 +126,25 @@ SHORT:
 
 На фондовой ДСВД доступны основные режимы TQBR/TQTF/TQIF/TQTY и SMAL, а конкретная бумага должна быть допущена к выходной сессии. MOEX прямо указывает, что статус допуска конкретной бумаги можно определить по полю `SECURITIES.WEEKENDSESSION`.
 
+**Критическое правило сканера:** окно `09:50–13:00 MSK` — только предпочтительное окно пользователя для наблюдения/торговли при повышенной активности. Оно **не ограничивает работу сканера**.
+
+Сканер работает в течение всей фактически открытой текущей торговой сессии, начиная с реального `session_start`, который предоставляет `MarketSessionService`, и до фактического закрытия этой сессии.
+
 ```text
 обычный день:
-  scan 07:00 → 13:00 MSK
+  MORNING: 07:00 → 10:00 MSK
+  MAIN:    10:00 → 19:00 MSK
+  EVENING: 19:00 → 23:50 MSK
 
 ДСВД:
-  trading 09:50 → 19:00 MSK
-  scan     09:50 → 13:00 MSK
+  trading/scanning: 09:50 → 19:00 MSK
+
+предпочтительное окно пользователя:
+  09:50 → 13:00 MSK
+  не является hard gate сканера
 ```
+
+После 13:00 при открытом рынке сканер продолжает работать; UI только показывает, что предпочтительное окно завершилось. До начала реальной сессии или после её закрытия сканирование не выполняется.
 
 На ДСВД `market_session = WEEKEND_SESSION`; сканер использует начало ДСВД `09:50`, а не обычные `07:00`.
 
@@ -167,6 +178,8 @@ pipeline_version
 ## 9. UI
 
 Главный экран — компактный dashboard с двумя основными карточками LONG/SHORT и коротким списком остальных активных инструментов. Диагностика не должна занимать главный экран.
+
+Предпочтительное окно `09:50–13:00 MSK` отображается отдельно и не используется как ограничение сканирования.
 
 ## 10. BCS HTTP / сетевой слой
 
@@ -250,6 +263,8 @@ git pull --ff-only
 - 28.11.2026 → `CLOSED`;
 - 05.12.2026 → `WEEKEND_SESSION`;
 - weekend scanner uses `09:50` as session start;
+- scanner continues after 13:00 while the current market session remains open;
+- preferred 09:50–13:00 window is diagnostic/UI information only and never a scan hard gate;
 - candle resilience uses bounded retry and connection pooling;
 - read-only scanner contract remains intact.
 
@@ -271,6 +286,7 @@ PYTHONPATH=Program python3 -m pytest -q Program
 7. If HTTP coverage remains unstable, evaluate BCS WebSocket/streaming current-session data rather than hiding missing data.
 8. Measure full scan time and network load.
 9. Compact output: 1 LONG, 1 SHORT, maximum 1 ATTENTION_WATCH.
+10. Verify that scanning continues after 13:00 during an open MAIN/EVENING session.
 
 ## 16. Current checkpoint
 
@@ -279,7 +295,7 @@ Repository:              ilshat-71-wq/Trader_7_12
 Branch:                  main ONLY
 Project MD:              Docs/PROJECT_PASSPORT.md ONLY
 Scanner:                 Market Attention Radar
-Pipeline version:        2.2
+Pipeline version:        2.2.2
 Runtime data:            BASE/SPOT only
 Equity universe:         ALL TQBR, DSWD filtered by WEEKENDSESSION
 Macro groups:            GOLD / OIL / GAS / USDRUB
@@ -289,9 +305,9 @@ IMOEX2 class code:       INDX (including nested boards[].classCode)
 Benchmark mandatory:     YES for directional selection
 Primary timeframe:       M5
 Recent flow window:      15 min
-Regular scan window:     07:00 → 13:00 MSK
-Weekend scan window:     09:50 → 13:00 MSK
-Weekend session:         WEEKEND_SESSION
+Current-session scanning: FULL OPEN SESSION → actual close
+Preferred window:        09:50 → 13:00 MSK (NOT a hard gate)
+Weekend session:         WEEKEND_SESSION 09:50 → 19:00 MSK
 Selection:               strongest + weakest vs market
 Output:                  LONG + SHORT + compact watchlist
 Closed market:           explicit MARKET_CLOSED, no M5 scan
@@ -313,4 +329,5 @@ Git synchronization:     GitHub main is canonical
 - First broad DSWD run suffered HTTP 429 burst load and produced only partial coverage (`ANALYZED 79/263`); that result was rejected as incomplete.
 - Global request-start throttling was added; subsequent run reached `ANALYZED 197/263` and eliminated the previous mass 429 pattern, but still showed transient SSL failures.
 - Current remediation adds per-worker HTTP connection pooling and uses the MOEX `WEEKENDSESSION` eligibility flag to prevent non-trading TQBR securities from entering the DSWD scan.
-- The next live run is the acceptance test: it must demonstrate that the reduced DSWD-eligible universe is being used and that remaining M5 coverage is materially higher without burst 429 or widespread transient SSL failures.
+- Scanner 2.2.2 removes the erroneous 13:00 hard gate: `09:50–13:00` is now only the user's preferred activity window, while scanning follows the full current open market session.
+- Regression coverage now explicitly verifies continued scanning after 13:00 during an open MAIN session.
