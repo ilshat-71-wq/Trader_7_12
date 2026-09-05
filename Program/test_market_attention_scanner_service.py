@@ -72,7 +72,7 @@ def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
 def test_strong_on_up_market_is_market_leader(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", 0.2, 1_900_000)], 0.7)
     result = scanner.scan(limit=2)
-    assert result[0]["selection_role"] == "LONG_CANDIDATE"
+    assert result[0]["selection_role"] == "MARKET_LEADER"
     assert result[0]["spot_ticker"] == "STRONG"
     assert result[0]["relative_strength"] == 1.1
 
@@ -80,20 +80,20 @@ def test_strong_on_up_market_is_market_leader(monkeypatch):
 def test_weak_on_up_market_is_market_laggard(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", -0.4, 1_900_000)], 0.7)
     result = scanner.scan(limit=2)
-    assert any(x["selection_role"] == "SHORT_CANDIDATE" and x["spot_ticker"] == "WEAK" for x in result)
+    assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
 
 
 def test_strong_on_down_market_is_market_leader(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 0.4, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
     result = scanner.scan(limit=2)
-    assert result[0]["selection_role"] == "LONG_CANDIDATE"
+    assert result[0]["selection_role"] == "MARKET_LEADER"
     assert result[0]["relative_strength"] == 1.0
 
 
 def test_weak_on_down_market_is_market_laggard(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", -0.1, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
     result = scanner.scan(limit=2)
-    assert any(x["selection_role"] == "SHORT_CANDIDATE" and x["spot_ticker"] == "WEAK" for x in result)
+    assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
 
 
 def test_tiny_relative_strength_is_not_directional(monkeypatch):
@@ -171,7 +171,7 @@ def test_acceleration_uses_equal_windows():
 def test_low_absolute_liquidity_cannot_be_directional(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("LIQUID", 1.0, 2_000_000), _row("THIN", -1.5, 500_000)], 0.0)
     result = scanner.scan(limit=3)
-    assert any(x["spot_ticker"] == "LIQUID" and x["selection_role"] == "LONG_CANDIDATE" for x in result)
+    assert any(x["spot_ticker"] == "LIQUID" and x["selection_role"] == "MARKET_LEADER" for x in result)
     assert all(x["spot_ticker"] != "THIN" for x in result)
     assert scanner._last_scan_diagnostics["liquidity_filtered"] == 1
 
