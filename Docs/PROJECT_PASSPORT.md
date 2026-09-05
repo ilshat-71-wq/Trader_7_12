@@ -1,6 +1,6 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 02.09.2026  
+**Дата актуализации:** 05.09.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main`  
 **Статус:** production-oriented read-only market-attention scanner
@@ -251,7 +251,20 @@ python3 -m compileall -q Program
 PYTHONPATH=Program python3 -m pytest -q Program
 ```
 
-## 15. Current checkpoint
+## 15. Production validation focus
+
+Следующий этап развития — не расширение universe и не добавление фьючерсной логики. Приоритет:
+
+1. Проверка фактического BCS metadata для IMOEX2 / IRUS2 и каждого канонического base/spot-инструмента.
+2. Проверка живого M5-потока в день торгов: цена, change, money_volume, recent 15-minute ₽×V/min.
+3. Контроль того, что LONG/SHORT появляются только при доступном benchmark.
+4. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
+5. Измерение времени полного скана на iMac и исключение лишних сетевых запросов.
+6. Сохранение компактного output: 1 LONG, 1 SHORT и максимум 1 ATTENTION_WATCH.
+
+Все изменения должны сохранять read-only contract и проходить compile + полный pytest.
+
+## 16. Current checkpoint
 
 ```text
 Repository:              ilshat-71-wq/Trader_7_12
