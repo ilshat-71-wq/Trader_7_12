@@ -2,6 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from services.market_attention_scanner_service import MarketAttentionScannerService
+from services.spot_universe_service import SpotUniverseService
 
 
 class FakeAPI:
@@ -173,3 +174,19 @@ def test_stale_benchmark_quote_is_rejected(monkeypatch):
     scanner = MarketAttentionScannerService(api=StaleQuoteAPI(), session_service=session, history_service=object())
     monkeypatch.setattr(scanner, "_candles", lambda *args: [])
     assert scanner._benchmark(session.get_trading_day(), session.now(), session.MORNING_START) == (None, None, None)
+
+
+def test_weekend_universe_respects_moex_weekend_session_flag():
+    class WeekendMetadataAPI(FakeAPI):
+        def get_instruments(self, instrument_type="FUTURES"):
+            if instrument_type != "STOCK":
+                return []
+            return [
+                {"ticker": "WEEKEND_Y", "boards": [{"classCode": "TQBR", "exchange": "MOEX"}], "WEEKENDSESSION": "Y"},
+                {"ticker": "WEEKEND_N", "boards": [{"classCode": "TQBR", "exchange": "MOEX"}], "WEEKENDSESSION": "N"},
+            ]
+
+    universe = SpotUniverseService(api=WeekendMetadataAPI()).load(weekend_session=True)
+    tickers = {row["spot_ticker"] for row in universe}
+    assert "WEEKEND_Y" in tickers
+    assert "WEEKEND_N" not in tickers
