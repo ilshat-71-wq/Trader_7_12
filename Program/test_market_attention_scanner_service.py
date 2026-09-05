@@ -165,3 +165,20 @@ def test_acceleration_uses_equal_windows():
     scanner.history = History()
     row = scanner._analyze_one({"spot_ticker": "TEST", "spot_class_code": "TQBR"}, FakeSession().get_trading_day(), time(7, 0), datetime(2026, 9, 2, 7, 30, tzinfo=FakeSession.TIMEZONE))
     assert round(row["money_acceleration"], 1) == 100.0
+
+
+def test_low_absolute_liquidity_cannot_be_directional(monkeypatch):
+    scanner = _scanner(monkeypatch, [_row("LIQUID", 1.0, 2_000_000), _row("THIN", -1.5, 500_000)], 0.0)
+    result = scanner.scan(limit=3)
+    assert any(x["spot_ticker"] == "LIQUID" and x["selection_role"] == "LONG_CANDIDATE" for x in result)
+    assert all(x["spot_ticker"] != "THIN" for x in result)
+    assert scanner._last_scan_diagnostics["liquidity_filtered"] == 1
+
+
+def test_percentile_cannot_rescue_low_liquidity(monkeypatch):
+    rows = [_row("STRONG_THIN", 3.0, 600_000), _row("WEAK_THIN", -3.0, 500_000), _row("LIQUID", 0.2, 2_000_000)]
+    scanner = _scanner(monkeypatch, rows, 0.0)
+    result = scanner.scan(limit=3)
+    assert all(x["spot_ticker"] != "STRONG_THIN" for x in result)
+    assert all(x["spot_ticker"] != "WEAK_THIN" for x in result)
+    assert scanner._last_scan_diagnostics["liquidity_filtered"] == 2
