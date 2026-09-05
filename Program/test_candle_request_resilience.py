@@ -57,9 +57,16 @@ def test_candle_request_uses_bounded_retry_profile():
         RequestHelper.get = staticmethod(original)
 
 
+def test_request_helper_has_connection_pool_and_rate_limit():
+    assert RequestHelper.REQUEST_INTERVAL >= 0.1
+    assert hasattr(RequestHelper, "_session_local")
+
+
 if __name__ == "__main__":
     test_candle_cache_reuses_equivalent_requests()
     print("PASS test_candle_cache_reuses_equivalent_requests")
     test_candle_request_uses_bounded_retry_profile()
     print("PASS test_candle_request_uses_bounded_retry_profile")
+    test_request_helper_has_connection_pool_and_rate_limit()
+    print("PASS test_request_helper_has_connection_pool_and_rate_limit")
     print("ALL TESTS PASSED")
