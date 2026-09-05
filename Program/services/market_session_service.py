@@ -1,11 +1,11 @@
-"""Trader_7_12 Pro — Moscow exchange futures session clock."""
+"""Trader_7_12 Pro — Moscow market session clock for the read-only scanner."""
 
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 
 class MarketSessionService:
-    """Single source of truth for current MOEX futures session."""
+    """Single source of truth for current Moscow market session."""
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
     PRE_OPEN_START = time(6, 50)
