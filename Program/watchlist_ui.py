@@ -27,7 +27,7 @@ def _money(value):
 
 
 class WatchlistTraderWindow(TraderWindow):
-    VERSION = "2.2"
+    VERSION = "2.2.1"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -87,6 +87,27 @@ class WatchlistTraderWindow(TraderWindow):
         info = self.session_service.get_session_info()
         diagnostics = getattr(self.scanner, "_last_scan_diagnostics", {}) or {}
         results = results or []
+        status = str(diagnostics.get("status") or "").upper()
+        if status == "OUTSIDE_SCAN_WINDOW":
+            scan_window = escape(str(diagnostics.get("scan_window") or "—"))
+            session = escape(str(diagnostics.get("session") or "CURRENT SESSION"))
+            html = [
+                "<div style='font-family:\"Helvetica Neue\",Arial;color:#e6e9ed;'>",
+                f"<div style='font-size:12px;color:#89939d;letter-spacing:1px;'>TRADER_7_12 PRO v{self.VERSION} • {info.get('date','—')} • МСК {info.get('time','—')}</div>",
+                f"<div style='font-size:22px;font-weight:800;margin-top:5px;'>{info.get('label','РЫНОК')}</div>",
+                "<div style='font-size:14px;color:#aab2b9;margin:4px 0 14px;'>MARKET BENCHMARK: <b>—</b> • сканирование не выполнялось</div>",
+                "<div style='padding:20px;border:1px solid #394149;border-radius:12px;background:#171b20;'>",
+                "<div style='font-size:18px;font-weight:800;color:#cbd1d7;'>ОКНО СКАНИРОВАНИЯ ЗАКРЫТО</div>",
+                f"<div style='margin-top:10px;color:#aab2b9;'>Сессия: <b>{session}</b></div>",
+                f"<div style='margin-top:5px;color:#aab2b9;'>Доступное окно: <b>{scan_window}</b></div>",
+                "<div style='margin-top:12px;color:#89939d;'>Рыночные данные не анализировались. LONG/SHORT не формировались.</div>",
+                "</div>",
+                "<div style='margin-top:16px;color:#89939d;font-size:12px;'>Сканер работает только в установленном окне текущей торговой сессии.<br>Фьючерсы не используются как замена базовым инструментам.</div>",
+                "</div>",
+            ]
+            self.result_box.setHtml("".join(html))
+            return
+
         benchmark = diagnostics.get("benchmark") or "—"
         change = diagnostics.get("benchmark_change_percent")
         market_text = "—" if change is None else f"{benchmark} {float(change):+.2f}%"
