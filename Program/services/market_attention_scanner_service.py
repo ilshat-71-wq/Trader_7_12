@@ -12,12 +12,12 @@ from services.relative_strength_service import RelativeStrengthService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.2"
+    VERSION = "2.2.2"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     SCAN_START = time(7, 0)
-    WEEKEND_SCAN_START = time(9, 50)
-    SCAN_END = time(13, 0)
+    PREFERRED_START = time(9, 50)
+    PREFERRED_END = time(13, 0)
     BENCHMARKS = ("IMOEX2", "IRUS2")
     MACRO_ALIASES = {
         "GOLD": ("GLDRUB_TOM",),
@@ -262,24 +262,27 @@ class MarketAttentionScannerService:
 
         if not self.session.is_market_open(now):
             self._last_scan_diagnostics = {"status": "MARKET_CLOSED", "session": "CLOSED", "trading_date": str(trading_date),
-                                            "scan_window": "07:00-13:00 MSK", "universe_total": 0, "stocks_total": 0,
-                                            "analyzed": 0, "benchmark": None, "data_policy": "SPOT_BASE_ONLY_NO_FUTURES"}
+                                            "scan_window": "ВСЯ ТЕКУЩАЯ ТОРГОВАЯ СЕССИЯ", "preferred_window": "09:50-13:00 MSK",
+                                            "universe_total": 0, "stocks_total": 0, "analyzed": 0, "benchmark": None,
+                                            "data_policy": "SPOT_BASE_ONLY_NO_FUTURES"}
             return []
 
-        scan_start = self.WEEKEND_SCAN_START if session_name == "WEEKEND_SESSION" else self.SCAN_START
-        scan_window = f"{scan_start.strftime('%H:%M')}-{self.SCAN_END.strftime('%H:%M')} MSK"
-        if now.time() < scan_start or now.time() >= self.SCAN_END:
-            self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "session": session_name, "scan_window": scan_window}
+        session_start = self.session.get_session_start(now)
+        if session_start is None:
+            self._last_scan_diagnostics = {"status": "MARKET_CLOSED", "session": session_name}
             return []
+
+        preferred = self.PREFERRED_START <= now.time() < self.PREFERRED_END
+        scan_window = f"{session_start.strftime('%H:%M')}-до закрытия MSK"
 
         universe = self.build_universe()
-        benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, scan_start)
+        benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
         if benchmark_change is None:
             self._last_scan_diagnostics = {
                 "status": "BENCHMARK_UNAVAILABLE", "session": session_name, "trading_date": str(trading_date),
-                "scan_window": scan_window, "universe_total": len(universe),
-                "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"), "analyzed": 0,
-                "benchmark": None, "benchmark_class_code": benchmark_code,
+                "scan_window": scan_window, "preferred_window": "09:50-13:00 MSK", "preferred_window_active": preferred,
+                "universe_total": len(universe), "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
+                "analyzed": 0, "benchmark": None, "benchmark_class_code": benchmark_code,
                 "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE")
                                   for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
                 "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
@@ -288,7 +291,7 @@ class MarketAttentionScannerService:
 
         results = []
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
-            futures = [pool.submit(self._analyze_one, item, trading_date, scan_start, now) for item in universe]
+            futures = [pool.submit(self._analyze_one, item, trading_date, session_start, now) for item in universe]
             for future in as_completed(futures):
                 try:
                     row = future.result()
@@ -329,13 +332,13 @@ class MarketAttentionScannerService:
         for i, row in enumerate(selected, 1):
             row["rank"] = i
             row["pipeline_version"] = self.VERSION
+            row["preferred_window_active"] = preferred
         self._last_scan_diagnostics = {
             "status": "OK", "session": session_name, "trading_date": str(trading_date),
-            "scan_window": scan_window, "universe_total": len(universe),
-            "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
-            "analyzed": len(results), "benchmark": benchmark_ticker,
-            "benchmark_change_percent": benchmark_change, "selected": len(selected),
-            "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
+            "scan_window": scan_window, "preferred_window": "09:50-13:00 MSK", "preferred_window_active": preferred,
+            "universe_total": len(universe), "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
+            "analyzed": len(results), "benchmark": benchmark_ticker, "benchmark_change_percent": benchmark_change,
+            "selected": len(selected), "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "SHORT_CANDIDATE"), None),
             "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
