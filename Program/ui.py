@@ -1,4 +1,4 @@
-"""Trader_7_12 Pro — compact read-only market scanner UI."""
+"""Trader_7_12 Pro — compact read-only market-information radar UI."""
 
 from html import escape
 import math
@@ -10,8 +10,13 @@ from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QTextEdit, QV
 from services.market_attention_scanner_service import MarketAttentionScannerService
 from services.market_session_service import MarketSessionService
 
-DIRECTION_LABELS = {"LONG": "ЛОНГ", "SHORT": "ШОРТ", "NEUTRAL": "НЕЙТРАЛЬНО"}
-ROLE_LABELS = {"LONG_CANDIDATE": "LONG-КАНДИДАТ", "SHORT_CANDIDATE": "SHORT-КАНДИДАТ", "ATTENTION_WATCH": "НАБЛЮДЕНИЕ"}
+ROLE_LABELS = {
+    "LONG_CANDIDATE": "ЛИДЕР РЫНКА",
+    "SHORT_CANDIDATE": "АУТСАЙДЕР РЫНКА",
+    "MARKET_LEADER": "ЛИДЕР РЫНКА",
+    "MARKET_LAGGARD": "АУТСАЙДЕР РЫНКА",
+    "ATTENTION_WATCH": "ВЫСОКИЙ ТЕКУЩИЙ ИНТЕРЕС",
+}
 RS_LABELS = {"STRONGER": "СИЛЬНЕЕ РЫНКА", "WEAKER": "СЛАБЕЕ РЫНКА", "NEUTRAL": "НЕЙТРАЛЬНО", "UNAVAILABLE": "RS НЕДОСТУПЕН"}
 SESSION_LABELS = {"PRE_OPEN": "ПРЕ-ОТКРЫТИЕ", "MORNING": "УТРЕННЯЯ СЕССИЯ", "MAIN": "ОСНОВНАЯ СЕССИЯ", "EVENING": "ВЕЧЕРНЯЯ СЕССИЯ", "WEEKEND_SESSION": "ДСВД", "CLOSED": "РЫНОК ЗАКРЫТ"}
 SCAN_COLORS = ("#9fba5d", "#b7d96b", "#d0e58a", "#b7d96b")
@@ -30,10 +35,6 @@ def _money(value):
         return f"{float(value or 0):,.0f} ₽".replace(",", " ")
     except (TypeError, ValueError):
         return "—"
-
-
-def _direction(item):
-    return DIRECTION_LABELS.get(str(item.get("direction") or "NEUTRAL").upper(), "НЕЙТРАЛЬНО")
 
 
 def _role(item):
@@ -118,9 +119,9 @@ class MarketScanWorker(QObject):
 
 
 class TraderWindow(QWidget):
-    """Read-only D1-led SPOT radar with live Moscow session state."""
+    """Read-only D1-led SPOT market-information radar."""
     def __init__(self, scanner_enabled=True):
-        super().__init__(); self.setWindowTitle("Trader_7_12 Pro — SPOT-радар"); self.resize(1120, 780)
+        super().__init__(); self.setWindowTitle("Trader_7_12 Pro — Market Information Radar"); self.resize(1120, 780)
         self.scanner = MarketAttentionScannerService() if scanner_enabled else None; self.scanner_enabled = scanner_enabled
         self.scan_thread = None; self.scan_worker = None; self.session_service = MarketSessionService(); self.animation_step = 0
         self.clock_timer = QTimer(self); self.clock_timer.timeout.connect(self._update_session_header)
@@ -130,7 +131,7 @@ class TraderWindow(QWidget):
     def init_ui(self):
         self.setStyleSheet("""QWidget { background:#20252b; color:#e6e9ed; font-family:'Helvetica Neue',Arial,sans-serif; } QLabel { color:#e6e9ed; } QPushButton { background:#30373f; color:#f0f2f4; border:1px solid #46505a; border-radius:8px; padding:10px 18px; } QPushButton:hover { background:#38414a; } QPushButton:disabled { background:#30372e; border:1px solid #59634a; } QTextEdit { background:#171b20; color:#dfe3e7; border:1px solid #394149; border-radius:8px; padding:14px; }""")
         self.title = QLabel("TRADER_7_12 PRO"); self.title.setAlignment(Qt.AlignCenter); self.title.setStyleSheet("font-size:29px;font-weight:800;letter-spacing:1px;padding:8px")
-        self.subtitle = QLabel("D1 • ЛИКВИДНОСТЬ • RS • ПОТОК"); self.subtitle.setAlignment(Qt.AlignCenter); self.subtitle.setStyleSheet("font-size:13px;color:#89939d;padding:1px")
+        self.subtitle = QLabel("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • READ-ONLY"); self.subtitle.setAlignment(Qt.AlignCenter); self.subtitle.setStyleSheet("font-size:13px;color:#89939d;padding:1px")
         self.session_label = QLabel(); self.session_label.setAlignment(Qt.AlignCenter); self.session_label.setStyleSheet("font-size:20px;font-weight:700;color:#cbd1d7;padding:4px")
         self.clock_label = QLabel(); self.clock_label.setAlignment(Qt.AlignCenter); self.clock_label.setStyleSheet("font-size:14px;color:#9fa8b1;padding-bottom:4px")
         self.scan_button = QPushButton("●  СКАНИРОВАТЬ РЫНОК"); self.scan_button.setMinimumHeight(54); self.scan_button.clicked.connect(self.run_market_scan); self._set_scan_button_style()
@@ -177,18 +178,18 @@ class TraderWindow(QWidget):
                  f"АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} / {diagnostics.get('universe_total', 0)}",
                  f"BENCHMARK: {escape(str(diagnostics.get('benchmark') or '—'))}  •  D1: {diagnostics.get('daily_benchmark_days', 0)} свечей", ""]
         if not results:
-            lines += ["КВАЛИФИЦИРОВАННЫХ КАНДИДАТОВ НЕТ", "", "Сигнал не создаётся искусственно: обязательные D1/RS/flow-проверки не дали кандидата."]
+            lines += ["КВАЛИФИЦИРОВАННЫХ ЛИДЕРОВ / АУТСАЙДЕРОВ НЕТ", "", "Информационный критерий не выполнен: обязательные D1/RS/flow-проверки не дали результата."]
         else:
             for idx, item in enumerate(results, 1):
                 lines += ["", f"████  #{idx}  {escape(str(item.get('spot_ticker') or '—'))}  ████",
-                          f"РОЛЬ:               {_role(item)}", f"НАПРАВЛЕНИЕ:        {_direction(item)}",
+                          f"КЛАССИФИКАЦИЯ:     {_role(item)}",
                           f"D1:                  {_daily_label(item)}", f"D1 RS:               {_number(item.get('daily_relative_mean_pp'), 3)} п.п.",
                           f"ТЕКУЩИЙ RS:          {_number(item.get('relative_strength'), 3)} п.п.  •  {_rs_label(item)}",
-                          f"RS SCORE:            {_number(item.get('relative_strength_score'), 1)} / 100", f"DIRECTIONAL SCORE:   {_number(item.get('directional_score'), 1)} / 100",
+                          f"RS SCORE:            {_number(item.get('relative_strength_score'), 1)} / 100", f"INFORMATION SCORE:   {_number(item.get('directional_score'), 1)} / 100",
                           f"ЦЕНА:                {_number(item.get('price'), 4)}", f"ИЗМЕНЕНИЕ:           {_number(item.get('change_percent'), 2)}%",
                           f"СЕССИЯ ₽×V:          {_money(item.get('session_money'))}", f"₽×V / МИН:            {_money(item.get('money_per_minute'))}",
                           f"ПОСЛЕДНИЕ 15 МИН:    {_money(item.get('recent_money'))}", f"УСКОРЕНИЕ FLOW:      {_number(item.get('money_acceleration'), 1)}%", "─" * 82]
-        lines += ["", "READ-ONLY: ордера, position sizing и SL/TP отсутствуют.", "═" * 82, "</pre>"]
+        lines += ["", "READ-ONLY: программа только показывает рыночные данные и классификации.", "═" * 82, "</pre>"]
         self.result_box.setHtml("\n".join(lines))
 
     def _scan_failed(self, error):
