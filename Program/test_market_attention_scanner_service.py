@@ -55,6 +55,20 @@ class FakeWeekendSession(FakeSession):
         return self.WEEKEND_START
 
 
+class FakeAfternoonSession(FakeSession):
+    def now(self):
+        return datetime(2026, 9, 2, 14, 0, tzinfo=self.TIMEZONE)
+
+    def get_session(self):
+        return "MAIN"
+
+    def get_session_info(self):
+        return {"session": "MAIN"}
+
+    def get_session_start(self, value=None):
+        return self.MAIN_START
+
+
 def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
     scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=session or FakeSession(), history_service=object())
     monkeypatch.setattr(scanner, "build_universe", lambda: [dict(x) for x in rows])
@@ -118,6 +132,16 @@ def test_weekend_scan_uses_dswd_start(monkeypatch):
     assert captured["session_start"].strftime("%H:%M") == "09:50"
     assert scanner._last_scan_diagnostics["session"] == "WEEKEND_SESSION"
     assert scanner._last_scan_diagnostics["scan_window"] == "09:50-до закрытия MSK"
+
+
+def test_scanner_continues_after_preferred_window(monkeypatch):
+    session = FakeAfternoonSession()
+    scanner = _scanner(monkeypatch, [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)], 0.2, session=session)
+    result = scanner.scan(limit=2)
+    assert result
+    assert scanner._last_scan_diagnostics["session"] == "MAIN"
+    assert scanner._last_scan_diagnostics["scan_window"] == "10:00-до закрытия MSK"
+    assert scanner._last_scan_diagnostics["preferred_window_active"] is False
 
 
 def test_benchmark_uses_nested_bcs_class_code_and_m5(monkeypatch):
