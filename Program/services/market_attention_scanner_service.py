@@ -12,7 +12,7 @@ from services.relative_strength_service import RelativeStrengthService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.1"
+    VERSION = "2.2"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     SCAN_START = time(7, 0)
@@ -41,6 +41,37 @@ class MarketAttentionScannerService:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _metadata_ticker(row):
+        if not isinstance(row, dict):
+            return ""
+        return str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
+
+    @staticmethod
+    def _metadata_class_code(row):
+        """Extract BCS classCode from flat and nested metadata schemas."""
+        if not isinstance(row, dict):
+            return ""
+        code = str(row.get("classCode") or row.get("class_code") or "").strip()
+        if code:
+            return code
+        boards = row.get("boards")
+        if not isinstance(boards, list):
+            return ""
+        candidates = []
+        for board in boards:
+            if not isinstance(board, dict):
+                continue
+            board_code = str(board.get("classCode") or board.get("class_code") or "").strip()
+            if not board_code:
+                continue
+            exchange = str(board.get("exchange") or "").strip().upper()
+            candidates.append((exchange == "MOEX", board_code))
+        for is_moex, board_code in candidates:
+            if is_moex:
+                return board_code
+        return candidates[0][1] if candidates else ""
+
     def _metadata_by_alias(self, aliases):
         try:
             rows = self.api.get_instruments_by_tickers(list(aliases))
@@ -68,8 +99,8 @@ class MarketAttentionScannerService:
         for row in self._metadata_by_alias(alias_pool):
             if not isinstance(row, dict):
                 continue
-            ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
-            code = str(row.get("classCode") or row.get("class_code") or "").strip()
+            ticker = self._metadata_ticker(row)
+            code = self._metadata_class_code(row)
             instrument_kind = str(row.get("type") or row.get("instrumentType") or row.get("securityType") or "").upper()
             if "FUT" in instrument_kind or "DERIV" in instrument_kind:
                 continue
@@ -174,10 +205,8 @@ class MarketAttentionScannerService:
         rows = self._metadata_by_alias(self.BENCHMARKS)
         by_ticker = {}
         for row in rows:
-            if not isinstance(row, dict):
-                continue
-            ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
-            code = str(row.get("classCode") or row.get("class_code") or "").strip()
+            ticker = self._metadata_ticker(row)
+            code = self._metadata_class_code(row)
             if ticker and code:
                 by_ticker[ticker] = (ticker, code)
 
@@ -188,10 +217,8 @@ class MarketAttentionScannerService:
             except Exception:
                 index_rows = []
             for row in index_rows if isinstance(index_rows, list) else []:
-                if not isinstance(row, dict):
-                    continue
-                ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
-                code = str(row.get("classCode") or row.get("class_code") or "").strip()
+                ticker = self._metadata_ticker(row)
+                code = self._metadata_class_code(row)
                 if ticker in self.BENCHMARKS and code:
                     by_ticker[ticker] = (ticker, code)
 
