@@ -103,6 +103,14 @@ class WatchlistTraderWindow(TraderWindow):
         ]
         if status == "BENCHMARK_UNAVAILABLE":
             html.append("<div style='padding:18px;border:1px solid #394149;border-radius:12px;background:#171b20;'>Benchmark недоступен. LONG/SHORT не формируются до восстановления валидного рыночного benchmark.</div>")
+        elif status == "INSUFFICIENT_COVERAGE":
+            html.append(
+                "<div style='padding:18px;border:1px solid #6f5d3b;border-radius:12px;background:#211d17;'>"
+                f"Покрытие текущего скана недостаточно для честного LONG/SHORT отбора: <b>{_num(diagnostics.get('coverage_percent'),1)}%</b> "
+                f"при минимуме <b>{_num(diagnostics.get('coverage_required_percent'),1)}%</b>. "
+                "Направленные кандидаты намеренно не публикуются."
+                "</div>"
+            )
         elif long_item:
             html.append(self._card(long_item, "LONG_CANDIDATE"))
         if short_item:
@@ -122,6 +130,8 @@ class WatchlistTraderWindow(TraderWindow):
         html.extend([
             "<div style='margin-top:16px;color:#89939d;font-size:12px;'>",
             f"UNIVERSE {diagnostics.get('universe_total',0)} • ANALYZED {diagnostics.get('analyzed',0)} • STOCKS {diagnostics.get('stocks_total',0)}",
+            f"<br>Покрытие: {float(diagnostics.get('coverage_percent', 0) or 0):.1f}%"
+            + (f" • пропущено {diagnostics.get('skipped_total',0)}" if diagnostics.get('skipped_total') is not None else ""),
             f"<br>Предпочтительное окно 09:50–13:00 MSK: {preferred_text}.",
             "<br>Сканер работает весь период текущей торговой сессии; предпочтительное окно не ограничивает его работу.",
             "<br>Сильнее рынка → LONG; слабее рынка → SHORT.",
