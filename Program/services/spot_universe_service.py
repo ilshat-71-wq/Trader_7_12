@@ -109,7 +109,7 @@ class SpotUniverseService:
         self._store(instrument_type, records)
         return instrument_type, records
 
-    def load(self, weekend_session=False):
+    def load(self, weekend_session=None):
         """Return normalized SPOT instruments without consulting futures data.
 
         On MOEX DSWD, only securities explicitly admitted to the additional
@@ -118,6 +118,13 @@ class SpotUniverseService:
         expose the flag, the record is retained rather than silently discarded;
         the scanner can then rely on actual M5 availability.
         """
+        if weekend_session is None:
+            try:
+                from services.market_session_service import MarketSessionService
+                weekend_session = MarketSessionService().get_session() == "WEEKEND_SESSION"
+            except Exception:
+                weekend_session = False
+
         if not getattr(self.api, "access_token", None):
             if not self.api.authorize():
                 return []
