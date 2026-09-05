@@ -27,7 +27,7 @@ def _money(value):
 
 
 class WatchlistTraderWindow(TraderWindow):
-    VERSION = "2.0"
+    VERSION = "2.1"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -95,7 +95,7 @@ class WatchlistTraderWindow(TraderWindow):
         watch = [x for x in results if x not in (long_item, short_item)]
         html = [
             "<div style='font-family:\"Helvetica Neue\",Arial;color:#e6e9ed;'>",
-            f"<div style='font-size:12px;color:#89939d;letter-spacing:1px;'>TRADER_7_12 PRO • {info.get('date','—')} • МСК {info.get('time','—')}</div>",
+            f"<div style='font-size:12px;color:#89939d;letter-spacing:1px;'>TRADER_7_12 PRO v{self.VERSION} • {info.get('date','—')} • МСК {info.get('time','—')}</div>",
             f"<div style='font-size:22px;font-weight:800;margin-top:5px;'>{info.get('label','РЫНОК')}</div>",
             f"<div style='font-size:14px;color:#aab2b9;margin:4px 0 14px;'>MARKET BENCHMARK: <b>{escape(market_text)}</b> • текущая сессия</div>",
         ]
