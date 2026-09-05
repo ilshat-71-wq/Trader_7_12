@@ -3,7 +3,8 @@
 **Дата актуализации:** 05.09.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
-**Статус:** production-oriented read-only market-attention scanner
+**Статус:** production-oriented read-only market-attention scanner  
+**Версия pipeline:** 2.3.1
 
 ## 1. Назначение
 
@@ -69,11 +70,12 @@ BASE/SPOT UNIVERSE
 → CURRENT SESSION M5
 → PRICE / CHANGE / ₽×V / ₽×V-MIN
 → RECENT 15-MIN FLOW
+→ ABSOLUTE LIQUIDITY GATE
 → FLOW ACCELERATION
 → INTRADAY RS VS IMOEX2
 → RS MEANINGFULNESS FILTER
 → RS MAGNITUDE + ATTENTION RANKING
-→ D1 + DAILY-RS + INTRADAY-RS CONFIRMATION
+→ D1 + DAILY-RS + INTRADAY-RS + LIQUIDITY CONFIRMATION
 → STRONGEST LONG / WEAKEST SHORT
 → MAX 1 WATCH
 ```
@@ -114,7 +116,39 @@ Attention score:
 10% acceleration percentile
 ```
 
-## 7. Benchmark / Relative Strength
+## 7. Absolute liquidity gate
+
+Percentile ranking is **not** allowed to manufacture liquidity. An instrument must first demonstrate meaningful absolute current activity; only then may it compete on relative ranking.
+
+Production scanner-operational thresholds:
+
+```text
+MIN_MONEY_PER_MINUTE        = 8 000 ₽/min
+MIN_RECENT_MONEY_PER_MINUTE = 5 000 ₽/min
+```
+
+Both conditions are required:
+
+```text
+session ₽×V/min >= 8 000 ₽/min
+AND
+recent 15-min ₽×V/min >= 5 000 ₽/min
+```
+
+These are operational scanner gates, **not MOEX official liquidity classifications**. They are deliberately expressed in money-per-minute so that the rule is time-normalized and works during the morning, main, evening and DSWD sessions.
+
+A failed gate produces:
+
+```text
+liquidity_status = LOW_LIQUIDITY
+liquidity_gate   = false
+```
+
+Low-liquidity instruments remain visible in diagnostics but cannot become `LONG_CANDIDATE`, `SHORT_CANDIDATE` or `ATTENTION_WATCH`.
+
+Coverage is calculated before this gate, so low-liquidity instruments do not masquerade as technical/data failures and do not corrupt the 80% market-data coverage metric.
+
+## 8. Benchmark / Relative Strength
 
 Only the real market benchmark is allowed:
 
@@ -158,7 +192,7 @@ BCS metadata → BCS M5 candles → BCS live quote fallback → unavailable
 
 Only real IMOEX2/IRUS2 is allowed. Synthetic benchmark, futures proxy and component-reconstructed index are forbidden.
 
-## 8. Directional selection
+## 9. Directional selection
 
 An instrument is eligible for directional output only when **all** required gates agree:
 
@@ -167,16 +201,16 @@ LONG:
   completed D1 STRONG structure
   + consistent daily outperformance vs benchmark
   + current-session RS >= +0.10 pp
-  + sufficient current money/activity
+  + absolute liquidity gate PASS
 
 SHORT:
   completed D1 WEAK structure
   + consistent daily underperformance vs benchmark
   + current-session RS <= -0.10 pp
-  + sufficient current money/activity
+  + absolute liquidity gate PASS
 ```
 
-Ranking:
+Ranking is performed **after** all hard gates:
 
 ```text
 RS magnitude score = percentile(|current RS|)
@@ -193,7 +227,7 @@ Maximum output:
 
 No signal is manufactured to fill a card. If only one qualified side exists, only that side is returned. If none exists, no directional candidate is returned.
 
-## 9. Calendar / DSWD
+## 10. Calendar / DSWD
 
 Weekend is not automatically CLOSED.
 
@@ -213,7 +247,7 @@ No DSWD in 2026: 12–13 Sep, 24–25 Oct, 28–29 Nov. DSWD is scheduled for 05
 
 Preferred window `09:50–13:00 MSK` is diagnostic/UI information only, never a hard scan gate. Scanner follows the actual open session through close.
 
-## 10. Coverage gate
+## 11. Coverage gate
 
 Minimum production M5 coverage for directional output: **80%**.
 
@@ -230,9 +264,11 @@ selected = []
 
 Diagnostics expose coverage, skipped count, skip reasons and samples. Partial scan is never presented as a complete market result.
 
+Low-liquidity filtering is reported separately and does not reduce `analyzed` coverage.
+
 D1 availability is separately reported. If the benchmark has insufficient completed D1 history, directional output is forbidden.
 
-## 11. HTTP resilience
+## 12. HTTP resilience
 
 - One process-wide read-only BCS client.
 - `MAX_WORKERS = 6`.
@@ -242,7 +278,7 @@ D1 availability is separately reported. If the benchmark has insufficient comple
 - 429/SSL degradation must reduce coverage and remain visible in diagnostics.
 - If instability persists, evaluate BCS WebSocket/streaming rather than hiding missing data.
 
-## 12. Output / UI contract
+## 13. Output / UI contract
 
 Output includes:
 
@@ -253,117 +289,33 @@ relative_strength, relative_strength_status, market_relation,
 relative_strength_score, directional_score,
 session_money, money_per_minute, recent_money,
 recent_money_per_minute, money_acceleration, attention_score,
+liquidity_status, liquidity_gate,
 daily_structure, daily_structure_state,
 daily_relative_direction, daily_relative_mean_pp,
 daily_qualified, data_status, pipeline_version
 ```
 
-Roles: `LONG_CANDIDATE`, `SHORT_CANDIDATE`, `ATTENTION_WATCH`.
-
-## 13. Runtime safety
-
-Forbidden:
+Diagnostics additionally expose:
 
 ```text
-order execution
-position sizing
-SL/TP automation
-futures selection / confirmation
-synthetic SPOT
-synthetic RS
-FUTURES_DIRECT fallback
-synthetic benchmark
+liquidity_passed
+liquidity_filtered
+liquidity_min_money_per_minute
+liquidity_min_recent_money_per_minute
+skip_reasons[LOW_LIQUIDITY]
+skip_samples[LOW_LIQUIDITY]
 ```
 
-Refresh token is local only:
+## 14. Safety boundary
+
+The application is strictly read-only:
 
 ```text
-~/.config/Trader_7_12/bcs_refresh_token
-chmod 600
+NO ORDERS
+NO POSITION SIZING
+NO SL/TP
+NO TRADE EXECUTION
+NO AUTOMATIC ENTRY DECISION
 ```
 
-Secrets are not stored in Git.
-
-## 14. Regression contract
-
-Required tests cover:
-
-- 2–3 completed D1 candles;
-- all-green rising Highs/Lows → STRONG structure;
-- all-red falling Highs/Lows → WEAK structure;
-- mixed candles → neutral;
-- consistent daily outperformance → LONG confirmation;
-- consistent daily underperformance → SHORT confirmation;
-- mixed daily RS → no qualification;
-- current incomplete D1 excluded;
-- daily RS aligned by trading date, not array position;
-- D1 confirmation overrides contradictory intraday direction;
-- benchmark D1 unavailable → no directional output;
-- meaningful RS threshold ±0.10 pp;
-- RS magnitude participates in directional ranking;
-- IMOEX2 → IRUS2 fallback;
-- no benchmark → no directional output;
-- recent/current money attention ranking;
-- two complete 15-minute acceleration windows;
-- incomplete previous window → acceleration 0;
-- no futures in universe;
-- real GOLD/USDRUB SPOT;
-- OIL/GAS not replaced by futures;
-- M5 benchmark preferred to quote;
-- stale quote rejected;
-- nested `boards[].classCode` and IMOEX2 → `INDX`;
-- `WEEKENDSESSION=N` exclusion;
-- DSWD calendar boundaries including 05.09.2026;
-- full-session scanning after 13:00;
-- 80% coverage suppression;
-- read-only contract.
-
-Before live run:
-
-```bash
-python3 -m compileall -q Program
-PYTHONPATH=Program python3 -m pytest -q Program
-```
-
-## 15. Repository hygiene
-
-Only `main`. No working branches are created.
-
-`Docs/PROJECT_PASSPORT.md` is the **single canonical project MD/checkpoint**. GitHub `main` is canonical source.
-
-```bash
-git switch main
-git pull --ff-only origin main
-```
-
-Old runtime branches/services are not removed by name alone. Cleanup is performed only after import/dependency verification so that working functionality is not destroyed accidentally.
-
-## 16. Current checkpoint — 05.09.2026
-
-```text
-Pipeline version:        2.3.0
-Runtime:                 BASE/SPOT only
-Universe:                ALL TQBR + DSWD eligibility
-Macro:                   GOLD / OIL / GAS / USDRUB
-Benchmark:               IMOEX2 → IRUS2
-Benchmark source:        BCS M5 → BCS quote
-Daily benchmark:         completed D1
-Timeframes:              D1 direction + M5 flow/confirmation
-D1 window:               2–3 completed candles
-Recent flow:             15 min
-Acceleration:            2 complete comparable 15-min windows
-Meaningful RS floor:     ±0.10 percentage points
-Directional score:       60% RS magnitude + 40% attention
-Current-session scan:    FULL OPEN SESSION → actual close
-Preferred window:        09:50–13:00, NOT hard gate
-DSWD:                    09:50–19:00 MSK
-Coverage gate:           80%
-Output:                  LONG + SHORT + max 1 WATCH
-Futures analysis:        REMOVED
-Order execution:         ABSENT
-Read-only:               YES
-```
-
-## 17. Validation gate
-
-The canonical source state is the latest `main` commit. Acceptance requires local `compileall` + full `pytest` on the canonical checkout and successful GitHub Actions for the latest commit when CI is available. No arbitrary RS threshold below the documented 0.10 pp floor should be introduced without a separate specification decision.
+The scanner identifies market attention and directional candidates only. Final trading decisions remain outside the application.
