@@ -313,6 +313,7 @@ class MarketAttentionScannerService:
         recent_values = [self._f(x["recent_money_per_minute"]) for x in results]
         session_values = [self._f(x["session_money"]) for x in results]
         pace_values = [self._f(x["money_per_minute"]) for x in results]
+        acceleration_values = [self._f(x["money_acceleration"]) for x in results]
         for row in results:
             row["benchmark"] = benchmark_ticker or ""
             row["benchmark_change_percent"] = benchmark_change
@@ -321,7 +322,7 @@ class MarketAttentionScannerService:
             activity = self._percentile(self._f(row["recent_money_per_minute"]), recent_values)
             session_score = self._percentile(self._f(row["session_money"]), session_values)
             pace_score = self._percentile(self._f(row["money_per_minute"]), pace_values)
-            accel_score = max(0.0, min(100.0, 50.0 + self._f(row["money_acceleration"]) * 2.0))
+            accel_score = self._percentile(self._f(row["money_acceleration"]), acceleration_values)
             row["attention_score"] = round(0.45 * activity + 0.25 * session_score + 0.20 * pace_score + 0.10 * accel_score, 1)
             rs = row["relative_strength"]
             row["market_relation"] = "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
