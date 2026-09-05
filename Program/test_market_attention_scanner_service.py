@@ -275,3 +275,40 @@ def test_acceleration_score_is_relative_and_bounded(monkeypatch):
     assert by_ticker["LOW"]["attention_score"] < by_ticker["HIGH"]["attention_score"]
     assert by_ticker["HIGH"]["attention_score"] < by_ticker["EXTREME"]["attention_score"]
     assert all(0.0 <= row["attention_score"] <= 100.0 for row in result)
+
+
+def test_flow_acceleration_requires_two_complete_15_minute_windows():
+    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
+    candles = [
+        {"time": f"2026-09-02T{hour:02d}:{minute:02d}:00Z", "close": 100.0, "money_volume": money}
+        for hour, minute, money in [
+            (7, 0, 100.0),
+            (7, 5, 100.0),
+            (7, 10, 100.0),
+            (7, 15, 200.0),
+            (7, 20, 200.0),
+            (7, 25, 200.0),
+        ]
+    ]
+    item = {"spot_ticker": "TEST", "spot_class_code": "TQBR"}
+    row = scanner._analyze_one(item, datetime(2026, 9, 2).date(), FakeSession.MORNING_START,
+                               datetime(2026, 9, 2, 7, 12, tzinfo=FakeSession.TIMEZONE))
+    assert row["money_acceleration"] == 0.0
+
+
+def test_flow_acceleration_uses_equal_15_minute_windows():
+    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
+    candles = [
+        {"time": f"2026-09-02T07:{minute:02d}:00Z", "close": 100.0, "money_volume": money}
+        for minute, money in [(0, 100.0), (5, 100.0), (10, 100.0), (15, 200.0), (20, 200.0), (25, 200.0)]
+    ]
+
+    class History:
+        def load(self, *args, **kwargs):
+            return candles
+
+    scanner.history = History()
+    item = {"spot_ticker": "TEST", "spot_class_code": "TQBR"}
+    row = scanner._analyze_one(item, datetime(2026, 9, 2).date(), FakeSession.MORNING_START,
+                               datetime(2026, 9, 2, 7, 30, tzinfo=FakeSession.TIMEZONE))
+    assert round(row["money_acceleration"], 1) == 100.0
