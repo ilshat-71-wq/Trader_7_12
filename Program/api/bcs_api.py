@@ -3,7 +3,7 @@ Trader_7_12 Pro
 
 BCS API
 
-Версия 0.9
+Версия 1.0
 
 Назначение:
 - авторизация BCS
@@ -12,6 +12,11 @@ BCS API
 - сделки
 - стакан
 - свечи
+
+Рыночные данные работают через один process-wide read-only client.
+Candle HTTP concurrency ограничена безопасным уровнем ниже лимита BCS
+(10 RPS для рыночных данных), чтобы широкий TQBR-скан не сериализовался
+одним запросом за раз и не зависал на таймаутах.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,10 +28,13 @@ from api.request_helper import RequestHelper
 
 class BCSAPI:
 
+    # BCS documents 10 RPS for market-data HTTP. Keep a small concurrent
+    # worker pool so the scanner can use the available throughput without
+    # hammering the endpoint.
     CANDLE_CACHE_TTL = 30.0
-    CANDLE_TIMEOUT = 3.0
-    CANDLE_RETRIES = 2
-    CANDLE_MAX_CONCURRENCY = 1
+    CANDLE_TIMEOUT = 8.0
+    CANDLE_RETRIES = 1
+    CANDLE_MAX_CONCURRENCY = 4
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
 
@@ -34,13 +42,7 @@ class BCSAPI:
     _initialized = False
 
     def __new__(cls):
-        """Return one process-wide read-only market-data client.
-
-        Scanner services are composed from several layers, and historically
-        each layer created its own BCSAPI. That caused repeated authorization,
-        independent candle caches and unnecessary concurrent HTTP load.
-        Keep one client instance while preserving the existing BCSAPI API.
-        """
+        """Return one process-wide read-only market-data client."""
         if cls._shared_instance is None:
             cls._shared_instance = super().__new__(cls)
         return cls._shared_instance
@@ -65,8 +67,6 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def authorize(self):
-        # Reuse an already authorized shared client. This prevents every
-        # nested service from refreshing the same BCS access token again.
         if self.access_token:
             return True
 
@@ -90,15 +90,9 @@ class BCSAPI:
         if r.status_code == 200:
             data = r.json()
             self.access_token = data.get("access_token")
-            # Keycloak/BCS may rotate the refresh token. Persist the newest
-            # value locally so the next process/session continues seamlessly.
             rotated_token = data.get("refresh_token")
             if rotated_token:
                 save_refresh_token(rotated_token)
-            elif not __import__("os").getenv("BCS_REFRESH_TOKEN"):
-                # The token was already loaded from the local secure file.
-                # Keep that file as the source of truth.
-                pass
             print("✅ Авторизация БКС успешна")
             return bool(self.access_token)
         print(r.text)
@@ -269,18 +263,12 @@ class BCSAPI:
 
     @staticmethod
     def _candle_cache_key(ticker, class_code, interval, start_dt, end_dt):
-        """Use minute precision so equivalent scan requests share one cache entry."""
         start_key = start_dt.replace(second=0, microsecond=0).isoformat()
         end_key = end_dt.replace(second=0, microsecond=0).isoformat()
         return (str(ticker).upper(), str(class_code), str(interval).upper(), start_key, end_key)
 
     def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
-        """Load BCS candles with bounded retry, cache and concurrency control.
-
-        All candles-chart HTTP calls pass through one semaphore on the shared
-        BCSAPI instance. This limits candle endpoint concurrency without
-        serializing the rest of the scanner.
-        """
+        """Load BCS candles with bounded retry, cache and safe concurrency."""
         url = f"{self.market_url}/candles-chart"
 
         def normalize_time(value):
@@ -344,12 +332,13 @@ class BCSAPI:
             return {}
 
         if r.status_code != 200:
+            print("⚠️ Candle HTTP:", ticker, interval, r.status_code)
             return {}
 
         try:
             data = r.json()
         except ValueError:
-            print("❌ Candles JSON error")
+            print("❌ Candles JSON error:", ticker, interval)
             return {}
 
         self._candle_cache[cache_key] = (now, data)
