@@ -117,6 +117,33 @@ def test_no_benchmark_means_no_directional_selection(monkeypatch):
     assert scanner._last_scan_diagnostics["benchmark"] is None
 
 
+def test_tiny_relative_strength_is_not_directional(monkeypatch):
+    rows = [
+        _row("TINY_LONG", 0.23, 3_000_000),
+        _row("TINY_SHORT", 0.17, 3_000_000),
+    ]
+    scanner = _scanner(monkeypatch, rows, 0.20)
+    result = scanner.scan(limit=3)
+    assert result == []
+    assert scanner._last_scan_diagnostics["long_candidate"] is None
+    assert scanner._last_scan_diagnostics["short_candidate"] is None
+
+
+def test_relative_strength_magnitude_participates_in_directional_ranking(monkeypatch):
+    rows = [
+        _row("HIGH_RS", 1.00, 1_600_000),
+        _row("HIGH_ATTENTION", 0.20, 3_000_000),
+        _row("WEAK", -0.80, 1_500_000),
+    ]
+    scanner = _scanner(monkeypatch, rows, 0.0)
+    result = scanner.scan(limit=3)
+    assert result[0]["selection_role"] == "LONG_CANDIDATE"
+    assert result[0]["spot_ticker"] == "HIGH_RS"
+    assert result[0]["relative_strength_quality"] == "MEANINGFUL"
+    assert result[0]["directional_score"] > result[1]["directional_score"]
+    assert any(x["selection_role"] == "SHORT_CANDIDATE" and x["spot_ticker"] == "WEAK" for x in result)
+
+
 def test_weekend_scan_uses_dswd_start(monkeypatch):
     captured = {}
     scanner = _scanner(monkeypatch, [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)], 0.2,
