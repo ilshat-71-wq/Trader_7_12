@@ -11,6 +11,7 @@ SPEC="scripts/Trader_7_12_Pro.spec"
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)"
 printf '%s\n' "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"
+printf '%s\n' "Commit: $(git rev-parse HEAD)"
 
 if [[ "$(git branch --show-current 2>/dev/null)" != "main" ]]; then
   echo "ERROR: build must run from main branch."
@@ -46,6 +47,7 @@ PYTHONPATH=Program "${PYTHON_BIN}" -m pytest -q Program
 
 rm -rf "${DIST_DIR}/${APP_NAME}" "${BUILD_DIR}/Trader_7_12_Pro"
 
+export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
 "${PYTHON_BIN}" -m PyInstaller \
   --noconfirm \
   --clean \
@@ -62,10 +64,20 @@ if [[ ! -x "${APP_PATH}/Contents/MacOS/Trader_7_12_Pro" ]]; then
   exit 1
 fi
 
+BUNDLE_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "${APP_PATH}/Contents/Info.plist")"
+if [[ "${BUNDLE_COMMIT}" != "${TRADER_BUILD_COMMIT}" ]]; then
+  echo "ERROR: bundle provenance mismatch."
+  echo "Expected: ${TRADER_BUILD_COMMIT}"
+  echo "Bundle:   ${BUNDLE_COMMIT}"
+  exit 1
+fi
+
 printf '%s\n' ""
 printf '%s\n' "=== APP BUILD OK ==="
 printf '%s\n' "${APP_PATH}"
 printf '%s\n' "Bundle identifier: com.ilshat.trader712pro"
+printf '%s\n' "Bundle version: 2.2.1"
+printf '%s\n' "Bundle source commit: ${BUNDLE_COMMIT}"
 printf '%s\n' ""
 printf '%s\n' "Next: double-click '${APP_PATH}' in Finder."
 printf '%s\n' "For a terminal-visible launch, use:"
