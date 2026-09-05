@@ -147,10 +147,15 @@ class MarketAttentionScannerService:
         previous_money = sum(max(0.0, self._f(x.get("money_volume", x.get("volume")))) for x in previous)
         elapsed = max(1, int((now - datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE)).total_seconds() / 60))
         pace = total_money / elapsed
-        recent_elapsed = min(self.RECENT_MINUTES, elapsed)
-        recent_pace = recent_money / max(1, recent_elapsed)
-        previous_pace = previous_money / max(1, min(self.RECENT_MINUTES, elapsed))
-        acceleration = (recent_pace / previous_pace - 1.0) if previous_pace > 0 else 0.0
+        recent_window_minutes = len(recent) * 5
+        previous_window_minutes = len(previous) * 5
+        if len(recent) == window_bars and len(previous) == window_bars and previous_money > 0:
+            recent_pace = recent_money / recent_window_minutes
+            previous_pace = previous_money / previous_window_minutes
+            acceleration = recent_pace / previous_pace - 1.0
+        else:
+            recent_pace = recent_money / max(1, recent_window_minutes)
+            acceleration = 0.0
         change = (last / first - 1.0) * 100.0
         direction = "LONG" if change > 0 else "SHORT" if change < 0 else "NEUTRAL"
         return {**item, "price": last, "change_percent": change, "direction": direction,
