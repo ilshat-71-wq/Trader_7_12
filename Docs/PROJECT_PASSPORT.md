@@ -2,7 +2,7 @@
 
 **Дата актуализации:** 05.09.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
-**Ветка:** `main`  
+**Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-attention scanner
 
 ## 1. Назначение
@@ -45,7 +45,7 @@ RECENT 15-MIN ACTIVITY
         ↓
 FLOW ACCELERATION
         ↓
-IMOEX2 / IRUS2 BENCHMARK
+IMOEX2 / IRUS2 MARKET BENCHMARK
         ↓
 INTRADAY RELATIVE STRENGTH
         ↓
@@ -57,14 +57,18 @@ WEAKEST   → SHORT CANDIDATE
 NEXT 1–3 → COMPACT WATCHLIST
 ```
 
-## 4. Relative Strength
+## 4. Market Benchmark / Relative Strength — обязательное правило
 
-Основной benchmark:
+**Каждый анализируемый инструмент всегда сравнивается с индексом рынка Московской биржи.**
+
+Приоритет benchmark жёстко задан:
 
 ```text
-IMOEX2
-fallback: IRUS2
+1. IMOEX2 — основной benchmark
+2. IRUS2 — fallback только если IMOEX2 недоступен
 ```
+
+Порядок выбора не зависит от порядка ответа BCS metadata: сканер сначала пытается использовать `IMOEX2`, и только при отсутствии пригодных текущих M5 данных переходит к `IRUS2`.
 
 Формула:
 
@@ -81,7 +85,7 @@ market +0.7%, asset -0.4% → RS -1.1 п.п. → слабее рынка
 market -0.6%, asset -2.2% → RS -1.6 п.п. → очень слабый
 ```
 
-Если benchmark недоступен, directional LONG/SHORT selection запрещён.
+Если `IMOEX2` и `IRUS2` недоступны или не имеют достаточных свежих M5 данных, directional LONG/SHORT selection **запрещён**. Инструмент нельзя считать сильным или слабым относительно рынка без benchmark.
 
 ## 5. Market Attention
 
@@ -100,12 +104,12 @@ market -0.6%, asset -2.2% → RS -1.6 п.п. → очень слабый
 
 ```text
 LONG:
-  положительный RS
+  положительный RS относительно IMOEX2/IRUS2
   высокая текущая активность
   максимальное внимание среди сильных
 
 SHORT:
-  отрицательный RS
+  отрицательный RS относительно IMOEX2/IRUS2
   высокая текущая активность
   максимальное внимание среди слабых
 ```
@@ -170,7 +174,7 @@ ATTENTION_WATCH
 
 Диагностика не должна занимать главный экран.
 
-## 10. Скорость
+## 10. Скорость и BCS
 
 BCS API использует один process-wide read-only client и ограниченную конкурентность.
 
@@ -182,6 +186,10 @@ BCS API использует один process-wide read-only client и огра�
 - делать дорогой технический pipeline для всего рынка.
 
 TQBR остаётся широким universe, но анализ ограничивается свежими M5 market-data запросами и компактным ranking.
+
+BCS документирует лимит 10 RPS для HTTP market data; текущая реализация использует bounded concurrency, timeout/retry и короткий cache, чтобы не сериализовать широкий скан одним запросом и не создавать неконтролируемую нагрузку.
+
+Для частых потоковых данных при следующем performance-этапе приоритетом может быть BCS WebSocket, без изменения алгоритма benchmark/RS и без введения фьючерсных прокси.
 
 ## 11. Авторизация
 
@@ -217,17 +225,23 @@ data_status = UNAVAILABLE
 
 а не прокси через фьючерс.
 
-## 13. Repository hygiene
+## 13. Repository hygiene / synchronization
 
-Разработка ведётся только в:
+Разработка ведётся **только в `main`**.
 
-```text
-main
-```
+Новые рабочие ветки не создаются. Pull Request flow для текущего проекта не используется.
 
-`Docs/PROJECT_PASSPORT.md` — единственный проектный MD-файл и архитектурный checkpoint.
+`Docs/PROJECT_PASSPORT.md` — **единственный проектный MD-файл** и архитектурный checkpoint. Каждый существенный этап разработки обязан одновременно актуализировать этот файл.
 
 Лишние futures/macro runtime-модули удалены из основного приложения.
+
+GitHub `main` является каноническим источником кода. Локальные приложения должны синхронизироваться с ним через:
+
+```bash
+git pull --ff-only
+```
+
+Перед запуском приложение должно находиться на актуальном `main`; локальные незакоммиченные изменения не должны молча перекрывать состояние GitHub.
 
 ## 14. Tests
 
@@ -237,7 +251,9 @@ main
 - strong asset on falling market → LONG;
 - weak asset on rising market → SHORT;
 - weak asset on falling market → SHORT;
-- missing benchmark → no directional candidate;
+- missing IMOEX2 → IRUS2 fallback;
+- missing both benchmarks → no directional candidate;
+- every directional candidate contains benchmark and relative strength;
 - attention ranking uses recent/current money;
 - no futures instruments enter the universe;
 - GOLD/USDRUB use real SPOT metadata;
@@ -255,34 +271,38 @@ PYTHONPATH=Program python3 -m pytest -q Program
 
 Следующий этап развития — не расширение universe и не добавление фьючерсной логики. Приоритет:
 
-1. Проверка фактического BCS metadata для IMOEX2 / IRUS2 и каждого канонического base/spot-инструмента.
+1. Проверка фактического BCS metadata для `IMOEX2` / `IRUS2` и каждого канонического base/spot-инструмента.
 2. Проверка живого M5-потока в день торгов: цена, change, money_volume, recent 15-minute ₽×V/min.
-3. Контроль того, что LONG/SHORT появляются только при доступном benchmark.
+3. Контроль того, что **каждый** LONG/SHORT имеет benchmark и RS относительно `IMOEX2` или `IRUS2`.
 4. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
 5. Измерение времени полного скана на iMac и исключение лишних сетевых запросов.
-6. Сохранение компактного output: 1 LONG, 1 SHORT и максимум 1 ATTENTION_WATCH.
+6. При необходимости — переход на BCS WebSocket для текущих M5 данных при сохранении того же математического алгоритма.
+7. Сохранение компактного output: 1 LONG, 1 SHORT и максимум 1 ATTENTION_WATCH.
 
-Все изменения должны сохранять read-only contract и проходить compile + полный pytest.
+Все изменения должны сохранять read-only contract, обновлять этот паспорт и проходить compile + полный pytest.
 
 ## 16. Current checkpoint
 
 ```text
 Repository:              ilshat-71-wq/Trader_7_12
-Branch:                  main
+Branch:                  main ONLY
+Project MD:              Docs/PROJECT_PASSPORT.md ONLY
 Scanner:                 Market Attention Radar
 Runtime data:            BASE/SPOT only
 Equity universe:         ALL TQBR
 Macro groups:            GOLD / OIL / GAS / USDRUB
-Benchmark:               IMOEX2 / IRUS2
+Benchmark priority:      IMOEX2 → IRUS2 fallback
+Benchmark mandatory:     YES for directional selection
 Primary timeframe:       M5
 Recent flow window:      15 min
-Selection:               strongest + weakest
+Selection:               strongest + weakest vs market
 Output:                  LONG + SHORT + compact watchlist
 Futures analysis:        REMOVED
 Futures mapping:         REMOVED
 Order execution:         ABSENT
 Read-only:               YES
-Auto-sync launcher:      ENABLED when checkout is clean
+BCS candle client:       shared / bounded concurrency / cache / timeout
+Git synchronization:     GitHub main is canonical
 ```
 
-**Главная цель версии 2.0:** быстро и честно показать, где находится максимальное текущее внимание рынка, и отделить сильнейший относительно рынка актив от слабейшего — без фьючерсной логики и без ложных прокси.
+**Главная цель версии 2.0:** быстро и честно показать, где находится максимальное текущее внимание рынка, и отделить сильнейший относительно `IMOEX2/IRUS2` актив от слабейшего — без фьючерсной логики и без ложных прокси.
