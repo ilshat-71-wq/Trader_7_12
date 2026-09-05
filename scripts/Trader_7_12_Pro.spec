@@ -6,6 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_submodules
 
 
+APP_VERSION = "2.3.1"
 BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
 SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
@@ -65,8 +66,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "Trader_7_12 Pro",
         "CFBundleName": "Trader_7_12 Pro",
-        "CFBundleShortVersionString": "2.3.0",
-        "CFBundleVersion": "2.3.0",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
         "CFBundleSourceCommit": BUILD_COMMIT,
         "LSMinimumSystemVersion": "12.0",
     },
