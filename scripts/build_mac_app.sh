@@ -7,7 +7,7 @@ APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
-APP_VERSION="2.2.3"
+APP_VERSION="2.3.0"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)"
