@@ -7,9 +7,7 @@
 
 ## 1. Назначение
 
-Trader_7_12 Pro отвечает на один вопрос:
-
-> **Какие 2–3 базовых инструмента прямо сейчас привлекают наибольшее внимание рынка, и кто из них относительно рынка сильнее или слабее?**
+Trader_7_12 Pro отвечает на один вопрос: какие 2–3 базовых инструмента прямо сейчас привлекают наибольшее внимание рынка и кто из них относительно рынка сильнее или слабее.
 
 Сканер только анализирует рынок. Он не выставляет заявки, не управляет позициями, не выбирает фьючерсы и не принимает торговое решение за пользователя.
 
@@ -25,11 +23,9 @@ Trader_7_12 Pro отвечает на один вопрос:
 5. USDRUB
 ```
 
-Для GOLD канонический spot-кандидат — `GLDRUB_TOM`, если он доступен в BCS SPOT metadata. Для USDRUB используется реальный spot-инструмент, доступный через BCS metadata.
+GOLD: `GLDRUB_TOM`, если доступен в BCS SPOT metadata. USDRUB: реальный spot-инструмент из BCS metadata. OIL/GAS не подменяются фьючерсами; при отсутствии реального base/spot источника — `UNAVAILABLE`.
 
-OIL/GAS не подменяются фьючерсами. Если BCS не предоставляет соответствующий base/spot-инструмент, статус `UNAVAILABLE`.
-
-На ДСВД фондового рынка анализируем только фактически торгуемые/доступные через источник инструменты; отсутствие свечей у недопущенной бумаги не считается сигналом.
+На ДСВД анализируются только фактически доступные через источник инструменты. Отсутствие свечей у недоступной бумаги не считается сигналом.
 
 Фьючерсная metadata, expiry, futures mapping и futures ranking в runtime-сканере отсутствуют.
 
@@ -58,9 +54,7 @@ WEAKEST   → SHORT CANDIDATE
 COMPACT WATCHLIST
 ```
 
-## 4. Market Benchmark / Relative Strength — обязательное правило
-
-Каждый анализируемый инструмент сравнивается с индексом рынка Московской биржи.
+## 4. Benchmark / Relative Strength — обязательное правило
 
 Приоритет benchmark:
 
@@ -77,8 +71,6 @@ RS = asset_current_session_return - benchmark_current_session_return
 
 ### Источник benchmark
 
-Для выбранного benchmark применяется следующая лестница получения данных:
-
 ```text
 BCS metadata
       ↓
@@ -89,13 +81,13 @@ BCS current quote: session open → current price
 benchmark unavailable
 ```
 
-Quote fallback не является заменой индекса: используется тот же реальный `IMOEX2` или `IRUS2`, только другой способ получения его текущей сессионной доходности.
+Quote fallback использует тот же реальный `IMOEX2` или `IRUS2`, а не прокси. Quote принимается только при наличии open, current price и допустимой свежести timestamp. Синтетический benchmark, futures proxy и вычисление индекса из компонентов запрещены.
 
-Quote принимается только при наличии цены открытия, текущей цены и приемлемой свежести timestamp. Синтетический benchmark, futures proxy и вычисление индекса из компонентов запрещены.
+Если benchmark недоступен, directional LONG/SHORT selection запрещён.
 
-Если оба benchmark недоступны или не имеют достаточных свежих данных, directional LONG/SHORT selection запрещён.
+**Критическая BCS-деталь версии 2.2:** BCS может возвращать `classCode` не на верхнем уровне metadata, а внутри `boards[]`. Сканер обязан поддерживать оба формата и для `IMOEX2` корректно извлекать реальный `INDX` из `boards[].classCode`.
 
-IMOEX2 является корректным benchmark для дополнительных сессий. MOEX указывает, что IMOEX2 рассчитывается во время дополнительных сессий; с 26.09.2026 расчёт индексов акций будет расширен на все дополнительные торговые сессии.
+IMOEX2 является корректным benchmark для дополнительных сессий; MOEX рассчитывает IMOEX2 во время дополнительных сессий.
 
 ## 5. Market Attention
 
@@ -108,33 +100,31 @@ IMOEX2 является корректным benchmark для дополните
 - session ₽×V/min;
 - ускорение денежного потока.
 
-Приоритет отдаётся тому, что происходит сейчас.
+Приоритет отдаётся текущей активности.
 
 ## 6. LONG / SHORT selection
 
 ```text
 LONG:
-  положительный RS относительно IMOEX2/IRUS2
+  положительный RS относительно benchmark
   высокая текущая активность
   максимальное внимание среди сильных
 
 SHORT:
-  отрицательный RS относительно IMOEX2/IRUS2
+  отрицательный RS относительно benchmark
   высокая текущая активность
   максимальное внимание среди слабых
 ```
 
 Сильный актив на падающем рынке может быть LONG-кандидатом. Слабый актив на растущем рынке может быть SHORT-кандидатом.
 
-`attention_score` не заменяет RS.
-
 ## 7. Торговый календарь и сессии
 
 **Критическое правило:** `Saturday/Sunday != CLOSED`.
 
-MOEX проводит дополнительные торговые сессии выходного дня (ДСВД) на фондовом рынке в субботу/воскресенье с 09:50 до 19:00 МСК, кроме дат, объявленных Биржей неторговыми. ДСВД является частью следующего обычного торгового дня.
+MOEX проводит дополнительные торговые сессии выходного дня (ДСВД) на фондовом рынке с 09:50 до 19:00 МСК, кроме дат, объявленных Биржей неторговыми. ДСВД является частью следующего обычного торгового дня.
 
-Для 2026 года текущая календарная модель учитывает опубликованные изменения: 12–13 сентября и 24–25 октября остаются неторговыми выходными; 28–29 ноября стали неторговыми из-за переноса технических работ; 5–6 декабря стали торговыми выходными.
+Календарь 2026 учитывает опубликованные изменения: 12–13 сентября и 24–25 октября — неторговые выходные; 28–29 ноября — неторговые из-за переноса технических работ; 5–6 декабря — торговые выходные.
 
 ```text
 обычный день:
@@ -147,7 +137,7 @@ MOEX проводит дополнительные торговые сессии
 
 На ДСВД `market_session = WEEKEND_SESSION`; сканер использует начало ДСВД `09:50`, а не обычные `07:00`.
 
-Вне торговой сессии market-data scan не запускается. На закрытом рынке пользователь видит `РЫНОК ЗАКРЫТ`.
+Вне торговой сессии scan не запускается. На закрытом рынке — `РЫНОК ЗАКРЫТ`.
 
 ## 8. Output contract
 
@@ -182,11 +172,9 @@ pipeline_version
 
 ## 10. Скорость и BCS
 
-BCS API использует один process-wide read-only client и ограниченную конкурентность. HTTP market data ограничены 10 RPS; текущая реализация использует bounded concurrency, timeout/retry и короткий cache.
+BCS API использует один process-wide read-only client и ограниченную конкурентность. HTTP market data используют bounded concurrency, timeout/retry и cache.
 
 Сканер не запрашивает futures metadata, не строит expiry universe, не выполняет futures mapping и не запускает дорогой технический pipeline по всему рынку.
-
-При следующем performance-этапе приоритетом может быть BCS WebSocket для текущих M5 данных без изменения алгоритма benchmark/RS.
 
 ## 11. Авторизация
 
@@ -230,8 +218,6 @@ git checkout main
 git pull --ff-only
 ```
 
-Перед запуском приложение должно находиться на актуальном `main`.
-
 ## 14. Regression tests
 
 Обязательные проверки:
@@ -250,17 +236,19 @@ git pull --ff-only
 - BCS M5 benchmark is preferred;
 - BCS live quote can supply the same real benchmark when M5 is unavailable;
 - stale benchmark quote is rejected;
+- nested BCS `boards[].classCode` is recognized;
+- `IMOEX2` nested metadata resolves to `INDX`;
 - 05.09.2026 10:44 MSK → `WEEKEND_SESSION`;
 - 09:49:59 before DSVD → `CLOSED`;
 - 09:50:00 DSVD → `WEEKEND_SESSION`;
 - 12.09.2026 → `CLOSED`;
 - 28.11.2026 → `CLOSED`;
-- 05.12.2026 → `WEEKEND_SESSION` after calendar update;
+- 05.12.2026 → `WEEKEND_SESSION`;
 - weekend scanner uses `09:50` as session start;
 - candle resilience test matches configured timeout/retry constants;
 - read-only scanner contract remains intact.
 
-Перед live-запуском:
+Before live run:
 
 ```bash
 python3 -m compileall -q Program
@@ -272,15 +260,13 @@ PYTHONPATH=Program python3 -m pytest -q Program
 Следующий этап — не расширение universe и не добавление фьючерсной логики. Приоритет:
 
 1. Проверка фактического BCS metadata для `IMOEX2` / `IRUS2` и канонических base/spot-инструментов.
-2. Проверка живого M5-потока в торговый день и на ДСВД.
+2. Проверка живого M5-потока в обычный торговый день и на ДСВД.
 3. Проверка BCS live quote fallback для benchmark.
-4. Контроль, что каждый LONG/SHORT имеет benchmark и RS относительно `IMOEX2` или `IRUS2`.
+4. Контроль, что каждый LONG/SHORT имеет benchmark и RS.
 5. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
 6. Измерение полного scan time и сетевой нагрузки.
 7. При необходимости переход на BCS WebSocket для текущих M5 данных.
 8. Компактный output: 1 LONG, 1 SHORT, максимум 1 ATTENTION_WATCH.
-
-Все изменения сохраняют read-only contract, обновляют этот паспорт и проходят compile + полный pytest.
 
 ## 16. Current checkpoint
 
@@ -289,12 +275,13 @@ Repository:              ilshat-71-wq/Trader_7_12
 Branch:                  main ONLY
 Project MD:              Docs/PROJECT_PASSPORT.md ONLY
 Scanner:                 Market Attention Radar
-Pipeline version:        2.1
+Pipeline version:        2.2
 Runtime data:            BASE/SPOT only
 Equity universe:         ALL TQBR (filtered by actual session availability)
 Macro groups:            GOLD / OIL / GAS / USDRUB
 Benchmark priority:      IMOEX2 → IRUS2 fallback
 Benchmark source:        BCS M5 → BCS live quote
+IMOEX2 class code:       INDX (including nested boards[].classCode)
 Benchmark mandatory:     YES for directional selection
 Primary timeframe:       M5
 Recent flow window:      15 min
@@ -308,8 +295,7 @@ Futures analysis:        REMOVED
 Futures mapping:         REMOVED
 Order execution:         ABSENT
 Read-only:               YES
-BCS candle client:       shared / bounded concurrency / cache / timeout
 Git synchronization:     GitHub main is canonical
 ```
 
-**Главная цель версии 2.1:** быстро и честно показать, где находится максимальное текущее внимание рынка, и отделить сильнейший относительно `IMOEX2/IRUS2` актив от слабейшего — без фьючерсной логики и без ложных прокси.
+**Главная цель версии 2.2:** корректно работать с реальной структурой BCS metadata, не терять `IMOEX2` из-за вложенного `boards[].classCode`, использовать реальный `INDX` benchmark и при этом сохранять жёсткий запрет на синтетические и фьючерсные прокси.
