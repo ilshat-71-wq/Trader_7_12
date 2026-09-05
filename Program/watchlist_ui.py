@@ -27,7 +27,7 @@ def _money(value):
 
 
 class WatchlistTraderWindow(TraderWindow):
-    VERSION = "2.1"
+    VERSION = "2.2"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
