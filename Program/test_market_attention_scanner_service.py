@@ -222,3 +222,41 @@ def test_weekend_universe_respects_moex_weekend_session_flag():
     tickers = {row["spot_ticker"] for row in universe}
     assert "WEEKEND_Y" in tickers
     assert "WEEKEND_N" not in tickers
+
+
+def test_directional_candidates_are_suppressed_when_coverage_is_insufficient(monkeypatch):
+    rows = [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000), _row("C", 0.8, 1_800_000)]
+    scanner = _scanner(monkeypatch, rows, 0.2)
+    original = scanner._analyze_one
+
+    def partial(item, *args):
+        if item["spot_ticker"] == "C":
+            return None
+        return original(item, *args)
+
+    monkeypatch.setattr(scanner, "_analyze_one", partial)
+    scanner.MIN_DIRECTIONAL_COVERAGE = 0.80
+    result = scanner.scan(limit=2)
+    assert result == []
+    assert scanner._last_scan_diagnostics["status"] == "INSUFFICIENT_COVERAGE"
+    assert scanner._last_scan_diagnostics["coverage_ok"] is False
+    assert scanner._last_scan_diagnostics["skip_reasons"]["INSUFFICIENT_M5"] == 1
+
+
+def test_coverage_diagnostics_report_partial_scan(monkeypatch):
+    rows = [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)]
+    scanner = _scanner(monkeypatch, rows, 0.2)
+    original = scanner._analyze_one
+
+    def partial(item, *args):
+        if item["spot_ticker"] == "B":
+            return None
+        return original(item, *args)
+
+    monkeypatch.setattr(scanner, "_analyze_one", partial)
+    scanner.MIN_DIRECTIONAL_COVERAGE = 0.40
+    result = scanner.scan(limit=2)
+    assert result
+    assert scanner._last_scan_diagnostics["coverage_percent"] == 50.0
+    assert scanner._last_scan_diagnostics["skipped_total"] == 1
+    assert scanner._last_scan_diagnostics["skip_samples"]["INSUFFICIENT_M5"] == ["B"]
