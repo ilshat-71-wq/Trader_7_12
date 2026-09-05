@@ -40,6 +40,20 @@ def test_non_trading_weekend_is_closed():
     assert SERVICE.is_market_open(saturday) is False
 
 
+def test_calendar_update_december_weekend_is_trading():
+    saturday = datetime(2026, 12, 5, 10, 0, tzinfo=MSK)
+    sunday = datetime(2026, 12, 6, 10, 0, tzinfo=MSK)
+    assert SERVICE.get_session(saturday) == "WEEKEND_SESSION"
+    assert SERVICE.get_session(sunday) == "WEEKEND_SESSION"
+
+
+def test_calendar_update_november_weekend_is_closed():
+    saturday = datetime(2026, 11, 28, 10, 0, tzinfo=MSK)
+    sunday = datetime(2026, 11, 29, 10, 0, tzinfo=MSK)
+    assert SERVICE.get_session(saturday) == "CLOSED"
+    assert SERVICE.get_session(sunday) == "CLOSED"
+
+
 def test_session_info_contains_live_clock_fields():
     value = datetime(2026, 8, 17, 19, 15, 30, tzinfo=MSK)
     info = SERVICE.get_session_info(value)
@@ -61,6 +75,8 @@ if __name__ == "__main__":
         test_weekend_additional_session_is_open,
         test_weekend_session_boundaries,
         test_non_trading_weekend_is_closed,
+        test_calendar_update_december_weekend_is_trading,
+        test_calendar_update_november_weekend_is_closed,
         test_session_info_contains_live_clock_fields,
         test_utc_datetime_is_converted_to_moscow,
     ):

@@ -16,6 +16,7 @@ class MarketAttentionScannerService:
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     SCAN_START = time(7, 0)
+    WEEKEND_SCAN_START = time(9, 50)
     SCAN_END = time(13, 0)
     BENCHMARKS = ("IMOEX2", "IRUS2")
     MACRO_ALIASES = {
@@ -138,9 +139,6 @@ class MarketAttentionScannerService:
             if ticker and code:
                 by_ticker[ticker] = (ticker, code)
 
-        # BCS's by-tickers endpoint can legitimately omit an index while still
-        # returning HTTP 200. Use the dedicated INDICES metadata catalogue as
-        # a read-only fallback for benchmark discovery, never for the asset universe.
         missing = [ticker for ticker in self.BENCHMARKS if ticker not in by_ticker]
         if missing:
             try:
@@ -190,9 +188,6 @@ class MarketAttentionScannerService:
         trading_date = self.session.get_trading_day()
         now = self.session.now()
 
-        # Never query market data on a non-trading calendar day. This prevents
-        # a weekend/closed-market run from being mislabeled as an active session
-        # and avoids hundreds of pointless candle requests.
         if not self.session.is_market_open(now):
             self._last_scan_diagnostics = {
                 "status": "MARKET_CLOSED",
@@ -207,11 +202,13 @@ class MarketAttentionScannerService:
             }
             return []
 
-        if now.time() < self.SCAN_START or now.time() >= self.SCAN_END:
-            self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "scan_window": "07:00-13:00 MSK"}
+        scan_start = self.WEEKEND_SCAN_START if session_name == "WEEKEND_SESSION" else self.SCAN_START
+        scan_window = f"{scan_start.strftime('%H:%M')}-{self.SCAN_END.strftime('%H:%M')} MSK"
+        if now.time() < scan_start or now.time() >= self.SCAN_END:
+            self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "session": session_name, "scan_window": scan_window}
             return []
 
-        session_start = self.SCAN_START
+        session_start = scan_start
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
 
@@ -220,7 +217,7 @@ class MarketAttentionScannerService:
                 "status": "BENCHMARK_UNAVAILABLE",
                 "session": session_name,
                 "trading_date": str(trading_date),
-                "scan_window": "07:00-13:00 MSK",
+                "scan_window": scan_window,
                 "universe_total": len(universe),
                 "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
                 "analyzed": 0,
@@ -276,7 +273,7 @@ class MarketAttentionScannerService:
             row["pipeline_version"] = self.VERSION
         self._last_scan_diagnostics = {
             "status": "OK", "session": session_name, "trading_date": str(trading_date),
-            "scan_window": "07:00-13:00 MSK", "universe_total": len(universe),
+            "scan_window": scan_window, "universe_total": len(universe),
             "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
             "analyzed": len(results), "benchmark": benchmark_ticker,
             "benchmark_change_percent": benchmark_change, "selected": len(selected),

@@ -7,10 +7,10 @@ from zoneinfo import ZoneInfo
 class MarketSessionService:
     """Single source of truth for the current Moscow market session.
 
-    The MOEX weekend schedule is not equivalent to ``weekday() >= 5``:
-    in 2026 most weekends have an additional stock-market session (ДСВД)
-    from 09:50 to 19:00 MSK. Only the explicitly non-trading weekend dates
-    below are closed.
+    MOEX calendar weekends are not equivalent to ``weekday() >= 5``.
+    In 2026 most weekends have an additional stock-market session (ДСВД)
+    from 09:50 to 19:00 MSK. Only dates explicitly declared non-trading
+    by the current MOEX calendar are closed.
     """
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
@@ -21,8 +21,8 @@ class MarketSessionService:
     EVENING_START = time(19, 0)
     MARKET_CLOSE = time(23, 50)
 
-    # MOEX 2026: weekend pairs on which the additional weekend session is NOT held.
-    # Source: official MOEX 2026 weekend trading schedule.
+    # MOEX 2026 weekend calendar. 28–29 Nov became non-trading after the
+    # September 2026 calendar update; 5–6 Dec became trading dates instead.
     NON_TRADING_WEEKEND_DATES_2026 = frozenset(
         date(2026, month, day)
         for month, day in (
@@ -34,7 +34,7 @@ class MarketSessionService:
             (8, 1), (8, 2), (8, 15), (8, 16),
             (9, 12), (9, 13),
             (10, 24), (10, 25),
-            (12, 5), (12, 6),
+            (11, 28), (11, 29),
         )
     )
 
@@ -102,7 +102,6 @@ class MarketSessionService:
         return self.LABELS.get(self.get_session(value), "РЫНОК ЗАКРЫТ")
 
     def get_trading_day(self, value=None):
-        """Return the Moscow-local calendar date represented by current data."""
         value = self.now() if value is None else self.to_moscow(value)
         return value.date() if value is not None else None
 

@@ -24,10 +24,21 @@ class FakeSession:
         return {"session": "MORNING"}
     def get_window(self):
         return (self.MORNING_START, self.MAIN_START)
+    def is_market_open(self, value=None):
+        return True
 
 
-def _scanner(monkeypatch, rows, benchmark=0.0):
-    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
+class FakeWeekendSession(FakeSession):
+    def now(self):
+        return datetime(2026, 9, 5, 10, 44, tzinfo=self.TIMEZONE)
+    def get_session(self):
+        return "WEEKEND_SESSION"
+    def get_session_info(self):
+        return {"session": "WEEKEND_SESSION"}
+
+
+def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
+    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=session or FakeSession(), history_service=object())
     monkeypatch.setattr(scanner, "build_universe", lambda: [dict(x) for x in rows])
     monkeypatch.setattr(scanner, "_benchmark", lambda *args: ("IMOEX2", "INDICES", benchmark))
     monkeypatch.setattr(scanner, "_analyze_one", lambda item, *args: dict(item))
@@ -72,3 +83,24 @@ def test_no_benchmark_means_no_directional_selection(monkeypatch):
     result = scanner.scan(limit=3)
     assert result == []
     assert scanner._last_scan_diagnostics["benchmark"] is None
+
+
+def test_weekend_scan_uses_dswd_start(monkeypatch):
+    captured = {}
+    scanner = _scanner(
+        monkeypatch,
+        [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)],
+        0.2,
+        session=FakeWeekendSession(),
+    )
+
+    def analyze(item, trading_date, session_start, now):
+        captured["session_start"] = session_start
+        return dict(item)
+
+    monkeypatch.setattr(scanner, "_analyze_one", analyze)
+    result = scanner.scan(limit=2)
+    assert result
+    assert captured["session_start"].strftime("%H:%M") == "09:50"
+    assert scanner._last_scan_diagnostics["session"] == "WEEKEND_SESSION"
+    assert scanner._last_scan_diagnostics["scan_window"] == "09:50-13:00 MSK"
