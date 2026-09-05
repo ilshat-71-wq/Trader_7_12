@@ -13,7 +13,9 @@ PROGRAM_DIR = os.path.join(PROJECT_ROOT, "Program")
 MAIN_SCRIPT = os.path.join(PROGRAM_DIR, "main.py")
 
 hiddenimports = [
+    "config",
     "api.bcs_api",
+    "api.request_helper",
     "services.market_attention_scanner_service",
     "services.spot_universe_service",
     "services.history_candle_service",
@@ -62,8 +64,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "Trader_7_12 Pro",
         "CFBundleName": "Trader_7_12 Pro",
-        "CFBundleShortVersionString": "2.2.1",
-        "CFBundleVersion": "2.2.1",
+        "CFBundleShortVersionString": "2.2.2",
+        "CFBundleVersion": "2.2.2",
         "CFBundleSourceCommit": BUILD_COMMIT,
         "LSMinimumSystemVersion": "12.0",
     },
