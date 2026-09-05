@@ -12,7 +12,7 @@ from services.relative_strength_service import RelativeStrengthService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.0"
+    VERSION = "2.1"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     SCAN_START = time(7, 0)
@@ -127,8 +127,50 @@ class MarketAttentionScannerService:
                 "money_acceleration": acceleration * 100.0, "candle_count": len(candles),
                 "data_status": "AVAILABLE"}
 
+    def _quote_session_return(self, ticker, class_code, now):
+        """Return real session-open-to-current return from a BCS quote."""
+        try:
+            data = self.api.get_quotes([{"ticker": ticker, "classCode": class_code}])
+        except Exception:
+            return None
+        records = data.get("records", []) if isinstance(data, dict) else []
+        if not isinstance(records, list):
+            return None
+        record = next((x for x in records if isinstance(x, dict)), None)
+        if not record:
+            return None
+
+        def first_positive(keys):
+            for key in keys:
+                value = self._f(record.get(key), 0.0)
+                if value > 0:
+                    return value
+            return None
+
+        last = first_positive(("lastPrice", "last", "price", "currentPrice", "close"))
+        opening = first_positive(("openPrice", "open", "dayOpen", "openingPrice"))
+        if last is None or opening is None:
+            return None
+
+        timestamp = None
+        for key in ("dateTime", "datetime", "time", "timestamp"):
+            value = record.get(key)
+            if not value:
+                continue
+            try:
+                timestamp = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                timestamp = timestamp.astimezone(timezone.utc)
+                break
+            except (TypeError, ValueError):
+                continue
+        if timestamp is not None and abs((now.astimezone(timezone.utc) - timestamp).total_seconds()) > 15 * 60:
+            return None
+        return (last / opening - 1.0) * 100.0
+
     def _benchmark(self, trading_date, now, session_start):
-        """Resolve benchmark deterministically: IMOEX2 first, IRUS2 only as fallback."""
+        """IMOEX2 first, IRUS2 fallback; M5 first, live BCS quote second."""
         rows = self._metadata_by_alias(self.BENCHMARKS)
         by_ticker = {}
         for row in rows:
@@ -166,6 +208,9 @@ class MarketAttentionScannerService:
                 first = self._f(candles[0].get("close")); last = self._f(candles[-1].get("close"))
                 if first > 0 and last > 0:
                     return ticker, code, (last / first - 1.0) * 100.0
+            quote_return = self._quote_session_return(ticker, code, now)
+            if quote_return is not None:
+                return ticker, code, quote_return
         return None, None, None
 
     @staticmethod
@@ -189,17 +234,9 @@ class MarketAttentionScannerService:
         now = self.session.now()
 
         if not self.session.is_market_open(now):
-            self._last_scan_diagnostics = {
-                "status": "MARKET_CLOSED",
-                "session": "CLOSED",
-                "trading_date": str(trading_date),
-                "scan_window": "07:00-13:00 MSK",
-                "universe_total": 0,
-                "stocks_total": 0,
-                "analyzed": 0,
-                "benchmark": None,
-                "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
-            }
+            self._last_scan_diagnostics = {"status": "MARKET_CLOSED", "session": "CLOSED", "trading_date": str(trading_date),
+                                            "scan_window": "07:00-13:00 MSK", "universe_total": 0, "stocks_total": 0,
+                                            "analyzed": 0, "benchmark": None, "data_policy": "SPOT_BASE_ONLY_NO_FUTURES"}
             return []
 
         scan_start = self.WEEKEND_SCAN_START if session_name == "WEEKEND_SESSION" else self.SCAN_START
@@ -208,29 +245,23 @@ class MarketAttentionScannerService:
             self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "session": session_name, "scan_window": scan_window}
             return []
 
-        session_start = scan_start
         universe = self.build_universe()
-        benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
-
+        benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, scan_start)
         if benchmark_change is None:
             self._last_scan_diagnostics = {
-                "status": "BENCHMARK_UNAVAILABLE",
-                "session": session_name,
-                "trading_date": str(trading_date),
-                "scan_window": scan_window,
-                "universe_total": len(universe),
-                "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
-                "analyzed": 0,
-                "benchmark": None,
-                "benchmark_class_code": benchmark_code,
-                "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
+                "status": "BENCHMARK_UNAVAILABLE", "session": session_name, "trading_date": str(trading_date),
+                "scan_window": scan_window, "universe_total": len(universe),
+                "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"), "analyzed": 0,
+                "benchmark": None, "benchmark_class_code": benchmark_code,
+                "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE")
+                                  for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
                 "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
             }
             return []
 
         results = []
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
-            futures = [pool.submit(self._analyze_one, item, trading_date, session_start, now) for item in universe]
+            futures = [pool.submit(self._analyze_one, item, trading_date, scan_start, now) for item in universe]
             for future in as_completed(futures):
                 try:
                     row = future.result()
