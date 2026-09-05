@@ -7,6 +7,7 @@ APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
+APP_VERSION="2.2.2"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)"
@@ -65,6 +66,7 @@ if [[ ! -x "${APP_PATH}/Contents/MacOS/Trader_7_12_Pro" ]]; then
 fi
 
 BUNDLE_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "${APP_PATH}/Contents/Info.plist")"
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP_PATH}/Contents/Info.plist")"
 if [[ "${BUNDLE_COMMIT}" != "${TRADER_BUILD_COMMIT}" ]]; then
   echo "ERROR: bundle provenance mismatch."
   echo "Expected: ${TRADER_BUILD_COMMIT}"
@@ -72,11 +74,18 @@ if [[ "${BUNDLE_COMMIT}" != "${TRADER_BUILD_COMMIT}" ]]; then
   exit 1
 fi
 
+if [[ "${BUNDLE_VERSION}" != "${APP_VERSION}" ]]; then
+  echo "ERROR: bundle version mismatch."
+  echo "Expected: ${APP_VERSION}"
+  echo "Bundle:   ${BUNDLE_VERSION}"
+  exit 1
+fi
+
 printf '%s\n' ""
 printf '%s\n' "=== APP BUILD OK ==="
 printf '%s\n' "${APP_PATH}"
 printf '%s\n' "Bundle identifier: com.ilshat.trader712pro"
-printf '%s\n' "Bundle version: 2.2.1"
+printf '%s\n' "Bundle version: ${BUNDLE_VERSION}"
 printf '%s\n' "Bundle source commit: ${BUNDLE_COMMIT}"
 printf '%s\n' ""
 printf '%s\n' "Next: double-click '${APP_PATH}' in Finder."
