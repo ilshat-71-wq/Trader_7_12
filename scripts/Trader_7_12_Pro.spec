@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
-SPEC_DIR = os.path.dirname(os.path.abspath(__file__))
+SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
 PROGRAM_DIR = os.path.join(PROJECT_ROOT, "Program")
 MAIN_SCRIPT = os.path.join(PROGRAM_DIR, "main.py")
