@@ -6,13 +6,13 @@ from datetime import datetime, timezone, time
 from services.spot_universe_service import SpotUniverseService
 from services.history_candle_service import HistoryCandleService
 from services.market_session_service import MarketSessionService
-from services.relative_strength_service import RelativeStrengthService
+from services.daily_trend_profile_service import DailyTrendProfileService
 
 
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.2.3"
+    VERSION = "2.3.0"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     MIN_DIRECTIONAL_COVERAGE = 0.80
@@ -35,7 +35,6 @@ class MarketAttentionScannerService:
         self.api = api or BCSAPI()
         self.history = history_service or HistoryCandleService()
         self.session = session_service or MarketSessionService()
-        self.rs = RelativeStrengthService()
         self._last_scan_diagnostics = {}
 
     @staticmethod
@@ -131,6 +130,39 @@ class MarketAttentionScannerService:
             return []
         return rows if isinstance(rows, list) else []
 
+    def _daily_candles(self, ticker, class_code, trading_date):
+        """Load only completed D1 candles strictly before the current trading date."""
+        try:
+            rows = self.history.load_daily(ticker, class_code)
+        except Exception:
+            return []
+        if not isinstance(rows, list):
+            return []
+        completed = []
+        seen_dates = set()
+        for candle in rows:
+            if not isinstance(candle, dict):
+                continue
+            value = candle.get("time") or candle.get("date") or candle.get("trading_date")
+            try:
+                text = str(value).strip().replace("Z", "+00:00")
+                dt = datetime.fromisoformat(text)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                day = dt.astimezone(self.session.TIMEZONE).date()
+            except (TypeError, ValueError):
+                continue
+            if day >= trading_date or day in seen_dates:
+                continue
+            seen_dates.add(day)
+            completed.append(candle)
+        completed.sort(key=lambda x: str(x.get("time") or x.get("date") or ""))
+        return completed[-DailyTrendProfileService.MAX_DAYS:]
+
+    def _daily_profile(self, item, trading_date, benchmark_daily):
+        candles = self._daily_candles(item["spot_ticker"], item["spot_class_code"], trading_date)
+        return DailyTrendProfileService.analyze(candles, benchmark_daily, before_date=trading_date)
+
     def _analyze_one(self, item, trading_date, session_start, now):
         ticker = item["spot_ticker"]
         class_code = item["spot_class_code"]
@@ -191,7 +223,6 @@ class MarketAttentionScannerService:
         opening = first_positive(("openPrice", "open", "dayOpen", "openingPrice"))
         if last is None or opening is None:
             return None
-
         timestamp = None
         for key in ("dateTime", "datetime", "time", "timestamp"):
             value = record.get(key)
@@ -218,7 +249,6 @@ class MarketAttentionScannerService:
             code = self._metadata_class_code(row)
             if ticker and code:
                 by_ticker[ticker] = (ticker, code)
-
         missing = [ticker for ticker in self.BENCHMARKS if ticker not in by_ticker]
         if missing:
             try:
@@ -230,7 +260,6 @@ class MarketAttentionScannerService:
                 code = self._metadata_class_code(row)
                 if ticker in self.BENCHMARKS and code:
                     by_ticker[ticker] = (ticker, code)
-
         start = datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE).astimezone(timezone.utc)
         end = now.astimezone(timezone.utc)
         for requested in self.BENCHMARKS:
@@ -248,6 +277,9 @@ class MarketAttentionScannerService:
             if quote_return is not None:
                 return ticker, code, quote_return
         return None, None, None
+
+    def _benchmark_daily(self, ticker, class_code, trading_date):
+        return self._daily_candles(ticker, class_code, trading_date)
 
     @staticmethod
     def _percentile(value, values):
@@ -268,22 +300,18 @@ class MarketAttentionScannerService:
         session_name = str(info.get("session") or "MORNING").upper()
         trading_date = self.session.get_trading_day()
         now = self.session.now()
-
         if not self.session.is_market_open(now):
             self._last_scan_diagnostics = {"status": "MARKET_CLOSED", "session": "CLOSED", "trading_date": str(trading_date),
                                             "scan_window": "ВСЯ ТЕКУЩАЯ ТОРГОВАЯ СЕССИЯ", "preferred_window": "09:50-13:00 MSK",
                                             "universe_total": 0, "stocks_total": 0, "analyzed": 0, "benchmark": None,
                                             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES"}
             return []
-
         session_start = self.session.get_session_start(now)
         if session_start is None:
             self._last_scan_diagnostics = {"status": "MARKET_CLOSED", "session": session_name}
             return []
-
         preferred = self.PREFERRED_START <= now.time() < self.PREFERRED_END
         scan_window = f"{session_start.strftime('%H:%M')}-до закрытия MSK"
-
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
         if benchmark_change is None:
@@ -298,8 +326,10 @@ class MarketAttentionScannerService:
             }
             return []
 
+        benchmark_daily = self._benchmark_daily(benchmark_ticker, benchmark_code, trading_date)
+        daily_benchmark_available = len(benchmark_daily) >= DailyTrendProfileService.MIN_DAYS
         results = []
-        skipped = {"INSUFFICIENT_M5": [], "INVALID_RESULT": [], "WORKER_ERROR": []}
+        skipped = {"INSUFFICIENT_M5": [], "INVALID_RESULT": [], "WORKER_ERROR": [], "D1_UNAVAILABLE": []}
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
             future_items = {
                 pool.submit(self._analyze_one, item, trading_date, session_start, now): item
@@ -333,55 +363,69 @@ class MarketAttentionScannerService:
             accel_score = self._percentile(self._f(row["money_acceleration"]), acceleration_values)
             row["attention_score"] = round(0.45 * activity + 0.25 * session_score + 0.20 * pace_score + 0.10 * accel_score, 1)
 
+        for row in results:
+            if daily_benchmark_available:
+                try:
+                    profile = self._daily_profile(row, trading_date, benchmark_daily)
+                except Exception:
+                    profile = {"direction": "NEUTRAL", "qualified": False, "structure_direction": "NEUTRAL",
+                               "structure_state": "ERROR", "relative_direction": "UNAVAILABLE", "days": 0}
+                row["daily_profile"] = profile
+                row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
+                row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
+                row["daily_relative_direction"] = profile.get("relative_direction", "UNAVAILABLE")
+                row["daily_relative_mean_pp"] = profile.get("relative_mean_pp", 0.0)
+                row["daily_qualified"] = bool(profile.get("qualified"))
+            else:
+                row["daily_profile"] = {"direction": "NEUTRAL", "qualified": False, "structure_direction": "NEUTRAL",
+                                         "structure_state": "D1_BENCHMARK_UNAVAILABLE", "relative_direction": "UNAVAILABLE", "days": 0}
+                row["daily_structure"] = "NEUTRAL"
+                row["daily_structure_state"] = "D1_BENCHMARK_UNAVAILABLE"
+                row["daily_relative_direction"] = "UNAVAILABLE"
+                row["daily_relative_mean_pp"] = 0.0
+                row["daily_qualified"] = False
+                skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
+
         rs_magnitudes = [abs(self._f(x.get("relative_strength"))) for x in results]
         for row in results:
             rs = self._f(row["relative_strength"])
             rs_magnitude_score = self._percentile(abs(rs), rs_magnitudes)
             row["relative_strength_score"] = round(rs_magnitude_score, 1)
-            row["directional_score"] = round(
-                self.RS_SCORE_WEIGHT * rs_magnitude_score + self.ATTENTION_SCORE_WEIGHT * row["attention_score"], 1
-            )
+            row["directional_score"] = round(self.RS_SCORE_WEIGHT * rs_magnitude_score + self.ATTENTION_SCORE_WEIGHT * row["attention_score"], 1)
             row["relative_strength_quality"] = "MEANINGFUL" if abs(rs) >= self.MIN_MEANINGFUL_RS_PP else "WEAK"
             row["market_relation"] = "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
-            row["direction"] = "LONG" if rs >= self.MIN_MEANINGFUL_RS_PP else "SHORT" if rs <= -self.MIN_MEANINGFUL_RS_PP else "NEUTRAL"
+            intraday_direction = "LONG" if rs >= self.MIN_MEANINGFUL_RS_PP else "SHORT" if rs <= -self.MIN_MEANINGFUL_RS_PP else "NEUTRAL"
+            d1_direction = row.get("daily_profile", {}).get("direction", "NEUTRAL")
+            row["direction"] = intraday_direction if intraday_direction == d1_direction else "NEUTRAL"
+            row["directional_qualified"] = row["direction"] in {"LONG", "SHORT"} and row.get("daily_qualified", False)
 
-        valid = [x for x in results if x["direction"] in {"LONG", "SHORT"}]
-        strong = sorted(
-            (x for x in valid if x["direction"] == "LONG"),
-            key=lambda x: (x["directional_score"], x["relative_strength"], x["attention_score"], x["recent_money_per_minute"]),
-            reverse=True,
-        )
-        weak = sorted(
-            (x for x in valid if x["direction"] == "SHORT"),
-            key=lambda x: (x["directional_score"], abs(x["relative_strength"]), x["attention_score"], x["recent_money_per_minute"]),
-            reverse=True,
-        )
+        valid = [x for x in results if x.get("directional_qualified")]
+        strong = sorted((x for x in valid if x["direction"] == "LONG"),
+                        key=lambda x: (x["directional_score"], x["relative_strength"], x["attention_score"], x["recent_money_per_minute"]), reverse=True)
+        weak = sorted((x for x in valid if x["direction"] == "SHORT"),
+                      key=lambda x: (x["directional_score"], abs(x["relative_strength"]), x["attention_score"], x["recent_money_per_minute"]), reverse=True)
         selected = []
         if strong:
             selected.append(dict(strong[0], selection_role="LONG_CANDIDATE", rank=1))
         if weak and (not selected or weak[0]["spot_ticker"] != selected[0]["spot_ticker"]):
             selected.append(dict(weak[0], selection_role="SHORT_CANDIDATE", rank=len(selected) + 1))
         selected_tickers = {x["spot_ticker"] for x in selected}
-        remaining = sorted(
-            (x for x in valid if x["spot_ticker"] not in selected_tickers),
-            key=lambda x: (x["directional_score"], x["attention_score"]),
-            reverse=True,
-        )
+        remaining = sorted((x for x in valid if x["spot_ticker"] not in selected_tickers),
+                           key=lambda x: (x["directional_score"], x["attention_score"]), reverse=True)
         for row in remaining[:max(0, int(limit or 0) - len(selected))]:
             selected.append(dict(row, selection_role="ATTENTION_WATCH", rank=len(selected) + 1))
         for i, row in enumerate(selected, 1):
             row["rank"] = i
             row["pipeline_version"] = self.VERSION
             row["preferred_window_active"] = preferred
+
         coverage_ratio = (len(results) / len(universe)) if universe else 0.0
         coverage_percent = round(coverage_ratio * 100.0, 1)
         coverage_ok = coverage_ratio >= self.MIN_DIRECTIONAL_COVERAGE
         if not coverage_ok:
             selected = []
-
         self._last_scan_diagnostics = {
-            "status": "OK" if coverage_ok else "INSUFFICIENT_COVERAGE",
-            "session": session_name, "trading_date": str(trading_date),
+            "status": "OK" if coverage_ok else "INSUFFICIENT_COVERAGE", "session": session_name, "trading_date": str(trading_date),
             "scan_window": scan_window, "preferred_window": "09:50-13:00 MSK", "preferred_window_active": preferred,
             "universe_total": len(universe), "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
             "analyzed": len(results), "coverage_ratio": round(coverage_ratio, 4), "coverage_percent": coverage_percent,
@@ -390,9 +434,13 @@ class MarketAttentionScannerService:
             "skip_reasons": {reason: len(values) for reason, values in skipped.items() if values},
             "skip_samples": {reason: values[:10] for reason, values in skipped.items() if values},
             "benchmark": benchmark_ticker, "benchmark_change_percent": benchmark_change,
-            "selected": len(selected), "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
+            "daily_benchmark_available": daily_benchmark_available, "daily_benchmark_days": len(benchmark_daily),
+            "daily_profiles_qualified": sum(1 for x in results if x.get("daily_qualified")),
+            "selected": len(selected),
+            "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "SHORT_CANDIDATE"), None),
             "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
+            "direction_policy": "COMPLETED_D1_STRUCTURE_PLUS_DAILY_RS_PLUS_INTRADAY_RS_PLUS_FLOW",
         }
         return selected
