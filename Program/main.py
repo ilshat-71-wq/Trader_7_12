@@ -14,21 +14,25 @@ from services.market_attention_scanner_service import MarketAttentionScannerServ
 
 def main():
     print("🚀 Запуск Trader_7_12 Pro — Market Attention Radar")
+
+    # Do not permanently disable the GUI because of a transient startup
+    # authorization failure. The scanner owns the same process-wide BCS
+    # client and retries authorization when the user starts a scan.
     loader = MarketLoader()
     try:
         connected = loader.connect()
     except Exception as exc:
         connected = False
-        print(f"⚠️ БКС временно недоступен: {exc}")
+        print(f"⚠️ Первичная проверка БКС не удалась: {type(exc).__name__}: {exc}")
 
-    print("✅ БКС подключён" if connected else "⚠️ Интерфейс запускается в режиме просмотра")
+    print("✅ БКС подключён" if connected else "⚠️ Первичная проверка БКС не пройдена — сканер остаётся доступен")
+
     app = QApplication(sys.argv)
-    window = WatchlistTraderWindow(scanner_enabled=connected)
-    if connected:
-        try:
-            window.scanner = MarketAttentionScannerService()
-        except Exception as exc:
-            print(f"⚠️ Сканер не инициализирован: {type(exc).__name__}: {exc}")
+    window = WatchlistTraderWindow(scanner_enabled=True)
+    try:
+        window.scanner = MarketAttentionScannerService()
+    except Exception as exc:
+        print(f"⚠️ Сканер не инициализирован при старте: {type(exc).__name__}: {exc}")
     window.show()
     sys.exit(app.exec())
 
