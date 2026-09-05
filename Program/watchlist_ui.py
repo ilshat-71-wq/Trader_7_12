@@ -27,7 +27,7 @@ def _money(value):
 
 
 class WatchlistTraderWindow(TraderWindow):
-    VERSION = "2.2.1"
+    VERSION = "2.2.2"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -88,25 +88,6 @@ class WatchlistTraderWindow(TraderWindow):
         diagnostics = getattr(self.scanner, "_last_scan_diagnostics", {}) or {}
         results = results or []
         status = str(diagnostics.get("status") or "").upper()
-        if status == "OUTSIDE_SCAN_WINDOW":
-            scan_window = escape(str(diagnostics.get("scan_window") or "—"))
-            session = escape(str(diagnostics.get("session") or "CURRENT SESSION"))
-            html = [
-                "<div style='font-family:\"Helvetica Neue\",Arial;color:#e6e9ed;'>",
-                f"<div style='font-size:12px;color:#89939d;letter-spacing:1px;'>TRADER_7_12 PRO v{self.VERSION} • {info.get('date','—')} • МСК {info.get('time','—')}</div>",
-                f"<div style='font-size:22px;font-weight:800;margin-top:5px;'>{info.get('label','РЫНОК')}</div>",
-                "<div style='font-size:14px;color:#aab2b9;margin:4px 0 14px;'>MARKET BENCHMARK: <b>—</b> • сканирование не выполнялось</div>",
-                "<div style='padding:20px;border:1px solid #394149;border-radius:12px;background:#171b20;'>",
-                "<div style='font-size:18px;font-weight:800;color:#cbd1d7;'>ОКНО СКАНИРОВАНИЯ ЗАКРЫТО</div>",
-                f"<div style='margin-top:10px;color:#aab2b9;'>Сессия: <b>{session}</b></div>",
-                f"<div style='margin-top:5px;color:#aab2b9;'>Доступное окно: <b>{scan_window}</b></div>",
-                "<div style='margin-top:12px;color:#89939d;'>Рыночные данные не анализировались. LONG/SHORT не формировались.</div>",
-                "</div>",
-                "<div style='margin-top:16px;color:#89939d;font-size:12px;'>Сканер работает только в установленном окне текущей торговой сессии.<br>Фьючерсы не используются как замена базовым инструментам.</div>",
-                "</div>",
-            ]
-            self.result_box.setHtml("".join(html))
-            return
 
         benchmark = diagnostics.get("benchmark") or "—"
         change = diagnostics.get("benchmark_change_percent")
@@ -120,7 +101,9 @@ class WatchlistTraderWindow(TraderWindow):
             f"<div style='font-size:22px;font-weight:800;margin-top:5px;'>{info.get('label','РЫНОК')}</div>",
             f"<div style='font-size:14px;color:#aab2b9;margin:4px 0 14px;'>MARKET BENCHMARK: <b>{escape(market_text)}</b> • текущая сессия</div>",
         ]
-        if long_item:
+        if status == "BENCHMARK_UNAVAILABLE":
+            html.append("<div style='padding:18px;border:1px solid #394149;border-radius:12px;background:#171b20;'>Benchmark недоступен. LONG/SHORT не формируются до восстановления валидного рыночного benchmark.</div>")
+        elif long_item:
             html.append(self._card(long_item, "LONG_CANDIDATE"))
         if short_item:
             html.append(self._card(short_item, "SHORT_CANDIDATE"))
@@ -132,11 +115,15 @@ class WatchlistTraderWindow(TraderWindow):
                 rs_text = "—" if rs is None else f"{float(rs):+.2f}"
                 html.append(f"<tr><td><b>{escape(str(item.get('spot_ticker') or '—'))}</b></td><td align='right'>{_num(item.get('change_percent'),2)}%</td><td align='right'>{rs_text}</td><td align='right'>{_money(item.get('recent_money_per_minute'))}</td><td align='right'>{_num(item.get('attention_score'),1)}</td></tr>")
             html.append("</table>")
-        if not long_item and not short_item:
-            html.append("<div style='padding:18px;border:1px solid #394149;border-radius:12px;background:#171b20;'>Недостаточно свежих данных для честного LONG/SHORT отбора. Сканер не подменяет отсутствующие данные фьючерсами.</div>")
+        if status not in {"BENCHMARK_UNAVAILABLE"} and not long_item and not short_item:
+            html.append("<div style='padding:18px;border:1px solid #394149;border-radius:12px;background:#171b20;'>Нет достаточных свежих данных для честного LONG/SHORT отбора. Сканер не подменяет отсутствующие данные фьючерсами.</div>")
+        preferred = diagnostics.get("preferred_window_active")
+        preferred_text = "активно" if preferred else "вне предпочтительного окна"
         html.extend([
             "<div style='margin-top:16px;color:#89939d;font-size:12px;'>",
             f"UNIVERSE {diagnostics.get('universe_total',0)} • ANALYZED {diagnostics.get('analyzed',0)} • STOCKS {diagnostics.get('stocks_total',0)}",
+            f"<br>Предпочтительное окно 09:50–13:00 MSK: {preferred_text}.",
+            "<br>Сканер работает весь период текущей торговой сессии; предпочтительное окно не ограничивает его работу.",
             "<br>Сильнее рынка → LONG; слабее рынка → SHORT.",
             "<br>Сканер только анализирует рынок. Исполнение сделок и выбор инструмента остаются за пользователем.",
             "</div></div>",
