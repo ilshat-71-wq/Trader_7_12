@@ -7,7 +7,18 @@
 
 ## 1. Назначение
 
-Trader_7_12 Pro — read-only сканер внимания рынка. Он показывает наиболее активные реальные BASE/SPOT-инструменты и их силу/слабость относительно реального рыночного benchmark.
+Trader_7_12 Pro — read-only сканер внимания рынка. Его задача — в течение текущего торгового дня находить 2–3 наиболее интересных реальных BASE/SPOT-инструмента, в которых одновременно есть существенный денежный поток и заметное отличие движения от рынка.
+
+Главный смысл directional output:
+
+```text
+МНОГО ДЕНЕГ
++ СТАБИЛЬНОЕ ДНЕВНОЕ ДВИЖЕНИЕ
++ ЗАМЕТНО СИЛЬНЕЕ/СЛАБЕЕ ИНДЕКСА
+= КАНДИДАТ ДЛЯ ОЦЕНКИ LONG / SHORT
+```
+
+Сильные относительно индекса — LONG-кандидаты. Слабые относительно индекса — SHORT-кандидаты. Это не обещание будущей доходности, а отбор текущих лидеров/аутсайдеров для принятия решения пользователем.
 
 Сканер не выставляет заявки, не управляет позициями, не выбирает фьючерсы и не принимает торговое решение за пользователя.
 
@@ -38,9 +49,10 @@ BASE/SPOT UNIVERSE
 → FLOW ACCELERATION
 → IMOEX2 / IRUS2 BENCHMARK
 → INTRADAY RELATIVE STRENGTH
-→ ATTENTION SCORE
+→ RS MEANINGFULNESS FILTER
+→ ATTENTION + RS DIRECTIONAL SCORE
 → STRONGEST LONG / WEAKEST SHORT
-→ COMPACT WATCHLIST
+→ MAX 1 WATCH
 ```
 
 Primary timeframe: M5. Recent flow window: 15 minutes.
@@ -70,15 +82,68 @@ Attention score:
 
 ## 5. Benchmark / Relative Strength
 
+The benchmark is the real market index, not a synthetic proxy. MOEX describes IMOEX2 as the MOEX Russia Index calculated across the trading day including additional sessions; the index is capitalization-weighted with free-float coefficients. citeturn1search0
+
 Priority:
 
 ```text
 IMOEX2 → IRUS2 fallback only if IMOEX2 unavailable/unfit
 ```
 
+Current session relative strength:
+
 ```text
 RS = asset_current_session_return - benchmark_current_session_return
 ```
+
+Interpretation:
+
+```text
+RS > 0  → instrument is stronger than market
+RS < 0  → instrument is weaker than market
+```
+
+The purpose of RS is **not** merely to label every positive/negative value. A tiny difference that is indistinguishable from market noise must not become a directional candidate.
+
+### Meaningful RS filter
+
+Production directional threshold:
+
+```text
+MIN_MEANINGFUL_RS_PP = 0.10 percentage points
+```
+
+Therefore:
+
+```text
+RS >= +0.10 pp → meaningful STRONG / LONG candidate
+RS <= -0.10 pp → meaningful WEAK / SHORT candidate
+-0.10 < RS < +0.10 → NEUTRAL for directional selection
+```
+
+The 0.10 pp threshold is a minimum noise floor, not a prediction threshold. It prevents outputs such as `RS +0.03 pp` or `RS -0.06 pp` from being presented as meaningful directional signals.
+
+### RS must matter in ranking
+
+Directional ranking no longer uses Attention alone. For every analyzed instrument:
+
+```text
+RS magnitude score = percentile(|RS|) across analyzed universe
+Directional score = 60% RS magnitude score + 40% attention score
+```
+
+This means the scanner explicitly rewards both:
+
+1. **large separation from the index**;
+2. **real money/activity**.
+
+A highly liquid instrument that moves almost exactly with the index should not outrank an equally active instrument that is materially diverging from the index merely because its raw Attention score is slightly higher.
+
+Within positive RS, the highest `directional_score` becomes the LONG candidate. Within negative RS, the highest `directional_score` becomes the SHORT candidate.
+
+This is aligned with the project objective: find a small number of liquid intraday leaders and laggards, not simply the stocks with the largest turnover.
+
+A strong asset can be LONG on a falling market; a weak asset can be SHORT on a rising market.
 
 Benchmark source:
 
@@ -94,14 +159,26 @@ BCS `classCode` is supported both at top level and inside `boards[].classCode`; 
 
 ## 6. Directional selection
 
+The target is not to forecast every stock. The scanner should publish only the clearest current leaders/laggards:
+
 ```text
-LONG  = RS > 0 + high current activity + highest attention among strong
-SHORT = RS < 0 + high current activity + highest attention among weak
+LONG_CANDIDATE
+  RS >= +0.10 pp
+  + high money/activity
+  + highest directional score among strong instruments
+
+SHORT_CANDIDATE
+  RS <= -0.10 pp
+  + high money/activity
+  + highest directional score among weak instruments
+
+ATTENTION_WATCH
+  next most relevant liquid instrument, when available
 ```
 
-A strong asset can be LONG on a falling market; a weak asset can be SHORT on a rising market.
+UI remains compact: maximum 1 LONG + 1 SHORT + 1 WATCH.
 
-No arbitrary RS threshold is currently introduced. Changing the sign-based RS methodology is a separate specification decision, not a bugfix.
+If there is no meaningful strong or weak instrument, the scanner must **not manufacture a directional signal** just to fill the card.
 
 ## 7. Calendar / DSWD
 
@@ -158,6 +235,7 @@ Output contract includes:
 selection_role, spot_ticker, market_group, price,
 change_percent, benchmark, benchmark_change_percent,
 relative_strength, relative_strength_status, market_relation,
+relative_strength_score, directional_score,
 session_money, money_per_minute, recent_money,
 recent_money_per_minute, money_acceleration, attention_score,
 data_status, pipeline_version
@@ -196,6 +274,9 @@ Secrets are not stored in Git.
 Required tests cover:
 
 - strong/weak assets against rising/falling benchmark;
+- meaningful RS threshold suppresses tiny deviations such as +0.03 pp / -0.06 pp;
+- RS magnitude participates in directional ranking instead of Attention alone;
+- high-attention low-RS instrument cannot outrank a materially diverging high-activity instrument solely on Attention;
 - IMOEX2 → IRUS2 fallback;
 - no benchmark → no directional output;
 - benchmark + RS on directional candidates;
@@ -238,7 +319,7 @@ Current GitHub audit: only `main` exists; no open PRs. Existing regression, buil
 ## 14. Current checkpoint — 05.09.2026
 
 ```text
-Pipeline version:        2.2.2
+Pipeline version:        2.2.3
 Runtime:                 BASE/SPOT only
 Universe:                ALL TQBR + DSWD eligibility
 Macro:                   GOLD / OIL / GAS / USDRUB
@@ -248,6 +329,8 @@ IMOEX2 class code:       INDX
 Timeframe:               M5
 Recent flow:             15 min
 Acceleration:            2 complete comparable 15-min windows
+Meaningful RS floor:     ±0.10 percentage points
+Directional score:       60% RS magnitude + 40% attention
 Current-session scan:    FULL OPEN SESSION → actual close
 Preferred window:        09:50–13:00, NOT hard gate
 DSWD:                    09:50–19:00 MSK
@@ -268,8 +351,8 @@ Read-only:               YES
 - Connection pooling and `WEEKENDSESSION` filtering are now part of production architecture.
 - Erroneous 13:00 hard gate removed; scanner now follows full open session.
 - Acceleration corrected to comparable complete 15-minute windows. Live sample `MAGN +1454.1%` is not automatically erroneous because it is a ratio of real comparable flow rates and has 10% attention weight.
-- Regression test `test_flow_acceleration_requires_two_complete_15_minute_windows` verifies incomplete previous windows produce zero acceleration.
+- RS methodology was then tightened: tiny deviations are no longer directional signals, and relative-strength magnitude now contributes 60% of the directional ranking while money/activity attention contributes 40%.
 
 ## 16. Validation gate
 
-The canonical source state is the latest `main` commit. The final acceptance gate is: local `compileall` + full `pytest` on the canonical checkout, followed by successful GitHub Actions for the latest commit. No RS-threshold methodology change is introduced without a separate specification decision.
+The canonical source state is the latest `main` commit. The final acceptance gate is: local `compileall` + full `pytest` on the canonical checkout, followed by successful GitHub Actions for the latest commit. No arbitrary RS threshold below the documented 0.10 pp floor should be introduced without a separate specification decision.
