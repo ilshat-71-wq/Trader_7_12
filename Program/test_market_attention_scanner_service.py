@@ -32,11 +32,16 @@ class FakeSession:
     def get_window(self):
         return (self.MORNING_START, self.MAIN_START)
 
+    def get_session_start(self, value=None):
+        return self.MORNING_START
+
     def is_market_open(self, value=None):
         return True
 
 
 class FakeWeekendSession(FakeSession):
+    WEEKEND_START = datetime(2026, 9, 5, 9, 50, tzinfo=FakeSession.TIMEZONE).time()
+
     def now(self):
         return datetime(2026, 9, 5, 10, 44, tzinfo=self.TIMEZONE)
 
@@ -45,6 +50,9 @@ class FakeWeekendSession(FakeSession):
 
     def get_session_info(self):
         return {"session": "WEEKEND_SESSION"}
+
+    def get_session_start(self, value=None):
+        return self.WEEKEND_START
 
 
 def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
@@ -109,7 +117,7 @@ def test_weekend_scan_uses_dswd_start(monkeypatch):
     assert result
     assert captured["session_start"].strftime("%H:%M") == "09:50"
     assert scanner._last_scan_diagnostics["session"] == "WEEKEND_SESSION"
-    assert scanner._last_scan_diagnostics["scan_window"] == "09:50-13:00 MSK"
+    assert scanner._last_scan_diagnostics["scan_window"] == "09:50-до закрытия MSK"
 
 
 def test_benchmark_uses_nested_bcs_class_code_and_m5(monkeypatch):
