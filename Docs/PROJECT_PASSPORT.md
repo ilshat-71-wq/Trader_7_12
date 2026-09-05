@@ -82,7 +82,7 @@ Attention score:
 
 ## 5. Benchmark / Relative Strength
 
-The benchmark is the real market index, not a synthetic proxy. MOEX describes IMOEX2 as the MOEX Russia Index calculated across the trading day including additional sessions; the index is capitalization-weighted with free-float coefficients. citeturn1search0
+The benchmark is the real market index, not a synthetic proxy. MOEX describes IMOEX2 as the MOEX Russia Index calculated across the trading day including additional sessions; the index is capitalization-weighted with free-float coefficients.
 
 Priority:
 
