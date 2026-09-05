@@ -11,6 +11,7 @@ SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
 PROGRAM_DIR = os.path.join(PROJECT_ROOT, "Program")
 MAIN_SCRIPT = os.path.join(PROGRAM_DIR, "main.py")
+ICON_PATH = os.path.join(PROJECT_ROOT, "build", "Trader_7_12_Pro.icns")
 
 hiddenimports = [
     "config",
@@ -59,7 +60,7 @@ exe = EXE(
 app = BUNDLE(
     exe,
     name="Trader_7_12 Pro.app",
-    icon=None,
+    icon=ICON_PATH,
     bundle_identifier="com.ilshat.trader712pro",
     info_plist={
         "CFBundleDisplayName": "Trader_7_12 Pro",
