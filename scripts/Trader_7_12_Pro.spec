@@ -1,8 +1,12 @@
 # PyInstaller spec for the read-only Trader_7_12 Pro macOS GUI.
 # Build from repository root with scripts/build_mac_app.sh.
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
 
+
+BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
 
 hiddenimports = [
     "api.bcs_api",
@@ -13,7 +17,6 @@ hiddenimports = [
     "services.relative_strength_service",
 ]
 
-# Keep package discovery deterministic for modules loaded by the scanner.
 hiddenimports += collect_submodules("api")
 hiddenimports += collect_submodules("services")
 
@@ -55,8 +58,9 @@ app = BUNDLE(
     info_plist={
         "CFBundleDisplayName": "Trader_7_12 Pro",
         "CFBundleName": "Trader_7_12 Pro",
-        "CFBundleShortVersionString": "2.2",
-        "CFBundleVersion": "2.2",
+        "CFBundleShortVersionString": "2.2.1",
+        "CFBundleVersion": "2.2.1",
+        "CFBundleSourceCommit": BUILD_COMMIT,
         "LSMinimumSystemVersion": "12.0",
     },
 )
