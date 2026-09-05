@@ -30,10 +30,11 @@ jobs:
       - name: Verify bundle provenance
         run: |
           APP='dist/Trader_7_12 Pro.app'
+          PLIST="$APP/Contents/Info.plist"
           test -x "$APP/Contents/MacOS/Trader_7_12_Pro"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist"
-          test "$(git rev-parse HEAD)" = "$(git rev-parse HEAD)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = 'com.ilshat.trader712pro'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = '2.2.1'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "$PLIST")" = "$(git rev-parse HEAD)"
 
       - name: Package app
         run: |
