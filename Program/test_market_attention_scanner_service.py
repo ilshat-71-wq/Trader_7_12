@@ -1,7 +1,7 @@
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from services.market_attention_scanner_service import MarketAttentionScannerService
+from services.market_information_scanner_service import MarketInformationScannerService
 
 
 class FakeAPI:
@@ -59,7 +59,7 @@ def _qualified_profile(direction="STRONG"):
 
 
 def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
-    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=session or FakeSession(), history_service=object())
+    scanner = MarketInformationScannerService(api=FakeAPI(), session_service=session or FakeSession(), history_service=object())
     monkeypatch.setattr(scanner, "build_universe", lambda: [dict(x) for x in rows])
     monkeypatch.setattr(scanner, "_benchmark", lambda *args: ("IMOEX2", "INDX", benchmark) if benchmark is not None else (None, None, None))
     monkeypatch.setattr(scanner, "_benchmark_daily", lambda *args: [{"time": "2026-08-31T00:00:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
@@ -70,7 +70,7 @@ def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
 
 
 def test_strong_on_up_market_is_market_leader(monkeypatch):
-    scanner = _scanner(monkeypatch, [{**_row("STRONG", 1.8, 2_000_000), "change_percent": 1.8}, {**_row("WEAK", 0.2, 1_900_000), "change_percent": 0.2}], 0.7)
+    scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", 0.2, 1_900_000)], 0.7)
     result = scanner.scan(limit=2)
     assert result[0]["selection_role"] == "MARKET_LEADER"
     assert result[0]["spot_ticker"] == "STRONG"
@@ -78,20 +78,20 @@ def test_strong_on_up_market_is_market_leader(monkeypatch):
 
 
 def test_weak_on_up_market_is_market_laggard(monkeypatch):
-    scanner = _scanner(monkeypatch, [{**_row("STRONG", 1.8, 2_000_000), "change_percent": 1.8}, {**_row("WEAK", -0.4, 1_900_000), "change_percent": -0.4}], 0.7)
+    scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", -0.4, 1_900_000)], 0.7)
     result = scanner.scan(limit=2)
     assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
 
 
 def test_strong_on_down_market_is_market_leader(monkeypatch):
-    scanner = _scanner(monkeypatch, [{**_row("STRONG", 0.4, 2_000_000), "change_percent": 0.4}, {**_row("WEAK", -2.2, 1_900_000), "change_percent": -2.2}], -0.6)
+    scanner = _scanner(monkeypatch, [_row("STRONG", 0.4, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
     result = scanner.scan(limit=2)
     assert result[0]["selection_role"] == "MARKET_LEADER"
     assert result[0]["relative_strength"] == 1.0
 
 
 def test_weak_on_down_market_is_market_laggard(monkeypatch):
-    scanner = _scanner(monkeypatch, [{**_row("STRONG", -0.1, 2_000_000), "change_percent": -0.1}, {**_row("WEAK", -2.2, 1_900_000), "change_percent": -2.2}], -0.6)
+    scanner = _scanner(monkeypatch, [_row("STRONG", -0.1, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
     result = scanner.scan(limit=2)
     assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
 
@@ -148,7 +148,7 @@ def test_rs_magnitude_participates_in_ranking(monkeypatch):
 
 
 def test_acceleration_requires_two_complete_windows():
-    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
+    scanner = MarketInformationScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
     candles = [{"time": f"2026-09-02T07:{m:02d}:00Z", "close": 100.0, "money_volume": 100.0} for m in (0, 5, 10)]
     class History:
         def load(self, *args, **kwargs): return candles
@@ -158,7 +158,7 @@ def test_acceleration_requires_two_complete_windows():
 
 
 def test_acceleration_uses_equal_windows():
-    scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
+    scanner = MarketInformationScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
     candles = [{"time": f"2026-09-02T07:{m:02d}:00Z", "close": 100.0, "money_volume": money}
                for m, money in ((0, 100), (5, 100), (10, 100), (15, 200), (20, 200), (25, 200))]
     class History:
