@@ -174,6 +174,10 @@ pipeline_version
 
 BCS API использует один process-wide read-only client и ограниченную конкурентность. HTTP market data используют bounded concurrency, timeout/retry и cache.
 
+Для широкого M5-скана добавлено **глобальное ограничение частоты старта HTTP-запросов** ниже документированного лимита BCS. Ограничение действует между всеми worker-потоками и для GET/POST, не сериализуя ожидание ответа. Это необходимо, потому что live DSWD-прогон 05.09.2026 показал серию HTTP 429 при параллельной загрузке M5 примерно 260 инструментов.
+
+429 не считается рыночным отсутствием данных: это техническое ограничение запроса. До исправления такой прогон давал только частичный `ANALYZED` universe и поэтому не должен считаться полной рыночной выборкой.
+
 Сканер не запрашивает futures metadata, не строит expiry universe, не выполняет futures mapping и не запускает дорогой технический pipeline по всему рынку.
 
 ## 11. Авторизация
@@ -264,7 +268,7 @@ PYTHONPATH=Program python3 -m pytest -q Program
 3. Проверка BCS live quote fallback для benchmark.
 4. Контроль, что каждый LONG/SHORT имеет benchmark и RS.
 5. Контроль отсутствия futures fallback для OIL/GAS/GOLD/USDRUB.
-6. Измерение полного scan time и сетевой нагрузки.
+6. Измерение полного scan time, сетевой нагрузки и доли успешно проанализированных инструментов.
 7. При необходимости переход на BCS WebSocket для текущих M5 данных.
 8. Компактный output: 1 LONG, 1 SHORT, максимум 1 ATTENTION_WATCH.
 
@@ -295,7 +299,10 @@ Futures analysis:        REMOVED
 Futures mapping:         REMOVED
 Order execution:         ABSENT
 Read-only:               YES
+HTTP market-data throttle: 0.15 s between request starts
 Git synchronization:     GitHub main is canonical
 ```
 
 **Главная цель версии 2.2:** корректно работать с реальной структурой BCS metadata, не терять `IMOEX2` из-за вложенного `boards[].classCode`, использовать реальный `INDX` benchmark и при этом сохранять жёсткий запрет на синтетические и фьючерсные прокси.
+
+**Live-validation correction 05.09.2026:** IMOEX2 M5 в DSWD подтверждён напрямую через BCS (`IMOEX2 / INDX`, 16 M5 candles в тестовом окне). Полный scanner-прогон выявил HTTP 429 при burst-нагрузке на M5, поэтому результаты такого частичного прогона не считаются достаточной выборкой рынка. Добавлено глобальное ограничение старта HTTP-запросов; следующий live-прогон должен подтвердить существенно более полное покрытие universe без burst-429.
