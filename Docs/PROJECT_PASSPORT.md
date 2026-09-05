@@ -7,268 +7,213 @@
 
 ## 1. Назначение
 
-Trader_7_12 Pro отвечает на один вопрос: какие 2–3 базовых инструмента прямо сейчас привлекают наибольшее внимание рынка и кто из них относительно рынка сильнее или слабее.
+Trader_7_12 Pro — read-only сканер внимания рынка. Он показывает наиболее активные реальные BASE/SPOT-инструменты и их силу/слабость относительно реального рыночного benchmark.
 
-Сканер только анализирует рынок. Он не выставляет заявки, не управляет позициями, не выбирает фьючерсы и не принимает торговое решение за пользователя.
+Сканер не выставляет заявки, не управляет позициями, не выбирает фьючерсы и не принимает торговое решение за пользователя.
 
 ## 2. Канонический universe
 
-Анализируется только реальный SPOT / BASE ASSET:
-
 ```text
-1. ALL MOEX TQBR STOCKS
-2. GOLD
-3. OIL
-4. GAS
-5. USDRUB
+ALL MOEX TQBR STOCKS
+GOLD
+OIL
+GAS
+USDRUB
 ```
 
-GOLD: `GLDRUB_TOM`, если доступен в BCS SPOT metadata. USDRUB: реальный spot-инструмент из BCS metadata. OIL/GAS не подменяются фьючерсами; при отсутствии реального base/spot источника — `UNAVAILABLE`.
+- GOLD: `GLDRUB_TOM`, если доступен в BCS SPOT metadata.
+- USDRUB: реальный spot-инструмент из BCS metadata.
+- OIL/GAS: не заменяются фьючерсами; без real base/spot source → `UNAVAILABLE`.
+- Futures metadata, expiry, mapping и ranking в runtime отсутствуют.
+- На ДСВД stock universe фильтруется по MOEX `WEEKENDSESSION`, если поле доступно; `WEEKENDSESSION=N` исключается.
+- Если `WEEKENDSESSION` не отдан BCS, бумага не удаляется молча; фактическая M5-доступность может использоваться как дополнительная проверка.
 
-В обычную рабочую сессию universe включает реальные TQBR-инструменты. На ДСВД stock-universe дополнительно фильтруется по официальному признаку допуска бумаги к выходной сессии `WEEKENDSESSION`, если этот флаг присутствует в BCS metadata. Бумаги с `WEEKENDSESSION=N` в выходной scan не входят.
-
-Если конкретная версия BCS metadata не отдаёт `WEEKENDSESSION`, запись не удаляется молча: она может быть проверена фактической M5-доступностью. Техническая ошибка получения данных не считается отсутствием торгов.
-
-Фьючерсная metadata, expiry, futures mapping и futures ranking в runtime-сканере отсутствуют.
-
-## 3. Главный алгоритм
+## 3. Pipeline
 
 ```text
 BASE/SPOT UNIVERSE
-        ↓
-CURRENT MARKET SESSION M5 DATA
-        ↓
-PRICE + CHANGE + ₽×V + ₽×V/MIN
-        ↓
-RECENT 15-MIN ACTIVITY
-        ↓
-FLOW ACCELERATION
-        ↓
-IMOEX2 / IRUS2 MARKET BENCHMARK
-        ↓
-INTRADAY RELATIVE STRENGTH
-        ↓
-ATTENTION SCORE
-        ↓
-STRONGEST → LONG CANDIDATE
-WEAKEST   → SHORT CANDIDATE
-        ↓
-COMPACT WATCHLIST
+→ CURRENT SESSION M5
+→ PRICE / CHANGE / ₽×V / ₽×V-MIN
+→ RECENT 15-MIN FLOW
+→ FLOW ACCELERATION
+→ IMOEX2 / IRUS2 BENCHMARK
+→ INTRADAY RELATIVE STRENGTH
+→ ATTENTION SCORE
+→ STRONGEST LONG / WEAKEST SHORT
+→ COMPACT WATCHLIST
 ```
 
-## 4. Benchmark / Relative Strength — обязательное правило
+Primary timeframe: M5. Recent flow window: 15 minutes.
 
-Приоритет benchmark:
+## 4. Flow acceleration — production contract
+
+Acceleration compares **two complete, equal 15-minute M5 windows**:
 
 ```text
-1. IMOEX2
-2. IRUS2 — fallback только если IMOEX2 недоступен/непригоден
+recent 15-min pace / previous 15-min pace - 1
+```
+
+Calculation is valid only when both windows contain 3 M5 candles and previous flow is positive. Otherwise `money_acceleration = 0.0`.
+
+No artificial acceleration cap is applied: a large value is valid when caused by real comparable flow rates. Acceleration has only 10% weight in attention and cannot alone determine selection.
+
+Attention score:
+
+```text
+45% recent ₽×V/min
+25% session ₽×V
+20% session ₽×V/min
+10% acceleration percentile
+```
+
+`attention_score` is relative market attention, not probability of profit.
+
+## 5. Benchmark / Relative Strength
+
+Priority:
+
+```text
+IMOEX2 → IRUS2 fallback only if IMOEX2 unavailable/unfit
 ```
 
 ```text
 RS = asset_current_session_return - benchmark_current_session_return
 ```
 
-### Источник benchmark
+Benchmark source:
 
 ```text
-BCS metadata
-      ↓
-BCS M5 candles
-      ↓ если M5 benchmark недоступен
-BCS current quote: session open → current price
-      ↓ если quote также непригоден
-benchmark unavailable
+BCS metadata → BCS M5 candles → BCS live quote fallback → unavailable
 ```
 
-Quote fallback использует тот же реальный `IMOEX2` или `IRUS2`, а не прокси. Quote принимается только при наличии open, current price и допустимой свежести timestamp. Синтетический benchmark, futures proxy и вычисление индекса из компонентов запрещены.
+Only real IMOEX2/IRUS2 is allowed. Synthetic benchmark, futures proxy and component-reconstructed index are forbidden.
 
-Если benchmark недоступен, directional LONG/SHORT selection запрещён.
+Quote fallback requires open, current price and fresh timestamp. If benchmark is unavailable, directional LONG/SHORT selection is forbidden.
 
-BCS может возвращать `classCode` не на верхнем уровне metadata, а внутри `boards[]`. Сканер поддерживает оба формата и для `IMOEX2` корректно извлекает реальный `INDX` из `boards[].classCode`.
+BCS `classCode` is supported both at top level and inside `boards[].classCode`; IMOEX2 resolves to real `INDX`.
 
-IMOEX2 является benchmark для дополнительных сессий; MOEX публикует расчёт IMOEX2 в ДСВД.
-
-## 5. Market Attention
-
-`attention_score` — относительная оценка внимания внутри текущего скана, не вероятность прибыли.
-
-Компоненты:
-
-- recent 15-minute ₽×V/min;
-- session ₽×V;
-- session ₽×V/min;
-- ускорение денежного потока.
-
-Приоритет отдаётся текущей активности.
-
-## 6. LONG / SHORT selection
+## 6. Directional selection
 
 ```text
-LONG:
-  положительный RS относительно benchmark
-  высокая текущая активность
-  максимальное внимание среди сильных
-
-SHORT:
-  отрицательный RS относительно benchmark
-  высокая текущая активность
-  максимальное внимание среди слабых
+LONG  = RS > 0 + high current activity + highest attention among strong
+SHORT = RS < 0 + high current activity + highest attention among weak
 ```
 
-Сильный актив на падающем рынке может быть LONG-кандидатом. Слабый актив на растущем рынке может быть SHORT-кандидатом.
+A strong asset can be LONG on a falling market; a weak asset can be SHORT on a rising market.
 
-## 7. Торговый календарь и ДСВД
+No arbitrary RS threshold is currently introduced. Changing the sign-based RS methodology is a separate specification decision, not a bugfix.
 
-Календарные суббота/воскресенье не считаются автоматически закрытым рынком. MOEX проводит ДСВД на фондовом рынке с 09:50 до 19:00 МСК; ДСВД является частью ближайшего следующего обычного торгового дня.
+## 7. Calendar / DSWD
 
-По опубликованному календарю 2026 года фондовый рынок не проводит ДСВД 12–13 сентября, 24–25 октября и 28–29 ноября. 5–6 декабря ДСВД проводится. **05.09.2026 является торговым днём в формате ДСВД (09:50–19:00 МСК).**
-
-На фондовой ДСВД доступны основные режимы TQBR/TQTF/TQIF/TQTY и SMAL, а конкретная бумага должна быть допущена к выходной сессии. MOEX прямо указывает, что статус допуска конкретной бумаги можно определить по полю `SECURITIES.WEEKENDSESSION`.
-
-**Критическое правило сканера:** окно `09:50–13:00 MSK` — только предпочтительное окно пользователя для наблюдения/торговли при повышенной активности. Оно **не ограничивает работу сканера**.
-
-Сканер работает в течение всей фактически открытой текущей торговой сессии, начиная с реального `session_start`, который предоставляет `MarketSessionService`, и до фактического закрытия этой сессии.
+Weekend is not automatically CLOSED.
 
 ```text
-обычный день:
-  MORNING: 07:00 → 10:00 MSK
-  MAIN:    10:00 → 19:00 MSK
-  EVENING: 19:00 → 23:50 MSK
+ordinary:
+  MORNING  07:00–10:00 MSK
+  MAIN     10:00–19:00 MSK
+  EVENING  19:00–23:50 MSK
 
-ДСВД:
-  trading/scanning: 09:50 → 19:00 MSK
-
-предпочтительное окно пользователя:
-  09:50 → 13:00 MSK
-  не является hard gate сканера
+DSWD:
+  09:50–19:00 MSK
 ```
 
-После 13:00 при открытом рынке сканер продолжает работать; UI только показывает, что предпочтительное окно завершилось. До начала реальной сессии или после её закрытия сканирование не выполняется.
+**05.09.2026 is a real DSWD trading day, 09:50–19:00 MSK.**
 
-На ДСВД `market_session = WEEKEND_SESSION`; сканер использует начало ДСВД `09:50`, а не обычные `07:00`.
+No DSWD in 2026: 12–13 Sep, 24–25 Oct, 28–29 Nov. DSWD is scheduled for 05–06 Dec.
 
-## 8. Output contract
+User preferred window `09:50–13:00 MSK` is **diagnostic/UI information only, never a hard scan gate**. Scanner follows the actual open session from `session_start` to actual close. Before session / after close → explicit `MARKET_CLOSED`.
 
-Каждый выбранный актив содержит минимум:
+## 8. Coverage gate
+
+Minimum production coverage for directional output: **80%**.
 
 ```text
-selection_role
-spot_ticker
-market_group
-price
-change_percent
-benchmark
-benchmark_change_percent
-relative_strength
-relative_strength_status
-market_relation
-session_money
-money_per_minute
-recent_money
-recent_money_per_minute
-money_acceleration
-attention_score
-data_status
-pipeline_version
+coverage = analyzed / universe_total
 ```
 
-Роли: `LONG_CANDIDATE`, `SHORT_CANDIDATE`, `ATTENTION_WATCH`.
-
-## 9. UI
-
-Главный экран — компактный dashboard с двумя основными карточками LONG/SHORT и коротким списком остальных активных инструментов. Диагностика не должна занимать главный экран.
-
-Предпочтительное окно `09:50–13:00 MSK` отображается отдельно и не используется как ограничение сканирования.
-
-## 10. BCS HTTP / сетевой слой
-
-BCS API использует один process-wide read-only client и ограниченную конкурентность.
-
-Market-data HTTP использует глобальное ограничение старта запросов `0.15 s` между запросами, общее для worker-потоков и GET/POST. Это удерживает нагрузку ниже лимита BCS и предотвращает burst-429.
-
-HTTP helper дополнительно использует переиспользуемый `requests.Session` с connection pool на worker thread, чтобы не выполнять TLS/TCP handshake заново для каждого M5-запроса. Это направлено на устранение наблюдавшихся transient `SSLError` при широком скане.
-
-Техническая ошибка HTTP/SSL не должна интерпретироваться как отсутствие торговли. Частичный scan не считается доказательным полным рыночным результатом.
-
-Сканер не запрашивает futures metadata, не строит expiry universe, не выполняет futures mapping и не запускает дорогой технический pipeline по всему рынку.
-
-## 11. Авторизация
-
-Refresh token:
+Below 80%:
 
 ```text
-~/.config/Trader_7_12/bcs_refresh_token
-chmod 600
+status = INSUFFICIENT_COVERAGE
+selected = []
 ```
 
-Секреты в Git запрещены.
+Diagnostics expose coverage, skipped count, skip reasons and sample tickers. Partial scan is never treated as a complete market result.
 
-## 12. Runtime safety
+## 9. HTTP resilience
 
-Запрещено:
+- One process-wide read-only BCS client.
+- `MAX_WORKERS = 6`.
+- Global request-start throttle: `0.15 s` between requests, shared by worker GET/POST.
+- Reusable `requests.Session` with connection pooling per worker.
+- HTTP/SSL failure is not interpreted as no trading.
+- 429/SSL degradation must reduce coverage and remain visible in diagnostics.
+- If instability persists, evaluate BCS WebSocket/streaming rather than hiding missing data.
+
+## 10. Output / UI
+
+Output contract includes:
+
+```text
+selection_role, spot_ticker, market_group, price,
+change_percent, benchmark, benchmark_change_percent,
+relative_strength, relative_strength_status, market_relation,
+session_money, money_per_minute, recent_money,
+recent_money_per_minute, money_acceleration, attention_score,
+data_status, pipeline_version
+```
+
+Roles: `LONG_CANDIDATE`, `SHORT_CANDIDATE`, `ATTENTION_WATCH`.
+
+UI contract: 1 LONG + 1 SHORT + maximum 1 WATCH; diagnostics secondary.
+
+## 11. Runtime safety
+
+Forbidden:
 
 ```text
 order execution
 position sizing
 SL/TP automation
-futures selection
-futures confirmation
+futures selection / confirmation
 synthetic SPOT
 synthetic RS
 FUTURES_DIRECT fallback
 synthetic benchmark
 ```
 
-Если реального base/spot источника нет: `data_status = UNAVAILABLE`.
+Refresh token is local only:
 
-## 13. Repository hygiene / synchronization
-
-Разработка ведётся только в `main`. Новые рабочие ветки не создаются.
-
-`Docs/PROJECT_PASSPORT.md` — единственный проектный MD-файл и архитектурный checkpoint. Каждый существенный этап разработки обязан актуализировать этот файл.
-
-GitHub `main` — канонический источник кода. Локальная синхронизация:
-
-```bash
-git checkout main
-git pull --ff-only
+```text
+~/.config/Trader_7_12/bcs_refresh_token
+chmod 600
 ```
 
-## 14. Regression tests
+Secrets are not stored in Git.
 
-Обязательные проверки:
+## 12. Regression contract
 
-- strong asset on rising market → LONG;
-- strong asset on falling market → LONG;
-- weak asset on rising market → SHORT;
-- weak asset on falling market → SHORT;
-- missing IMOEX2 → IRUS2 fallback;
-- missing both benchmarks → no directional candidate;
-- every directional candidate contains benchmark and RS;
-- attention ranking uses recent/current money;
-- no futures instruments enter the universe;
-- GOLD/USDRUB use real SPOT metadata;
-- unavailable OIL/GAS are not replaced by futures;
-- BCS M5 benchmark is preferred;
-- BCS live quote can supply the same real benchmark when M5 is unavailable;
-- stale benchmark quote is rejected;
-- nested BCS `boards[].classCode` is recognized;
-- `IMOEX2` nested metadata resolves to `INDX`;
-- MOEX `WEEKENDSESSION=N` excludes a stock from DSWD universe;
-- 05.09.2026 → `WEEKEND_SESSION`;
-- 09:49:59 before DSWD → `CLOSED`;
-- 09:50:00 DSWD → `WEEKEND_SESSION`;
-- 12.09.2026 → `CLOSED`;
-- 28.11.2026 → `CLOSED`;
-- 05.12.2026 → `WEEKEND_SESSION`;
-- weekend scanner uses `09:50` as session start;
-- scanner continues after 13:00 while the current market session remains open;
-- preferred 09:50–13:00 window is diagnostic/UI information only and never a scan hard gate;
-- candle resilience uses bounded retry and connection pooling;
-- directional candidates are suppressed when coverage is below the minimum production threshold;
-- partial-scan diagnostics expose coverage, skipped count, reason counts and sample tickers;
-- read-only scanner contract remains intact.
+Required tests cover:
+
+- strong/weak assets against rising/falling benchmark;
+- IMOEX2 → IRUS2 fallback;
+- no benchmark → no directional output;
+- benchmark + RS on directional candidates;
+- recent/current money attention ranking;
+- two complete 15-minute acceleration windows;
+- incomplete previous window → acceleration 0;
+- extreme acceleration does not break 0–100 attention ranking;
+- no futures in universe;
+- real GOLD/USDRUB SPOT;
+- OIL/GAS not replaced by futures;
+- M5 benchmark preferred to quote;
+- stale quote rejected;
+- nested `boards[].classCode` and IMOEX2 → `INDX`;
+- `WEEKENDSESSION=N` exclusion;
+- DSWD calendar boundaries including 05.09.2026;
+- full-session scanning after 13:00;
+- 80% coverage suppression and partial-scan diagnostics;
+- read-only contract.
 
 Before live run:
 
@@ -277,61 +222,54 @@ python3 -m compileall -q Program
 PYTHONPATH=Program python3 -m pytest -q Program
 ```
 
-## 15. Production validation focus
+## 13. Repository hygiene
 
-1. Verify actual BCS metadata for `IMOEX2` / `IRUS2` and canonical base/spot instruments.
-2. Verify that BCS stock metadata exposes MOEX `WEEKENDSESSION` and that DSWD universe is filtered accordingly.
-3. Verify live M5 flow on an ordinary trading day and DSWD.
-4. Verify that transient SSL errors no longer materially reduce M5 coverage.
-5. Verify no burst HTTP 429 under full universe load.
-6. Require at least 80% universe coverage before publishing directional candidates; below this threshold return explicit `INSUFFICIENT_COVERAGE` and suppress LONG/SHORT output.
-7. If HTTP coverage remains unstable, evaluate BCS WebSocket/streaming current-session data rather than hiding missing data.
-8. Measure full scan time and network load.
-9. Compact output: 1 LONG, 1 SHORT, maximum 1 ATTENTION_WATCH.
-10. Verify that scanning continues after 13:00 during an open MAIN/EVENING session.
+Only `main`. No working branches are created.
 
-## 16. Current checkpoint
+`Docs/PROJECT_PASSPORT.md` is the **single canonical project MD/checkpoint**. GitHub `main` is canonical source.
 
-```text
-Repository:              ilshat-71-wq/Trader_7_12
-Branch:                  main ONLY
-Project MD:              Docs/PROJECT_PASSPORT.md ONLY
-Scanner:                 Market Attention Radar
-Pipeline version:        2.2.2
-Runtime data:            BASE/SPOT only
-Equity universe:         ALL TQBR, DSWD filtered by WEEKENDSESSION
-Macro groups:            GOLD / OIL / GAS / USDRUB
-Benchmark priority:      IMOEX2 → IRUS2 fallback
-Benchmark source:        BCS M5 → BCS live quote
-IMOEX2 class code:       INDX (including nested boards[].classCode)
-Benchmark mandatory:     YES for directional selection
-Primary timeframe:       M5
-Recent flow window:      15 min
-Current-session scanning: FULL OPEN SESSION → actual close
-Preferred window:        09:50 → 13:00 MSK (NOT a hard gate)
-Weekend session:         WEEKEND_SESSION 09:50 → 19:00 MSK
-Selection:               strongest + weakest vs market
-Output:                  LONG + SHORT + compact watchlist
-Closed market:           explicit MARKET_CLOSED, no M5 scan
-Futures analysis:        REMOVED
-Futures mapping:         REMOVED
-Order execution:         ABSENT
-Read-only:               YES
-HTTP market-data throttle: 0.15 s between request starts
-HTTP connection pooling: YES, per worker thread
-Minimum directional coverage: 80% of current universe
-Partial-scan diagnostics: coverage + skipped reasons + sample tickers
-Weekend eligibility:     MOEX SECURITIES.WEEKENDSESSION when exposed by BCS metadata
-Git synchronization:     GitHub main is canonical
+```bash
+git switch main
+git pull --ff-only origin main
 ```
 
-## 17. Live-validation history — 05.09.2026
+Current GitHub audit: only `main` exists; no open PRs. Existing regression, build and workflow files are retained because they are technically relevant.
 
-- MOEX DSWD for 05.09.2026 confirmed as a trading weekend session.
-- BCS `IMOEX2 / INDX` M5 confirmed directly with live DSWD candles.
-- Scanner v2.2 successfully selected real BASE/SPOT LONG and SHORT candidates with IMOEX2-relative strength.
-- First broad DSWD run suffered HTTP 429 burst load and produced only partial coverage (`ANALYZED 79/263`); that result was rejected as incomplete.
-- Global request-start throttling was added; subsequent run reached `ANALYZED 197/263` and eliminated the previous mass 429 pattern, but still showed transient SSL failures.
-- Current remediation adds per-worker HTTP connection pooling and uses the MOEX `WEEKENDSESSION` eligibility flag to prevent non-trading TQBR securities from entering the DSWD scan.
-- Scanner 2.2.2 removes the erroneous 13:00 hard gate: `09:50–13:00` is now only the user's preferred activity window, while scanning follows the full current open market session.
-- Regression coverage now explicitly verifies continued scanning after 13:00 during an open MAIN session.
+## 14. Current checkpoint — 05.09.2026
+
+```text
+Pipeline version:        2.2.2
+Runtime:                 BASE/SPOT only
+Universe:                ALL TQBR + DSWD eligibility
+Macro:                   GOLD / OIL / GAS / USDRUB
+Benchmark:               IMOEX2 → IRUS2
+Benchmark source:        BCS M5 → BCS quote
+IMOEX2 class code:       INDX
+Timeframe:               M5
+Recent flow:             15 min
+Acceleration:            2 complete comparable 15-min windows
+Current-session scan:    FULL OPEN SESSION → actual close
+Preferred window:        09:50–13:00, NOT hard gate
+DSWD:                    09:50–19:00 MSK
+Coverage gate:           80%
+Output:                  LONG + SHORT + max 1 WATCH
+Futures analysis:        REMOVED
+Order execution:         ABSENT
+Read-only:               YES
+```
+
+## 15. Live validation history — 05.09.2026
+
+- DSWD 05.09.2026 verified as a real MOEX trading session.
+- Live BCS `IMOEX2 / INDX` M5 data observed during DSWD.
+- Real BASE/SPOT LONG/SHORT candidates observed with benchmark-relative strength.
+- Initial broad DSWD run `79/263` was rejected as incomplete after burst 429.
+- Request-start throttling reduced burst-429 pattern; transient SSL failures remained a resilience concern.
+- Connection pooling and `WEEKENDSESSION` filtering are now part of production architecture.
+- Erroneous 13:00 hard gate removed; scanner now follows full open session.
+- Acceleration corrected to comparable complete 15-minute windows. Live sample `MAGN +1454.1%` is not automatically erroneous because it is a ratio of real comparable flow rates and has 10% attention weight.
+- Regression test `test_flow_acceleration_requires_two_complete_15_minute_windows` verifies incomplete previous windows produce zero acceleration.
+
+## 16. Validation gate
+
+The canonical source state is the latest `main` commit. The final acceptance gate is: local `compileall` + full `pytest` on the canonical checkout, followed by successful GitHub Actions for the latest commit. No RS-threshold methodology change is introduced without a separate specification decision.
