@@ -195,6 +195,21 @@ class MarketAttentionScannerService:
             row["attention_score"] = round(0.45 * activity + 0.25 * session_score + 0.20 * pace_score + 0.10 * accel_score, 1)
             rs = row["relative_strength"]
             row["market_relation"] = "НЕТ BENCHMARK" if rs is None else "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
+            row["direction"] = (
+                "LONG" if rs is not None and rs > 0
+                else "SHORT" if rs is not None and rs < 0
+                else "NEUTRAL"
+            )
+
+        if benchmark_change is None:
+            self._last_scan_diagnostics = {
+                "status": "BENCHMARK_UNAVAILABLE",
+                "session": session_name,
+                "trading_date": str(trading_date),
+                "benchmark": None,
+                "benchmark_class_code": benchmark_code,
+            }
+            return []
 
         valid = [x for x in results if x["relative_strength"] is not None and x["direction"] in {"LONG", "SHORT"}]
         strong = sorted((x for x in valid if x["relative_strength"] > 0), key=lambda x: (x["attention_score"], x["relative_strength"], x["recent_money_per_minute"]), reverse=True)
