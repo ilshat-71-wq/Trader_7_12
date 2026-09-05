@@ -109,6 +109,25 @@ class SpotUniverseService:
         self._store(instrument_type, records)
         return instrument_type, records
 
+    def _load_sequential_fallback(self, instrument_types):
+        """Retry failed metadata kinds sequentially.
+
+        Frozen GUI builds must remain robust when the first concurrent metadata
+        burst is rejected or interrupted. The fallback is deliberately limited
+        to kinds that produced no records and uses the same BCS client, cache,
+        and request throttling as the normal path.
+        """
+        recovered = {}
+        for instrument_type in instrument_types:
+            try:
+                kind, records = self._load_one(instrument_type)
+            except Exception as exc:
+                print(f"SPOT sequential fallback failed: {instrument_type}: {type(exc).__name__}")
+                continue
+            if records:
+                recovered[kind] = records
+        return recovered
+
     def load(self, weekend_session=None):
         """Return normalized SPOT instruments without consulting futures data.
 
@@ -130,6 +149,7 @@ class SpotUniverseService:
                 return []
 
         records = []
+        loaded_by_kind = {}
         with ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)), thread_name_prefix="spot-universe") as executor:
             pending = [executor.submit(self._load_one, kind) for kind in self.INSTRUMENT_TYPES]
             for future in as_completed(pending):
@@ -138,26 +158,34 @@ class SpotUniverseService:
                 except Exception as exc:
                     print(f"SPOT metadata worker failed: {type(exc).__name__}")
                     continue
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    ticker = str(item.get("ticker") or item.get("secCode") or item.get("securityCode") or "").strip().upper()
-                    class_code = self._class_code(item)
-                    if not ticker or not class_code:
-                        continue
-                    weekend_flag = self._weekend_flag(item) if kind == "STOCK" else None
-                    if weekend_session and kind == "STOCK" and weekend_flag is False:
-                        continue
-                    normalized = {
-                        "spot_ticker": ticker,
-                        "spot_class_code": class_code,
-                        "spot_group": self._group(kind, item),
-                        "spot_universe": "DYNAMIC_SPOT",
-                        "spot_instrument_type": kind,
-                    }
-                    if weekend_flag is not None:
-                        normalized["weekend_session"] = weekend_flag
-                    records.append(normalized)
+                loaded_by_kind[kind] = items if isinstance(items, list) else []
+
+        failed_kinds = [kind for kind in self.INSTRUMENT_TYPES if not loaded_by_kind.get(kind)]
+        if failed_kinds:
+            recovered = self._load_sequential_fallback(failed_kinds)
+            loaded_by_kind.update(recovered)
+
+        for kind, items in loaded_by_kind.items():
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                ticker = str(item.get("ticker") or item.get("secCode") or item.get("securityCode") or "").strip().upper()
+                class_code = self._class_code(item)
+                if not ticker or not class_code:
+                    continue
+                weekend_flag = self._weekend_flag(item) if kind == "STOCK" else None
+                if weekend_session and kind == "STOCK" and weekend_flag is False:
+                    continue
+                normalized = {
+                    "spot_ticker": ticker,
+                    "spot_class_code": class_code,
+                    "spot_group": self._group(kind, item),
+                    "spot_universe": "DYNAMIC_SPOT",
+                    "spot_instrument_type": kind,
+                }
+                if weekend_flag is not None:
+                    normalized["weekend_session"] = weekend_flag
+                records.append(normalized)
 
         unique = {}
         for item in records:
