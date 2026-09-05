@@ -12,10 +12,13 @@ from services.relative_strength_service import RelativeStrengthService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.2.2"
+    VERSION = "2.2.3"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     MIN_DIRECTIONAL_COVERAGE = 0.80
+    MIN_MEANINGFUL_RS_PP = 0.10
+    RS_SCORE_WEIGHT = 0.60
+    ATTENTION_SCORE_WEIGHT = 0.40
     SCAN_START = time(7, 0)
     PREFERRED_START = time(9, 50)
     PREFERRED_END = time(13, 0)
@@ -329,20 +332,41 @@ class MarketAttentionScannerService:
             pace_score = self._percentile(self._f(row["money_per_minute"]), pace_values)
             accel_score = self._percentile(self._f(row["money_acceleration"]), acceleration_values)
             row["attention_score"] = round(0.45 * activity + 0.25 * session_score + 0.20 * pace_score + 0.10 * accel_score, 1)
-            rs = row["relative_strength"]
-            row["market_relation"] = "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
-            row["direction"] = "LONG" if rs > 0 else "SHORT" if rs < 0 else "NEUTRAL"
 
-        valid = [x for x in results if x["relative_strength"] is not None and x["direction"] in {"LONG", "SHORT"}]
-        strong = sorted((x for x in valid if x["relative_strength"] > 0), key=lambda x: (x["attention_score"], x["relative_strength"], x["recent_money_per_minute"]), reverse=True)
-        weak = sorted((x for x in valid if x["relative_strength"] < 0), key=lambda x: (x["attention_score"], -x["relative_strength"], x["recent_money_per_minute"]), reverse=True)
+        rs_magnitudes = [abs(self._f(x.get("relative_strength"))) for x in results]
+        for row in results:
+            rs = self._f(row["relative_strength"])
+            rs_magnitude_score = self._percentile(abs(rs), rs_magnitudes)
+            row["relative_strength_score"] = round(rs_magnitude_score, 1)
+            row["directional_score"] = round(
+                self.RS_SCORE_WEIGHT * rs_magnitude_score + self.ATTENTION_SCORE_WEIGHT * row["attention_score"], 1
+            )
+            row["relative_strength_quality"] = "MEANINGFUL" if abs(rs) >= self.MIN_MEANINGFUL_RS_PP else "WEAK"
+            row["market_relation"] = "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
+            row["direction"] = "LONG" if rs >= self.MIN_MEANINGFUL_RS_PP else "SHORT" if rs <= -self.MIN_MEANINGFUL_RS_PP else "NEUTRAL"
+
+        valid = [x for x in results if x["direction"] in {"LONG", "SHORT"}]
+        strong = sorted(
+            (x for x in valid if x["direction"] == "LONG"),
+            key=lambda x: (x["directional_score"], x["relative_strength"], x["attention_score"], x["recent_money_per_minute"]),
+            reverse=True,
+        )
+        weak = sorted(
+            (x for x in valid if x["direction"] == "SHORT"),
+            key=lambda x: (x["directional_score"], abs(x["relative_strength"]), x["attention_score"], x["recent_money_per_minute"]),
+            reverse=True,
+        )
         selected = []
         if strong:
             selected.append(dict(strong[0], selection_role="LONG_CANDIDATE", rank=1))
         if weak and (not selected or weak[0]["spot_ticker"] != selected[0]["spot_ticker"]):
             selected.append(dict(weak[0], selection_role="SHORT_CANDIDATE", rank=len(selected) + 1))
         selected_tickers = {x["spot_ticker"] for x in selected}
-        remaining = sorted((x for x in valid if x["spot_ticker"] not in selected_tickers), key=lambda x: x["attention_score"], reverse=True)
+        remaining = sorted(
+            (x for x in valid if x["spot_ticker"] not in selected_tickers),
+            key=lambda x: (x["directional_score"], x["attention_score"]),
+            reverse=True,
+        )
         for row in remaining[:max(0, int(limit or 0) - len(selected))]:
             selected.append(dict(row, selection_role="ATTENTION_WATCH", rank=len(selected) + 1))
         for i, row in enumerate(selected, 1):
