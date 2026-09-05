@@ -280,16 +280,19 @@ def test_acceleration_score_is_relative_and_bounded(monkeypatch):
 def test_flow_acceleration_requires_two_complete_15_minute_windows():
     scanner = MarketAttentionScannerService(api=FakeAPI(), session_service=FakeSession(), history_service=object())
     candles = [
-        {"time": f"2026-09-02T{hour:02d}:{minute:02d}:00Z", "close": 100.0, "money_volume": money}
-        for hour, minute, money in [
-            (7, 0, 100.0),
-            (7, 5, 100.0),
-            (7, 10, 100.0),
-            (7, 15, 200.0),
-            (7, 20, 200.0),
-            (7, 25, 200.0),
-        ]
+        {"time": "2026-09-02T07:00:00Z", "close": 100.0, "money_volume": 100.0},
+        {"time": "2026-09-02T07:05:00Z", "close": 100.0, "money_volume": 100.0},
+        {"time": "2026-09-02T07:10:00Z", "close": 100.0, "money_volume": 100.0},
+        {"time": "2026-09-02T07:15:00Z", "close": 100.0, "money_volume": 200.0},
+        {"time": "2026-09-02T07:20:00Z", "close": 100.0, "money_volume": 200.0},
+        {"time": "2026-09-02T07:25:00Z", "close": 100.0, "money_volume": 200.0},
     ]
+
+    class History:
+        def load(self, *args, **kwargs):
+            return candles[:3]
+
+    scanner.history = History()
     item = {"spot_ticker": "TEST", "spot_class_code": "TQBR"}
     row = scanner._analyze_one(item, datetime(2026, 9, 2).date(), FakeSession.MORNING_START,
                                datetime(2026, 9, 2, 7, 12, tzinfo=FakeSession.TIMEZONE))
