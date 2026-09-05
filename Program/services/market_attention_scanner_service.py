@@ -165,9 +165,32 @@ class MarketAttentionScannerService:
         if now.time() < self.SCAN_START or now.time() >= self.SCAN_END:
             self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "scan_window": "07:00-13:00 MSK"}
             return []
+
         session_start = self.SCAN_START
+        # Build metadata first. It is cheap and gives diagnostics even when
+        # the market-data endpoint is temporarily unavailable.
         universe = self.build_universe()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
+
+        # Never spend hundreds of HTTP candle requests when the benchmark is
+        # unavailable: without it, the scanner is explicitly forbidden from
+        # producing directional LONG/SHORT selections.
+        if benchmark_change is None:
+            self._last_scan_diagnostics = {
+                "status": "BENCHMARK_UNAVAILABLE",
+                "session": session_name,
+                "trading_date": str(trading_date),
+                "scan_window": "07:00-13:00 MSK",
+                "universe_total": len(universe),
+                "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
+                "analyzed": 0,
+                "benchmark": None,
+                "benchmark_class_code": benchmark_code,
+                "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
+                "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
+            }
+            return []
+
         results = []
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
             futures = [pool.submit(self._analyze_one, item, trading_date, session_start, now) for item in universe]
@@ -185,34 +208,16 @@ class MarketAttentionScannerService:
         for row in results:
             row["benchmark"] = benchmark_ticker or ""
             row["benchmark_change_percent"] = benchmark_change
-            if benchmark_change is None:
-                row["relative_strength"] = None
-                row["relative_strength_status"] = "UNAVAILABLE"
-            else:
-                row["relative_strength"] = round(row["change_percent"] - benchmark_change, 4)
-                row["relative_strength_status"] = "AVAILABLE"
+            row["relative_strength"] = round(row["change_percent"] - benchmark_change, 4)
+            row["relative_strength_status"] = "AVAILABLE"
             activity = self._percentile(self._f(row["recent_money_per_minute"]), recent_values)
             session_score = self._percentile(self._f(row["session_money"]), session_values)
             pace_score = self._percentile(self._f(row["money_per_minute"]), pace_values)
             accel_score = max(0.0, min(100.0, 50.0 + self._f(row["money_acceleration"]) * 2.0))
             row["attention_score"] = round(0.45 * activity + 0.25 * session_score + 0.20 * pace_score + 0.10 * accel_score, 1)
             rs = row["relative_strength"]
-            row["market_relation"] = "НЕТ BENCHMARK" if rs is None else "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
-            row["direction"] = (
-                "LONG" if rs is not None and rs > 0
-                else "SHORT" if rs is not None and rs < 0
-                else "NEUTRAL"
-            )
-
-        if benchmark_change is None:
-            self._last_scan_diagnostics = {
-                "status": "BENCHMARK_UNAVAILABLE",
-                "session": session_name,
-                "trading_date": str(trading_date),
-                "benchmark": None,
-                "benchmark_class_code": benchmark_code,
-            }
-            return []
+            row["market_relation"] = "СИЛЬНЕЕ РЫНКА" if rs > 0 else "СЛАБЕЕ РЫНКА" if rs < 0 else "НЕЙТРАЛЬНО"
+            row["direction"] = "LONG" if rs > 0 else "SHORT" if rs < 0 else "NEUTRAL"
 
         valid = [x for x in results if x["relative_strength"] is not None and x["direction"] in {"LONG", "SHORT"}]
         strong = sorted((x for x in valid if x["relative_strength"] > 0), key=lambda x: (x["attention_score"], x["relative_strength"], x["recent_money_per_minute"]), reverse=True)
