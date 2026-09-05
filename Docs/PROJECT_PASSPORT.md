@@ -135,6 +135,8 @@ M5
 
 Для каждого актива используются только данные текущей торговой сессии.
 
+Сканер **не запрашивает рыночные свечи, если рынок закрыт**. Выходной день не должен отображаться как активная торговая сессия и не должен порождать массовые пустые M5-запросы.
+
 ## 8. Output contract
 
 Каждый выбранный актив содержит минимум:
@@ -173,6 +175,8 @@ ATTENTION_WATCH
 Главный экран — компактный dashboard с двумя основными карточками LONG/SHORT и коротким списком остальных активных инструментов.
 
 Диагностика не должна занимать главный экран.
+
+На закрытом рынке пользователь должен видеть понятный статус `РЫНОК ЗАКРЫТ`, а не ложную активную сессию или ошибку отсутствующего benchmark.
 
 ## 10. Скорость и BCS
 
@@ -238,6 +242,7 @@ data_status = UNAVAILABLE
 GitHub `main` является каноническим источником кода. Локальные приложения должны синхронизироваться с ним через:
 
 ```bash
+git checkout main
 git pull --ff-only
 ```
 
@@ -258,6 +263,8 @@ git pull --ff-only
 - no futures instruments enter the universe;
 - GOLD/USDRUB use real SPOT metadata;
 - unavailable OIL/GAS are not replaced by futures;
+- weekend / closed market → `MARKET_CLOSED`, no market-data scan;
+- candle resilience test matches the configured timeout/retry constants;
 - read-only scanner contract remains intact.
 
 Перед live-запуском на iMac необходимо выполнить:
@@ -297,6 +304,7 @@ Primary timeframe:       M5
 Recent flow window:      15 min
 Selection:               strongest + weakest vs market
 Output:                  LONG + SHORT + compact watchlist
+Closed market:           explicit MARKET_CLOSED, no M5 scan
 Futures analysis:        REMOVED
 Futures mapping:         REMOVED
 Order execution:         ABSENT

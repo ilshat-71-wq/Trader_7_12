@@ -51,8 +51,8 @@ def test_candle_request_uses_bounded_retry_profile():
     RequestHelper.get = staticmethod(fake_get)
     try:
         api.get_candles("BRENT1026", "SPBFUT", "H1")
-        assert captured["timeout"] == 3.0
-        assert captured["max_retries"] == 2
+        assert captured["timeout"] == api.CANDLE_TIMEOUT
+        assert captured["max_retries"] == api.CANDLE_RETRIES
     finally:
         RequestHelper.get = staticmethod(original)
 

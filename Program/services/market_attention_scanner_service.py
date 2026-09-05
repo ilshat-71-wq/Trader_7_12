@@ -138,6 +138,23 @@ class MarketAttentionScannerService:
             if ticker and code:
                 by_ticker[ticker] = (ticker, code)
 
+        # BCS's by-tickers endpoint can legitimately omit an index while still
+        # returning HTTP 200. Use the dedicated INDICES metadata catalogue as
+        # a read-only fallback for benchmark discovery, never for the asset universe.
+        missing = [ticker for ticker in self.BENCHMARKS if ticker not in by_ticker]
+        if missing:
+            try:
+                index_rows = self.api.get_instruments("INDICES")
+            except Exception:
+                index_rows = []
+            for row in index_rows if isinstance(index_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                ticker = str(row.get("ticker") or row.get("secCode") or row.get("securityCode") or "").strip().upper()
+                code = str(row.get("classCode") or row.get("class_code") or "").strip()
+                if ticker in self.BENCHMARKS and code:
+                    by_ticker[ticker] = (ticker, code)
+
         start = datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE).astimezone(timezone.utc)
         end = now.astimezone(timezone.utc)
         for requested in self.BENCHMARKS:
@@ -172,6 +189,24 @@ class MarketAttentionScannerService:
         session_name = str(info.get("session") or "MORNING").upper()
         trading_date = self.session.get_trading_day()
         now = self.session.now()
+
+        # Never query market data on a non-trading calendar day. This prevents
+        # a weekend/closed-market run from being mislabeled as an active session
+        # and avoids hundreds of pointless candle requests.
+        if not self.session.is_market_open(now):
+            self._last_scan_diagnostics = {
+                "status": "MARKET_CLOSED",
+                "session": "CLOSED",
+                "trading_date": str(trading_date),
+                "scan_window": "07:00-13:00 MSK",
+                "universe_total": 0,
+                "stocks_total": 0,
+                "analyzed": 0,
+                "benchmark": None,
+                "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
+            }
+            return []
+
         if now.time() < self.SCAN_START or now.time() >= self.SCAN_END:
             self._last_scan_diagnostics = {"status": "OUTSIDE_SCAN_WINDOW", "scan_window": "07:00-13:00 MSK"}
             return []

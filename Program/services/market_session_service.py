@@ -29,7 +29,7 @@ class MarketSessionService:
 
     def get_session(self, value=None):
         value = self.now() if value is None else self.to_moscow(value)
-        if value is None:
+        if value is None or value.weekday() >= 5:
             return "CLOSED"
         current_time = value.time()
         if self.PRE_OPEN_START <= current_time < self.MORNING_START:
