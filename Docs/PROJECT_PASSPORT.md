@@ -266,6 +266,8 @@ git pull --ff-only
 - scanner continues after 13:00 while the current market session remains open;
 - preferred 09:50–13:00 window is diagnostic/UI information only and never a scan hard gate;
 - candle resilience uses bounded retry and connection pooling;
+- directional candidates are suppressed when coverage is below the minimum production threshold;
+- partial-scan diagnostics expose coverage, skipped count, reason counts and sample tickers;
 - read-only scanner contract remains intact.
 
 Before live run:
@@ -282,7 +284,7 @@ PYTHONPATH=Program python3 -m pytest -q Program
 3. Verify live M5 flow on an ordinary trading day and DSWD.
 4. Verify that transient SSL errors no longer materially reduce M5 coverage.
 5. Verify no burst HTTP 429 under full universe load.
-6. Require sufficient coverage before publishing directional candidates.
+6. Require at least 80% universe coverage before publishing directional candidates; below this threshold return explicit `INSUFFICIENT_COVERAGE` and suppress LONG/SHORT output.
 7. If HTTP coverage remains unstable, evaluate BCS WebSocket/streaming current-session data rather than hiding missing data.
 8. Measure full scan time and network load.
 9. Compact output: 1 LONG, 1 SHORT, maximum 1 ATTENTION_WATCH.
@@ -317,6 +319,8 @@ Order execution:         ABSENT
 Read-only:               YES
 HTTP market-data throttle: 0.15 s between request starts
 HTTP connection pooling: YES, per worker thread
+Minimum directional coverage: 80% of current universe
+Partial-scan diagnostics: coverage + skipped reasons + sample tickers
 Weekend eligibility:     MOEX SECURITIES.WEEKENDSESSION when exposed by BCS metadata
 Git synchronization:     GitHub main is canonical
 ```
