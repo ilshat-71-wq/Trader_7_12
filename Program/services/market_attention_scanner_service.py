@@ -15,6 +15,7 @@ class MarketAttentionScannerService:
     VERSION = "2.2.2"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
+    MIN_DIRECTIONAL_COVERAGE = 0.80
     SCAN_START = time(7, 0)
     PREFERRED_START = time(9, 50)
     PREFERRED_END = time(13, 0)
@@ -290,15 +291,24 @@ class MarketAttentionScannerService:
             return []
 
         results = []
+        skipped = {"INSUFFICIENT_M5": [], "INVALID_RESULT": [], "WORKER_ERROR": []}
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
-            futures = [pool.submit(self._analyze_one, item, trading_date, session_start, now) for item in universe]
-            for future in as_completed(futures):
+            future_items = {
+                pool.submit(self._analyze_one, item, trading_date, session_start, now): item
+                for item in universe
+            }
+            for future in as_completed(future_items):
+                item = future_items[future]
+                ticker = str(item.get("spot_ticker") or "")
                 try:
                     row = future.result()
                 except Exception:
-                    row = None
+                    skipped["WORKER_ERROR"].append(ticker)
+                    continue
                 if row:
                     results.append(row)
+                else:
+                    skipped["INSUFFICIENT_M5"].append(ticker)
 
         recent_values = [self._f(x["recent_money_per_minute"]) for x in results]
         session_values = [self._f(x["session_money"]) for x in results]
@@ -333,11 +343,23 @@ class MarketAttentionScannerService:
             row["rank"] = i
             row["pipeline_version"] = self.VERSION
             row["preferred_window_active"] = preferred
+        coverage_ratio = (len(results) / len(universe)) if universe else 0.0
+        coverage_percent = round(coverage_ratio * 100.0, 1)
+        coverage_ok = coverage_ratio >= self.MIN_DIRECTIONAL_COVERAGE
+        if not coverage_ok:
+            selected = []
+
         self._last_scan_diagnostics = {
-            "status": "OK", "session": session_name, "trading_date": str(trading_date),
+            "status": "OK" if coverage_ok else "INSUFFICIENT_COVERAGE",
+            "session": session_name, "trading_date": str(trading_date),
             "scan_window": scan_window, "preferred_window": "09:50-13:00 MSK", "preferred_window_active": preferred,
             "universe_total": len(universe), "stocks_total": sum(1 for x in universe if x.get("market_group") == "STOCK"),
-            "analyzed": len(results), "benchmark": benchmark_ticker, "benchmark_change_percent": benchmark_change,
+            "analyzed": len(results), "coverage_ratio": round(coverage_ratio, 4), "coverage_percent": coverage_percent,
+            "coverage_required_percent": round(self.MIN_DIRECTIONAL_COVERAGE * 100.0, 1), "coverage_ok": coverage_ok,
+            "skipped_total": sum(len(values) for values in skipped.values()),
+            "skip_reasons": {reason: len(values) for reason, values in skipped.items() if values},
+            "skip_samples": {reason: values[:10] for reason, values in skipped.items() if values},
+            "benchmark": benchmark_ticker, "benchmark_change_percent": benchmark_change,
             "selected": len(selected), "long_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x["selection_role"] == "SHORT_CANDIDATE"), None),
             "group_status": {group: ("AVAILABLE" if any(x.get("market_group") == group for x in universe) else "UNAVAILABLE") for group in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
