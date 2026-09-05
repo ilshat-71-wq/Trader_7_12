@@ -6,6 +6,7 @@ from services.market_attention_scanner_service import MarketAttentionScannerServ
 
 class FakeAPI:
     access_token = "ok"
+
     def authorize(self):
         return True
 
@@ -14,16 +15,22 @@ class FakeSession:
     TIMEZONE = ZoneInfo("Europe/Moscow")
     MORNING_START = datetime(2026, 9, 2, 7, 0, tzinfo=TIMEZONE).time()
     MAIN_START = datetime(2026, 9, 2, 10, 0, tzinfo=TIMEZONE).time()
+
     def now(self):
         return datetime(2026, 9, 2, 10, 0, tzinfo=self.TIMEZONE)
+
     def get_trading_day(self):
         return self.now().date()
+
     def get_session(self):
         return "MORNING"
+
     def get_session_info(self):
         return {"session": "MORNING"}
+
     def get_window(self):
         return (self.MORNING_START, self.MAIN_START)
+
     def is_market_open(self, value=None):
         return True
 
@@ -31,8 +38,10 @@ class FakeSession:
 class FakeWeekendSession(FakeSession):
     def now(self):
         return datetime(2026, 9, 5, 10, 44, tzinfo=self.TIMEZONE)
+
     def get_session(self):
         return "WEEKEND_SESSION"
+
     def get_session_info(self):
         return {"session": "WEEKEND_SESSION"}
 
@@ -87,12 +96,8 @@ def test_no_benchmark_means_no_directional_selection(monkeypatch):
 
 def test_weekend_scan_uses_dswd_start(monkeypatch):
     captured = {}
-    scanner = _scanner(
-        monkeypatch,
-        [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)],
-        0.2,
-        session=FakeWeekendSession(),
-    )
+    scanner = _scanner(monkeypatch, [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)], 0.2,
+                       session=FakeWeekendSession())
 
     def analyze(item, trading_date, session_start, now):
         captured["session_start"] = session_start
@@ -104,3 +109,24 @@ def test_weekend_scan_uses_dswd_start(monkeypatch):
     assert captured["session_start"].strftime("%H:%M") == "09:50"
     assert scanner._last_scan_diagnostics["session"] == "WEEKEND_SESSION"
     assert scanner._last_scan_diagnostics["scan_window"] == "09:50-13:00 MSK"
+
+
+def test_benchmark_uses_live_quote_when_m5_is_missing(monkeypatch):
+    class QuoteAPI(FakeAPI):
+        def get_instruments_by_tickers(self, tickers):
+            return [{"ticker": "IMOEX2", "classCode": "SNDX"}]
+
+        def get_instruments(self, instrument_type="FUTURES"):
+            return []
+
+        def get_quotes(self, instruments):
+            return {"records": [{"ticker": "IMOEX2", "classCode": "SNDX", "open": 100.0, "last": 101.5,
+                                  "dateTime": "2026-09-02T07:00:00.000Z"}]}
+
+    session = FakeSession()
+    scanner = MarketAttentionScannerService(api=QuoteAPI(), session_service=session, history_service=object())
+    monkeypatch.setattr(scanner, "_candles", lambda *args: [])
+    ticker, code, change = scanner._benchmark(session.get_trading_day(), session.now(), session.MORNING_START)
+    assert ticker == "IMOEX2"
+    assert code == "SNDX"
+    assert round(change, 4) == 1.5
