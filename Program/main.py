@@ -5,35 +5,35 @@ Read-only market-attention scanner. No order execution and no futures analysis.
 
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from market.market_loader import MarketLoader
 from watchlist_ui import WatchlistTraderWindow
-from services.market_attention_scanner_service import MarketAttentionScannerService
 
 
 def main():
     print("🚀 Запуск Trader_7_12 Pro — Market Attention Radar")
 
-    # Do not permanently disable the GUI because of a transient startup
-    # authorization failure. The scanner owns the same process-wide BCS
-    # client and retries authorization when the user starts a scan.
-    loader = MarketLoader()
-    try:
-        connected = loader.connect()
-    except Exception as exc:
-        connected = False
-        print(f"⚠️ Первичная проверка БКС не удалась: {type(exc).__name__}: {exc}")
-
-    print("✅ БКС подключён" if connected else "⚠️ Первичная проверка БКС не пройдена — сканер остаётся доступен")
-
+    # Create the Qt application before any backend work and show the window
+    # immediately. BCS authorization and scanner construction are deliberately
+    # lazy: the dashboard must not depend on a startup network probe or on
+    # backend initialization completing before the Qt event loop starts.
     app = QApplication(sys.argv)
+    app.setApplicationName("Trader_7_12 Pro")
+    app.setQuitOnLastWindowClosed(True)
+
     window = WatchlistTraderWindow(scanner_enabled=True)
-    try:
-        window.scanner = MarketAttentionScannerService()
-    except Exception as exc:
-        print(f"⚠️ Сканер не инициализирован при старте: {type(exc).__name__}: {exc}")
     window.show()
+    window.raise_()
+    window.activateWindow()
+
+    print(f"🖥️ GUI window visible: {window.isVisible()}")
+    print(f"🖥️ GUI platform: {app.platformName()}")
+
+    # Keep scanner initialization inside the GUI lifecycle without blocking
+    # the first paint. The actual BCS work remains lazy until a scan starts.
+    QTimer.singleShot(0, window._update_session_header)
+
     sys.exit(app.exec())
 
 
