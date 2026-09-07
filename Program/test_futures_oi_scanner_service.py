@@ -70,7 +70,8 @@ def test_si_root_is_separate_from_underlying():
     si = next(x for x in contracts if x["futures_root"] == "SI")
     assert si["oi_root"] == "SI"
     assert si["underlying_asset"] == "USDRUB"
-    assert si["futures_ticker"] == "SI-9.26"
+    assert si["futures_ticker"] == "Si-9.26"
+    assert si["futures_ticker_normalized"] == "SI-9.26"
     assert si["curve_role"] == "FRONT"
 
 
