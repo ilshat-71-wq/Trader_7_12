@@ -6,7 +6,7 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with generic futures -> underlying mapping."""
 
-    VERSION = "2.0.0"
+    VERSION = "2.0.1"
 
     def __init__(self, api=None, oi_service=None):
         from api.bcs_api import BCSAPI
@@ -70,9 +70,10 @@ class FuturesOIScannerService:
         today = date.today().isoformat()
         grouped = {}
         for raw in rows if isinstance(rows, list) else []:
-            ticker = self._text(raw, "ticker", "secCode", "securityCode").upper()
-            if not ticker:
+            source_ticker = self._text(raw, "ticker", "secCode", "securityCode")
+            if not source_ticker:
                 continue
+            ticker = source_ticker.upper()
             kind = self._text(raw, "type", "instrumentType", "securityType").upper()
             if "OPTION" in kind or "OPT" in kind:
                 continue
@@ -93,7 +94,8 @@ class FuturesOIScannerService:
                 {
                     "futures_root": futures_root,
                     "oi_root": futures_root,
-                    "futures_ticker": ticker,
+                    "futures_ticker": source_ticker,
+                    "futures_ticker_normalized": ticker,
                     "futures_class_code": self._text(raw, "classCode", "class_code"),
                     "underlying_asset_source": underlying_source,
                     "underlying_asset": self._normalize_underlying_display(underlying_source),
@@ -104,8 +106,6 @@ class FuturesOIScannerService:
             )
             grouped.setdefault(futures_root, []).append(item)
 
-        # Keep every active root, but mark the front and next contracts so
-        # rollover is visible instead of silently replacing one maturity.
         result = []
         for root, items in grouped.items():
             ordered = sorted(items, key=self._contract_sort_key)
@@ -152,7 +152,7 @@ class FuturesOIScannerService:
 
         results, skipped = [], 0
         for contract in contracts:
-            quote = quote_map.get(contract["futures_ticker"], {})
+            quote = quote_map.get(contract["futures_ticker"].upper(), {})
             last = self._float(quote, "lastPrice", "last", "price", "currentPrice", "close")
             opening = self._float(quote, "openPrice", "open", "dayOpen", "openingPrice")
             if last is None or opening is None or opening <= 0:
