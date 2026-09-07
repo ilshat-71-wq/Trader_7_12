@@ -177,6 +177,23 @@ This is an informational classification only. The application does not make a tr
 ЛИДЕРЫ
 АУТСАЙДЕРЫ
 ТОП ПО ТЕКУЩЕМУ ИНТЕРЕСУ
+FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS
+```
+
+Для futures/OI в отдельной видимой панели показываются:
+
+```text
+FUTURES ROOT / CONTRACT
+UNDERLYING / BASE ASSET
+FUTURES PRICE CHANGE
+UNDERLYING PRICE CHANGE
+OPEN INTEREST
+ΔOI %
+OI Z-SCORE
+OI REGIME
+DIRECTION ALIGNMENT
+CURVE ROLE
+OI STRENGTH
 ```
 
 ## 12. Calendar / DSWD
@@ -219,7 +236,7 @@ Partial scan is never presented as a complete market result.
 
 ## 15. Open Interest — futures analytics
 
-OI is now a separate, reusable analytics layer for **all supported MOEX futures roots**, not a SI-only rule.
+OI is a separate, reusable analytics layer for **all supported MOEX futures roots**, not a SI-only rule.
 
 Source:
 
@@ -227,7 +244,7 @@ Source:
 MOEX ISS → /iss/analyticalproducts/futoi/securities
 ```
 
-MOEX documents FUTOI as open-interest data by futures root and client group, with `POS`, `POS_LONG`, `POS_SHORT`, trader counts and publication time. The ISS interface supports both all-instruments-by-date and single-root-by-period requests. citeturn2search6turn0search1
+The MOEX derivatives market publishes open interest alongside price, volume and trades; MOEX also exposes underlying information for futures contracts. citeturn0news1turn0news2
 
 The production OI layer calculates:
 
@@ -263,15 +280,61 @@ Z-score is calculated from historical daily percentage changes in OI, using the 
 >3       ANOMALOUS
 ```
 
-### Futures contract handling
+### 15.1 Futures → underlying mapping — generic
 
-`FuturesOIScannerService` loads BCS futures metadata, excludes options, chooses the nearest non-expired contract for each futures root, obtains its current quote/volume and combines that with aggregate MOEX FUTOI for the root.
+The mapping is **not hardcoded for SI**. Runtime BCS futures metadata is the source of truth for each futures root:
 
-This means `Si` is only one example. The same OI framework is intended for RI, BR, GD, CNY, RTS/other supported roots and all other futures returned by the runtime metadata source.
+```text
+FUTURES ROOT / CONTRACT
+        ↓
+BCS underlyingAsset / underlyingTicker / underlying class
+        ↓
+BASE / UNDERLYING QUOTE
+```
 
-Near expiry, OI on the expiring contract is not interpreted as a standalone market-exit signal. The root-level OI layer is designed to reduce rollover distortion by using the aggregate futures-root OI source.
+For example, SI is represented as:
 
-OI is informational only and does not create BUY/SELL, LONG/SHORT, entry, position-sizing or execution decisions.
+```text
+Si-9.26
+futures_root = SI
+underlying_asset = USDRUB
+```
+
+The source code may be `USDRUB_TOM`; the UI normalizes this to the display name `USDRUB` while retaining the source code internally.
+
+The same mechanism is used for every futures root returned by BCS metadata: currency, index, commodity and single-stock futures. There is no SI-only branch in the analytics logic.
+
+The scanner keeps **futures price/change** and **underlying price/change** as separate facts. They are not substituted for one another. A `DIVERGENCE` state is exposed when their directions disagree.
+
+### 15.2 Curve / rollover handling
+
+For each futures root the scanner keeps the nearest non-expired contract as `FRONT` and exposes the next maturity as `NEXT` when available. MOEX FUTOI is treated as root-level OI; the front contract is therefore not allowed to masquerade as the entire root's OI during rollover.
+
+This is important for SI and every other quarterly/monthly futures curve: falling OI in an expiring front contract is not automatically interpreted as market-wide short covering.
+
+### 15.3 Visible application output
+
+The application now contains a dedicated read-only `FUTURES OI` panel. For every analyzed futures root it shows:
+
+```text
+ROOT / CONTRACT
+BASE ASSET
+FUT Δ%
+BASE Δ%
+OI
+ΔOI%
+Z
+REGIME
+ALIGNMENT
+CURVE ROLE
+OI STRENGTH
+```
+
+The panel is updated asynchronously after the main SPOT market scan so the GUI remains responsive. Failure to obtain futures/OI data is shown explicitly and is never converted into a false `0` or `CLOSED` state.
+
+### 15.4 Information boundary
+
+OI is informational/confirming context. It does not create BUY/SELL, LONG/SHORT, entry, position-sizing or execution decisions.
 
 ## 16. Safety boundary
 
