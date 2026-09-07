@@ -8,7 +8,7 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from watchlist_ui import WatchlistTraderWindow
+from oi_watchlist_ui import OIWatchlistTraderWindow
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
     app.setApplicationName("Trader_7_12 Pro")
     app.setQuitOnLastWindowClosed(True)
 
-    window = WatchlistTraderWindow(scanner_enabled=True)
+    window = OIWatchlistTraderWindow(scanner_enabled=True)
     window.show()
     window.raise_()
     window.activateWindow()
