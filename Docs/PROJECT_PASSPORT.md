@@ -1,10 +1,10 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 05.09.2026  
+**Дата актуализации:** 08.09.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
-**Версия pipeline:** 2.3.1
+**Версия pipeline:** 2.4.0
 
 ## 1. Назначение
 
@@ -103,22 +103,6 @@ BASE/SPOT UNIVERSE
 - реакция на дневной MIN и MAX IMOEX2;
 - текущая позиция относительно рынка.
 
-### Раннее торговое окно
-
-Ранние данные используются как отдельный факт текущей сессии. Их вес может зависеть от времени дня, но раннее преимущество не фиксируется навсегда: рынок переоценивается по мере поступления новых данных.
-
-### Экстремумы IMOEX2
-
-Сканер должен сохранять и сравнивать поведение инструментов в ключевых внутридневных точках:
-
-```text
-IMOEX2 DAY MIN
-IMOEX2 DAY MAX
-CURRENT
-```
-
-Для каждого инструмента оценивается фактическая реакция в те же временные точки. Это позволяет видеть устойчивость при снижении рынка и слабость при росте рынка без подмены данных прогнозом.
-
 ## 7. Flow acceleration — production contract
 
 Acceleration compares two complete, equal 15-minute M5 windows:
@@ -153,19 +137,6 @@ MIN_RECENT_MONEY_PER_MINUTE = 5 000 ₽/min
 
 Both conditions are required.
 
-These are operational scanner gates, not MOEX official liquidity classifications. They are time-normalized and work during morning, main, evening and DSWD sessions.
-
-A failed gate produces:
-
-```text
-liquidity_status = LOW_LIQUIDITY
-liquidity_gate   = false
-```
-
-Low-liquidity instruments remain visible in diagnostics but cannot become a market leader/laggard or attention selection.
-
-Coverage is calculated before this gate, so low-liquidity instruments do not masquerade as technical/data failures.
-
 ## 9. Benchmark / Relative Strength
 
 Only the real market benchmark is allowed:
@@ -192,81 +163,21 @@ Meaningful current RS floor:
 MIN_MEANINGFUL_RS_PP = 0.10 percentage points
 ```
 
-Therefore:
-
-```text
-RS >= +0.10 pp → meaningful STRONGER
-RS <= -0.10 pp → meaningful WEAKER
-between → NEUTRAL
-```
-
-Shared `RelativeStrengthService` uses the same ±0.10 pp floor.
-
-Benchmark source:
-
-```text
-BCS metadata → BCS M5 candles → BCS live quote fallback → unavailable
-```
-
-Only real IMOEX2/IRUS2 is allowed. Synthetic benchmark, futures proxy and component-reconstructed index are forbidden.
-
 ## 10. Market leader / laggard selection
 
 The scanner may select at most the strongest current market leader and weakest current market laggard from instruments that satisfy all required objective information gates.
 
-```text
-MARKET_LEADER:
-  completed D1 STRONG structure
-  + consistent daily outperformance vs benchmark
-  + current-session RS >= +0.10 pp
-  + absolute liquidity gate PASS
-
-MARKET_LAGGARD:
-  completed D1 WEAK structure
-  + consistent daily underperformance vs benchmark
-  + current-session RS <= -0.10 pp
-  + absolute liquidity gate PASS
-```
-
-Это **не торговые рекомендации**. Термины LONG/SHORT, BUY/SELL и «торговый кандидат» не являются частью пользовательской информационной модели.
-
-Ranking is performed after the objective gates:
-
-```text
-RS magnitude score = percentile(|current RS|)
-Information score = 60% RS magnitude + 40% Attention
-```
-
-No result is manufactured to fill a card. If no instrument meets the facts-based criteria, the corresponding block remains empty.
+This is an informational classification only. The application does not make a trade decision.
 
 ## 11. Output / UI contract
 
-Основной экран должен быть ориентирован на фактическую картину рынка:
+Основной экран ориентирован на фактическую картину рынка:
 
 ```text
 ЛИДЕРЫ
 АУТСАЙДЕРЫ
 ТОП ПО ТЕКУЩЕМУ ИНТЕРЕСУ
 ```
-
-В строке/карточке инструмента по возможности показываются:
-
-```text
-spot_ticker, market_group, price,
-change_percent, benchmark, benchmark_change_percent,
-relative_strength, relative_strength_status, market_relation,
-relative_strength_score, directional_score,
-session_money, money_per_minute, recent_money,
-recent_money_per_minute, money_acceleration, attention_score,
-liquidity_status, liquidity_gate,
-daily_structure, daily_structure_state,
-daily_relative_direction, daily_relative_mean_pp,
-daily_qualified, data_status, pipeline_version
-```
-
-При наличии реализованных экстремальных точек также отображаются факты поведения относительно `IMOEX2 MIN`, `IMOEX2 MAX` и `NOW`.
-
-UI не должен использовать формулировки «ЛОНГ-КАНДИДАТ», «ШОРТ-КАНДИДАТ», «ЛОНГОВАТЬ», «ШОРТИТЬ», «ПОКУПАТЬ», «ПРОДАВАТЬ», «ВХОД» как вывод программы.
 
 ## 12. Calendar / DSWD
 
@@ -284,15 +195,9 @@ DSWD:
 
 **05.09.2026 is a real DSWD trading day, 09:50–19:00 MSK.**
 
-Preferred window `09:50–13:00 MSK` is diagnostic/UI information only, never a hard scan gate. Scanner follows the actual open session through close.
-
 ## 13. Coverage gate
 
 Minimum production M5 coverage: **80%**.
-
-```text
-coverage = analyzed / universe_total
-```
 
 Below 80%:
 
@@ -301,7 +206,7 @@ status = INSUFFICIENT_COVERAGE
 selected = []
 ```
 
-Diagnostics expose coverage, skipped count, skip reasons and samples. Partial scan is never presented as a complete market result.
+Partial scan is never presented as a complete market result.
 
 ## 14. HTTP resilience
 
@@ -312,7 +217,63 @@ Diagnostics expose coverage, skipped count, skip reasons and samples. Partial sc
 - HTTP/SSL failure is not interpreted as no trading.
 - 429/SSL degradation must reduce coverage and remain visible in diagnostics.
 
-## 15. Safety boundary
+## 15. Open Interest — futures analytics
+
+OI is now a separate, reusable analytics layer for **all supported MOEX futures roots**, not a SI-only rule.
+
+Source:
+
+```text
+MOEX ISS → /iss/analyticalproducts/futoi/securities
+```
+
+MOEX documents FUTOI as open-interest data by futures root and client group, with `POS`, `POS_LONG`, `POS_SHORT`, trader counts and publication time. The ISS interface supports both all-instruments-by-date and single-root-by-period requests. citeturn2search6turn0search1
+
+The production OI layer calculates:
+
+```text
+OI
+ΔOI contracts
+ΔOI %
+OI history
+OI-change Z-score
+Price + OI regime
+Volume confirmation
+```
+
+Canonical regimes:
+
+```text
+PRICE ↑ + OI ↑ → NEW_POSITION_BUILDING_UP
+PRICE ↑ + OI ↓ → SHORT_COVERING
+PRICE ↓ + OI ↑ → NEW_POSITION_BUILDING_DOWN
+PRICE ↓ + OI ↓ → LONG_LIQUIDATION
+```
+
+OI itself never determines direction. Price is the directional axis; volume is the activity confirmation; OI explains whether open exposure is building or unwinding.
+
+### OI Z-score
+
+Z-score is calculated from historical daily percentage changes in OI, using the latest 20 observations when sufficient history exists:
+
+```text
+|Z| < 1   NORMAL
+1–2      ELEVATED
+2–3      STRONG
+>3       ANOMALOUS
+```
+
+### Futures contract handling
+
+`FuturesOIScannerService` loads BCS futures metadata, excludes options, chooses the nearest non-expired contract for each futures root, obtains its current quote/volume and combines that with aggregate MOEX FUTOI for the root.
+
+This means `Si` is only one example. The same OI framework is intended for RI, BR, GD, CNY, RTS/other supported roots and all other futures returned by the runtime metadata source.
+
+Near expiry, OI on the expiring contract is not interpreted as a standalone market-exit signal. The root-level OI layer is designed to reduce rollover distortion by using the aggregate futures-root OI source.
+
+OI is informational only and does not create BUY/SELL, LONG/SHORT, entry, position-sizing or execution decisions.
+
+## 16. Safety boundary
 
 The application is strictly read-only:
 
