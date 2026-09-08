@@ -1,4 +1,4 @@
-"""Trader_7_12 Pro — OI-enabled dashboard wrapper."""
+"""Trader_7_12 Pro — single-window OI-enabled dashboard."""
 
 from html import escape
 
@@ -27,7 +27,7 @@ class FuturesOIWorker(QObject):
 
 
 class OIWatchlistTraderWindow(TraderWindow):
-    """Read-only market dashboard with a visible generic futures/OI layer."""
+    """The single Trader_7_12 Pro window: SPOT radar + visible futures/OI context."""
 
     VERSION = "2.4.0"
 
@@ -36,18 +36,23 @@ class OIWatchlistTraderWindow(TraderWindow):
         if scanner_enabled:
             self.scanner = MarketInformationScannerService()
         self.setWindowTitle("Trader_7_12 Pro — Market Information Radar")
+        self.resize(1280, 980)
+        self.setMinimumSize(1120, 900)
         self.subtitle.setText("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • FUTURES OI • READ-ONLY")
+
         self.oi_box = QTextEdit()
         self.oi_box.setReadOnly(True)
-        self.oi_box.setMaximumHeight(300)
+        self.oi_box.setMinimumHeight(340)
+        self.oi_box.setMaximumHeight(420)
         self.oi_box.setStyleSheet("font-size:13px")
         self.layout().addWidget(self.oi_box)
+
         self.oi_thread = None
         self.oi_worker = None
         self.oi_box.setText(
-            "FUTURES OI\n\n"
-            "После сканирования рынка здесь появятся все доступные фьючерсные roots:\n"
-            "фьючерс → базовый актив → цена → Δ → OI → ΔOI → Z-score → режим."
+            "FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS\n\n"
+            "Единое окно Trader_7_12 Pro. После сканирования SPOT здесь автоматически\n"
+            "появятся фьючерс → базовый актив → FUT Δ → BASE Δ → OI → ΔOI → Z-score → режим."
             if scanner_enabled else "FUTURES OI\n\nBCS временно недоступен."
         )
 
@@ -59,7 +64,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_box.setText("FUTURES OI\n\nИдёт загрузка фьючерсной кривой и MOEX OI…")
+        self.oi_box.setText("FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS\n\nИдёт загрузка фьючерсной кривой и MOEX OI…")
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIScannerService())
         self.oi_worker.moveToThread(self.oi_thread)
@@ -92,6 +97,8 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • "
             f"АНАЛИЗ: {diagnostics.get('analyzed', 0)} • "
             f"ИСТОЧНИК OI: {escape(str(diagnostics.get('oi_source') or '—'))}",
+            f"КОНТРАКТОВ: {diagnostics.get('active_contracts', 0)} • ROOTS: {diagnostics.get('active_roots', 0)} • "
+            f"QUOTE: {diagnostics.get('quote_records', 0)} • METADATA: {diagnostics.get('metadata_lookup_records', 0)}",
             "",
             "ROOT / КОНТРАКТ          БАЗОВЫЙ АКТИВ       FUT Δ%    BASE Δ%       OI        ΔOI%   Z     РЕЖИМ",
             "─" * 118,
