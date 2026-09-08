@@ -4,7 +4,7 @@
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
-**Версия pipeline:** 2.4.0
+**Версия pipeline:** 2.4.1
 
 ## 1. Назначение
 
@@ -169,6 +169,8 @@ The scanner may select at most the strongest current market leader and weakest c
 
 This is an informational classification only. The application does not make a trade decision.
 
+When strict qualification is unavailable because D1 history or M5 coverage is insufficient, the radar does **not** erase the available market information. It may show up to the configured radar capacity as `ATTENTION_WATCH` / `WATCH_ONLY`, provided absolute liquidity and meaningful current RS are present. These rows are explicitly not strict qualifications and never become BUY/SELL or execution signals.
+
 ## 11. Output / UI contract
 
 Основной экран ориентирован на фактическую картину рынка:
@@ -220,10 +222,9 @@ Below 80%:
 
 ```text
 status = INSUFFICIENT_COVERAGE
-selected = []
 ```
 
-Partial scan is never presented as a complete market result.
+The 80% threshold remains a diagnostic completeness gate. It no longer deletes all visible candidates: strict `QUALIFIED` rows remain eligible, while objectively supported but incomplete rows may be shown as `ATTENTION_WATCH / WATCH_ONLY`. Partial scan is never relabeled as a complete market result.
 
 ## 14. HTTP resilience
 
