@@ -1,4 +1,4 @@
-# PyInstaller spec for the read-only Trader_7_12 Pro macOS GUI.
+# PyInstaller spec for the single-window read-only Trader_7_12 Pro macOS GUI.
 # Build from repository root with scripts/build_mac_app.sh.
 
 import os
@@ -6,7 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_submodules
 
 
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.4.0"
 BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
 SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
