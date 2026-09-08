@@ -12,21 +12,9 @@ class FakeAPI:
     def get_instruments(self, instrument_type):
         assert instrument_type == "FUTURES"
         return [
-            {
-                "ticker": "AFLT-9.26",
-                "underlyingAsset": "AFLT",
-                "classCode": "SPBFUT",
-            },
-            {
-                "ticker": "ALRS-9.26",
-                "underlyingAsset": "ALRS",
-                "classCode": "SPBFUT",
-            },
-            {
-                "ticker": "APPF",
-                "underlyingAsset": "APPF",
-                "classCode": "SPBFUT",
-            },
+            {"ticker": "AFLT-9.26", "underlyingAsset": "AFLT", "classCode": "SPBFUT"},
+            {"ticker": "ALRS-9.26", "underlyingAsset": "ALRS", "classCode": "SPBFUT"},
+            {"ticker": "APPF", "underlyingAsset": "APPF", "classCode": "SPBFUT"},
         ]
 
     def get_instruments_by_tickers(self, tickers):
@@ -34,20 +22,23 @@ class FakeAPI:
 
 
 def test_moex_short_code_mapping_for_standard_stock_futures():
-    assert FuturesOIScannerService._oi_root(
-        {"underlyingAsset": "AFLT"}, "AFLT-9.26", "AFLT"
-    ) == "AF"
-    assert FuturesOIScannerService._oi_root(
-        {"underlyingAsset": "ALRS"}, "ALRS-9.26", "ALRS"
-    ) == "AL"
+    assert FuturesOIScannerService._oi_root({"underlyingAsset": "AFLT"}, "AFLT-9.26", "AFLT") == "AF"
+    assert FuturesOIScannerService._oi_root({"underlyingAsset": "ALRS"}, "ALRS-9.26", "ALRS") == "AL"
 
 
-def test_metadata_short_code_has_priority():
-    row = {
-        "underlyingAsset": "AFLT",
-        "shortCode": "ZZ",
-    }
-    assert FuturesOIScannerService._oi_root(row, "AFLT-9.26", "AFLT") == "ZZ"
+def test_invalid_metadata_contract_identifier_does_not_override_underlying_mapping():
+    row = {"underlyingAsset": "AFLT", "shortCode": "AFLT-9.26"}
+    assert FuturesOIScannerService._oi_root(row, "AFLT-9.26", "AFLT") == "AF"
+
+
+def test_unknown_metadata_root_does_not_override_known_underlying_mapping():
+    row = {"underlyingAsset": "AFLT", "shortCode": "ZZ"}
+    assert FuturesOIScannerService._oi_root(row, "AFLT-9.26", "AFLT") == "AF"
+
+
+def test_valid_metadata_root_is_used_for_unmapped_underlying():
+    row = {"underlyingAsset": "APPF", "shortCode": "APPF"}
+    assert FuturesOIScannerService._oi_root(row, "APPF", "APPF") == "APPF"
 
 
 def test_active_contracts_group_by_oi_root_not_underlying_ticker():
