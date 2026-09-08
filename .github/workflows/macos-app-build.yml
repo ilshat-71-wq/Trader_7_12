@@ -39,10 +39,13 @@ jobs:
         run: |
           APP='dist/Trader_7_12 Pro.app'
           PLIST="$APP/Contents/Info.plist"
+          EXPECTED_VERSION='2.4.3'
           test -x "$APP/Contents/MacOS/Trader_7_12_Pro"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = 'com.ilshat.trader712pro'
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = '2.4.1'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = "$EXPECTED_VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "$PLIST")" = "$(git rev-parse HEAD)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$PLIST")" = 'Trader_7_12_Pro.icns'
+          test -f "$APP/Contents/Resources/Trader_7_12_Pro.icns"
 
       - name: Package app
         run: |
