@@ -29,7 +29,7 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """The single Trader_7_12 Pro window: SPOT radar + visible futures/OI context."""
 
-    VERSION = "2.4.0"
+    VERSION = "2.4.1"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
