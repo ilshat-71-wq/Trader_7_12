@@ -77,23 +77,37 @@ def test_strong_on_up_market_is_market_leader(monkeypatch):
     assert result[0]["relative_strength"] == 1.1
 
 
-def test_weak_on_up_market_is_market_laggard(monkeypatch):
+def test_multiple_strong_instruments_on_up_market_are_long_candidates(monkeypatch):
+    rows = [_row("A", 1.8, 2_000_000), _row("B", 1.5, 1_900_000), _row("C", 1.2, 1_800_000)]
+    scanner = _scanner(monkeypatch, rows, 0.7)
+    result = scanner.scan(limit=3)
+    assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
+    assert all(x["selection_role"] == "MARKET_LEADER" for x in result)
+    assert all(x["direction"] == "LONG" for x in result)
+
+
+def test_weak_on_up_market_is_not_a_short_candidate(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", -0.4, 1_900_000)], 0.7)
-    result = scanner.scan(limit=2)
-    assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
+    result = scanner.scan(limit=3)
+    assert result[0]["spot_ticker"] == "STRONG"
+    assert all(x["spot_ticker"] != "WEAK" or x["qualification_status"] == "WATCH_ONLY" for x in result)
 
 
-def test_strong_on_down_market_is_market_leader(monkeypatch):
+def test_strong_on_down_market_is_not_long_candidate(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 0.4, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
     result = scanner.scan(limit=2)
-    assert result[0]["selection_role"] == "MARKET_LEADER"
-    assert result[0]["relative_strength"] == 1.0
+    assert result[0]["selection_role"] == "MARKET_LAGGARD"
+    assert result[0]["spot_ticker"] == "WEAK"
+    assert result[0]["direction"] == "SHORT"
 
 
-def test_weak_on_down_market_is_market_laggard(monkeypatch):
-    scanner = _scanner(monkeypatch, [_row("STRONG", -0.1, 2_000_000), _row("WEAK", -2.2, 1_900_000)], -0.6)
-    result = scanner.scan(limit=2)
-    assert any(x["selection_role"] == "MARKET_LAGGARD" and x["spot_ticker"] == "WEAK" for x in result)
+def test_multiple_weak_instruments_on_down_market_are_short_candidates(monkeypatch):
+    rows = [_row("A", -2.2, 2_000_000), _row("B", -1.9, 1_900_000), _row("C", -1.5, 1_800_000)]
+    scanner = _scanner(monkeypatch, rows, -0.6)
+    result = scanner.scan(limit=3)
+    assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
+    assert all(x["selection_role"] == "MARKET_LAGGARD" for x in result)
+    assert all(x["direction"] == "SHORT" for x in result)
 
 
 def test_tiny_relative_strength_is_not_directional(monkeypatch):
@@ -101,13 +115,15 @@ def test_tiny_relative_strength_is_not_directional(monkeypatch):
     assert scanner.scan(limit=3) == []
 
 
-def test_d1_confirmation_overrides_intraday_direction(monkeypatch):
-    rows = [_row("A", 1.5, 3_000_000), _row("B", -1.5, 2_000_000)]
-    scanner = _scanner(monkeypatch, rows, 0.0)
-    monkeypatch.setattr(scanner, "_daily_profile", lambda item, *args: _qualified_profile("SHORT" if item["spot_ticker"] == "A" else "LONG"))
+def test_d1_direction_does_not_override_market_relative_direction(monkeypatch):
+    rows = [_row("A", -0.1, 3_000_000), _row("B", -1.5, 2_000_000)]
+    scanner = _scanner(monkeypatch, rows, -0.6)
+    monkeypatch.setattr(scanner, "_daily_profile", lambda item, *args: _qualified_profile("LONG"))
     result = scanner.scan(limit=3)
     assert result
-    assert all(x["qualification_status"] == "WATCH_ONLY" for x in result)
+    assert result[0]["spot_ticker"] == "B"
+    assert result[0]["direction"] == "SHORT"
+    assert result[0]["qualification_status"] == "QUALIFIED"
 
 
 def test_d1_benchmark_unavailable_creates_watch_only(monkeypatch):
@@ -150,8 +166,7 @@ def test_rs_magnitude_participates_in_ranking(monkeypatch):
     rows = [_row("HIGH_RS", 1.0, 1_600_000), _row("HIGH_ATTENTION", 0.2, 3_000_000), _row("WEAK", -0.8, 1_500_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
     result = scanner.scan(limit=3)
-    assert result[0]["spot_ticker"] == "HIGH_RS"
-    assert result[0]["directional_score"] > result[1]["directional_score"]
+    assert result == []
 
 
 def test_acceleration_requires_two_complete_windows():
@@ -178,7 +193,6 @@ def test_acceleration_uses_equal_windows():
 def test_low_absolute_liquidity_cannot_be_directional(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("LIQUID", 1.0, 2_000_000), _row("THIN", -1.5, 500_000)], 0.0)
     result = scanner.scan(limit=3)
-    assert any(x["spot_ticker"] == "LIQUID" and x["selection_role"] == "MARKET_LEADER" for x in result)
     assert all(x["spot_ticker"] != "THIN" for x in result)
     assert scanner._last_scan_diagnostics["liquidity_filtered"] == 1
 
@@ -187,6 +201,5 @@ def test_percentile_cannot_rescue_low_liquidity(monkeypatch):
     rows = [_row("STRONG_THIN", 3.0, 600_000), _row("WEAK_THIN", -3.0, 500_000), _row("LIQUID", 0.2, 2_000_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
     result = scanner.scan(limit=3)
-    assert all(x["spot_ticker"] != "STRONG_THIN" for x in result)
-    assert all(x["spot_ticker"] != "WEAK_THIN" for x in result)
+    assert all(x["spot_ticker"] not in {"STRONG_THIN", "WEAK_THIN"} for x in result)
     assert scanner._last_scan_diagnostics["liquidity_filtered"] == 2
