@@ -6,12 +6,6 @@
 **Статус:** production-oriented read-only market-information scanner  
 **Версия pipeline:** 2.4.0
 
-## Futures OI integration note
-
-BCS `/instruments/by-type` provides the futures universe but may omit `classCode` and expiry fields. `FuturesOIScannerService` therefore enriches each futures ticker through the authoritative BCS `/instruments/by-tickers` endpoint before quote retrieval. Futures OI remains root-level and is read from MOEX ISS FUTOI; the scanner does not infer or hardcode futures `classCode` values.
-
-The futures panel is read-only and informational. It uses the FRONT non-expired contract per futures root for the primary quote row, while preserving curve rank/role metadata. OI is mapped to the futures root, not to the underlying spot instrument.
-
 ## 1. Назначение
 
 Trader_7_12 Pro — **read-only информационный сканер рынка**. Его задача — в течение текущего торгового дня показывать реальные факты о состоянии доступных BASE/SPOT-инструментов: дневную структуру, относительную силу/слабость к IMOEX2, текущую активность и денежный поток, раннее поведение и реакцию на внутридневные экстремумы индекса.
@@ -57,7 +51,7 @@ USDRUB
 - GOLD: `GLDRUB_TOM`, если доступен в BCS SPOT metadata.
 - USDRUB: реальный spot-инструмент из BCS metadata.
 - OIL/GAS: не заменяются фьючерсами; без real base/spot source → `UNAVAILABLE`.
-- Futures metadata is handled separately by the futures OI scanner and is not used as a substitute for BASE/SPOT analysis.
+- Futures metadata, expiry, mapping и ranking обрабатываются отдельным futures OI слоем и не заменяют BASE/SPOT analysis.
 - На ДСВД stock universe фильтруется по MOEX `WEEKENDSESSION`, если поле доступно; `WEEKENDSESSION=N` исключается.
 - Если `WEEKENDSESSION` не отдан BCS, бумага не удаляется молча; фактическая M5-доступность может использоваться как дополнительная проверка.
 
@@ -223,3 +217,165 @@ DSWD:
 Minimum production M5 coverage: **80%**.
 
 Below 80%:
+
+```text
+status = INSUFFICIENT_COVERAGE
+selected = []
+```
+
+Partial scan is never presented as a complete market result.
+
+## 14. HTTP resilience
+
+- One process-wide read-only BCS client.
+- `MAX_WORKERS = 6`.
+- Global request-start throttle: `0.15 s` between requests.
+- Reusable `requests.Session` with connection pooling per worker.
+- HTTP/SSL failure is not interpreted as no trading.
+- 429/SSL degradation must reduce coverage and remain visible in diagnostics.
+
+## 15. Open Interest — futures analytics
+
+OI is a separate, reusable analytics layer for **all supported MOEX futures roots**, not a SI-only rule.
+
+Source:
+
+```text
+MOEX ISS → /iss/analyticalproducts/futoi/securities
+```
+
+The MOEX derivatives market publishes open interest alongside price, volume and trades; MOEX also exposes underlying information for futures contracts.
+
+The production OI layer calculates:
+
+```text
+OI
+ΔOI contracts
+ΔOI %
+OI history
+OI-change Z-score
+Price + OI regime
+Volume confirmation
+```
+
+Canonical regimes:
+
+```text
+PRICE ↑ + OI ↑ → NEW_POSITION_BUILDING_UP
+PRICE ↑ + OI ↓ → SHORT_COVERING
+PRICE ↓ + OI ↑ → NEW_POSITION_BUILDING_DOWN
+PRICE ↓ + OI ↓ → LONG_LIQUIDATION
+```
+
+OI itself never determines direction. Price is the directional axis; volume is the activity confirmation; OI explains whether open exposure is building or unwinding.
+
+### OI Z-score
+
+Z-score is calculated from historical daily percentage changes in OI, using the latest 20 observations when sufficient history exists:
+
+```text
+|Z| < 1   NORMAL
+1–2      ELEVATED
+2–3      STRONG
+>3       ANOMALOUS
+```
+
+### 15.1 Futures → underlying mapping — generic
+
+The mapping is **not hardcoded for SI**. Runtime BCS futures metadata is the source of truth for each futures root.
+
+BCS `/instruments/by-type` can return the futures universe without `classCode` and expiry fields. The production scanner therefore enriches each futures ticker through BCS `/instruments/by-tickers` before requesting quotes. `classCode` is never guessed or hardcoded.
+
+```text
+FUTURES ROOT / CONTRACT
+        ↓
+BCS /by-tickers metadata enrichment
+        ↓
+underlyingAsset / underlyingTicker / classCode / expiry
+        ↓
+FUTURES QUOTE + BASE/UNDERLYING QUOTE
+        ↓
+MOEX FUTOI by futures root
+```
+
+For example, SI is represented as:
+
+```text
+Si-9.26
+futures_root = SI
+underlying_asset = USDRUB
+```
+
+The source code may be `USDRUB_TOM`; the UI normalizes this to the display name `USDRUB` while retaining the source code internally.
+
+The same mechanism is used for every futures root returned by BCS metadata: currency, index, commodity and single-stock futures. There is no SI-only branch in the analytics logic.
+
+The scanner keeps **futures price/change** and **underlying price/change** as separate facts. They are not substituted for one another. A `DIVERGENCE` state is exposed when their directions disagree.
+
+### 15.2 Curve / rollover handling
+
+For each futures root the scanner keeps the nearest non-expired contract as `FRONT` and exposes curve rank/role metadata for `NEXT` and deferred maturities. MOEX FUTOI is treated as root-level OI; the front contract is therefore not allowed to masquerade as the entire root's OI during rollover.
+
+This is important for SI and every other futures curve: falling OI in an expiring front contract is not automatically interpreted as market-wide short covering.
+
+### 15.3 Visible application output
+
+The application contains a dedicated read-only `FUTURES OI` panel. For every analyzed futures root it shows:
+
+```text
+ROOT / CONTRACT
+BASE ASSET
+FUT Δ%
+BASE Δ%
+OI
+ΔOI%
+Z
+REGIME
+ALIGNMENT
+CURVE ROLE
+OI STRENGTH
+```
+
+The panel is updated asynchronously after the main SPOT market scan so the GUI remains responsive. Failure to obtain futures/OI data is shown explicitly and is never converted into a false `0` or `CLOSED` state.
+
+### 15.4 Runtime diagnostics
+
+The futures scanner exposes counts for:
+
+```text
+raw_contracts
+metadata_lookup_batches
+metadata_lookup_ok
+metadata_lookup_records
+option_filtered
+expired_filtered
+expiry_available
+class_code_available
+active_contracts
+active_roots
+quote_instruments
+quote_records
+analyzed
+skipped
+```
+
+This makes an upstream metadata/API failure distinguishable from an actual absence of futures activity.
+
+### 15.5 Information boundary
+
+OI is informational/confirming context. It does not create BUY/SELL, LONG/SHORT, entry, position-sizing or execution decisions.
+
+## 16. Safety boundary
+
+The application is strictly read-only:
+
+```text
+NO ORDERS
+NO POSITION SIZING
+NO SL/TP
+NO TRADE EXECUTION
+NO AUTOMATIC ENTRY DECISION
+NO TRADE RECOMMENDATION
+```
+
+The application reports facts and market classifications only. Final decisions remain completely outside the application.
