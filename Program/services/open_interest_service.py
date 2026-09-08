@@ -2,20 +2,26 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from statistics import mean, pstdev
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from api.request_helper import RequestHelper
 
 
 class OpenInterestService:
-    """Professional read-only MOEX futures OI analytics."""
+    """Read-only MOEX futures OI analytics.
+
+    FUTOI remains the participant-structure source when available. Aggregate
+    open interest from the public MOEX futures marketdata block is the reliable
+    contract-level fallback and therefore does not depend on FUTOI root mapping.
+    """
 
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
-    VERSION = "1.2.0"
+    FUTURES_MARKETDATA_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities"
+    VERSION = "1.3.0"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
-    USER_AGENT = "Trader_7_12/1.2"
+    USER_AGENT = "Trader_7_12/1.3"
 
     REGIMES = {
         "PRICE_UP_OI_UP": "NEW_POSITION_BUILDING_UP",
@@ -29,6 +35,7 @@ class OpenInterestService:
         self._http_get = http_get or self._default_get
         self._history_cache = {}
         self._all_cache = {}
+        self._marketdata_cache = {}
 
     @classmethod
     def _default_get(cls, url, timeout=8):
@@ -57,7 +64,23 @@ class OpenInterestService:
 
     def _request_root(self, root, start, end, latest=True):
         params = {"from": start, "till": end, "latest": int(bool(latest))}
-        return self._http_get(f"{self.BASE_URL}/{root}.json?{urlencode(params)}", timeout=self.TIMEOUT)
+        return self._http_get(f"{self.BASE_URL}/{quote(str(root).upper(), safe='')}.json?{urlencode(params)}", timeout=self.TIMEOUT)
+
+    def _request_marketdata(self, contract_ticker):
+        ticker = str(contract_ticker or "").strip().upper()
+        if not ticker:
+            return None
+        if ticker in self._marketdata_cache:
+            return self._marketdata_cache[ticker]
+        url = f"{self.FUTURES_MARKETDATA_URL}/{quote(ticker, safe='')}.json?iss.only=marketdata"
+        try:
+            payload = self._http_get(url, timeout=self.TIMEOUT)
+        except Exception:
+            return None
+        rows = self._parse_block(payload, "marketdata")
+        row = rows[0] if rows else None
+        self._marketdata_cache[ticker] = row
+        return row
 
     @staticmethod
     def _number(value):
@@ -68,14 +91,6 @@ class OpenInterestService:
 
     @classmethod
     def _aggregate_rows(cls, rows):
-        """Aggregate client-group rows into the contract's open interest.
-
-        MOEX FUTOI reports POS separately for client groups and signs short
-        positions negatively. Gross long and gross short therefore represent
-        the two sides of the same open interest. The robust aggregate is the
-        mean of the two sides when both exist; POS absolute values provide the
-        fallback for feeds that omit POS_LONG/POS_SHORT.
-        """
         if not rows:
             return None
         ticker = str(rows[0].get("ticker") or "").upper()
@@ -85,12 +100,7 @@ class OpenInterestService:
             oi = (long_oi + short_oi) / 2.0
         else:
             oi = sum(abs(cls._number(row.get("pos"))) for row in rows) / 2.0
-        return {
-            "ticker": ticker,
-            "oi": oi,
-            "oi_long": long_oi,
-            "oi_short": short_oi,
-        }
+        return {"ticker": ticker, "oi": oi, "oi_long": long_oi, "oi_short": short_oi}
 
     def load_all(self, trading_date: str | date, latest=True):
         if isinstance(trading_date, date):
@@ -98,7 +108,10 @@ class OpenInterestService:
         key = (str(trading_date), bool(latest))
         if key in self._all_cache:
             return dict(self._all_cache[key])
-        rows = self._parse_block(self._request_all({"date": trading_date, "latest": int(bool(latest))}))
+        try:
+            rows = self._parse_block(self._request_all({"date": trading_date, "latest": int(bool(latest))}))
+        except Exception:
+            rows = []
         grouped = {}
         for row in rows:
             grouped.setdefault(str(row.get("ticker") or "").upper(), []).append(row)
@@ -117,7 +130,10 @@ class OpenInterestService:
         key = (root, start_s, end_s, bool(latest))
         if key in self._history_cache:
             return list(self._history_cache[key])
-        rows = self._parse_block(self._request_root(root, start_s, end_s, latest))
+        try:
+            rows = self._parse_block(self._request_root(root, start_s, end_s, latest))
+        except Exception:
+            rows = []
         by_date = {}
         for row in rows:
             day = str(row.get("tradedate") or row.get("date") or "")[:10]
@@ -172,25 +188,65 @@ class OpenInterestService:
             "volume_confirmation": None if volume_percent is None else cls._number(volume_percent) > 0,
         }
 
-    def analyze(self, root, price_change_percent, volume_percent=None, as_of=None):
+    def _marketdata_analysis(self, contract_ticker, price_change_percent, volume_percent):
+        row = self._request_marketdata(contract_ticker)
+        if not row:
+            return None
+        oi = self._number(row.get("openposition"))
+        oi_change_contracts = self._number(row.get("oichange"))
+        if oi <= 0:
+            return None
+        previous_oi = oi - oi_change_contracts
+        oi_change_percent = (oi_change_contracts / previous_oi) * 100.0 if previous_oi > 0 else None
+        return {
+            "oi_status": "AVAILABLE" if oi_change_percent is not None else "CURRENT_ONLY",
+            "oi_source": "MOEX_FUTURES_MARKETDATA",
+            "oi_contract_ticker": str(contract_ticker).upper(),
+            "oi": round(oi, 3),
+            "oi_change_contracts": int(oi_change_contracts),
+            "oi_change_percent": None if oi_change_percent is None else round(oi_change_percent, 3),
+            "oi_data_date": row.get("tradedate") or row.get("systime") or None,
+            "oi_service_version": self.VERSION,
+            **self.classify(price_change_percent, oi_change_percent or 0.0, volume_percent, None),
+        }
+
+    def analyze(self, root, price_change_percent, volume_percent=None, as_of=None, contract_ticker=None):
         as_of = as_of or date.today()
         if isinstance(as_of, datetime):
             as_of = as_of.date()
         root = str(root).upper()
+
+        # First retain the participant-structure product when it actually has data.
         current = self.load_all(as_of).get(root)
-        if not current:
-            return {"oi_status": "UNAVAILABLE", "oi_root": root, "oi_service_version": self.VERSION}
-        history = self.load_history(root, as_of - timedelta(days=self.HISTORY_DAYS), as_of)
-        previous_oi = next((x["oi"] for x in reversed(history) if x.get("date") < as_of.isoformat()), None)
-        oi_change = ((current["oi"] / previous_oi) - 1.0) * 100.0 if previous_oi and previous_oi > 0 else None
-        changes = self._pct_changes([x["oi"] for x in history])
-        z = self.zscore(oi_change, changes[-self.ZSCORE_WINDOW:]) if oi_change is not None else None
+        if current:
+            history = self.load_history(root, as_of - timedelta(days=self.HISTORY_DAYS), as_of)
+            previous_oi = next((x["oi"] for x in reversed(history) if x.get("date") < as_of.isoformat()), None)
+            oi_change = ((current["oi"] / previous_oi) - 1.0) * 100.0 if previous_oi and previous_oi > 0 else None
+            changes = self._pct_changes([x["oi"] for x in history])
+            z = self.zscore(oi_change, changes[-self.ZSCORE_WINDOW:]) if oi_change is not None else None
+            return {
+                "oi_status": "AVAILABLE" if oi_change is not None else "CURRENT_ONLY",
+                "oi_source": "MOEX_ISS_FUTOI",
+                "oi_root": root,
+                "oi": current["oi"],
+                "oi_long": current.get("oi_long"),
+                "oi_short": current.get("oi_short"),
+                "oi_change_percent": None if oi_change is None else round(oi_change, 3),
+                "oi_history_days": len(history),
+                "oi_service_version": self.VERSION,
+                **self.classify(price_change_percent, oi_change or 0.0, volume_percent, z),
+            }
+
+        # Contract-level aggregate OI is independent of FUTOI subscription/root mapping.
+        if contract_ticker:
+            fallback = self._marketdata_analysis(contract_ticker, price_change_percent, volume_percent)
+            if fallback:
+                return fallback
+
         return {
-            "oi_status": "AVAILABLE" if oi_change is not None else "CURRENT_ONLY",
+            "oi_status": "UNAVAILABLE",
+            "oi_source": "NONE",
             "oi_root": root,
-            "oi": current["oi"],
-            "oi_change_percent": None if oi_change is None else round(oi_change, 3),
-            "oi_history_days": len(history),
+            "oi_contract_ticker": str(contract_ticker or "").upper() or None,
             "oi_service_version": self.VERSION,
-            **self.classify(price_change_percent, oi_change or 0.0, volume_percent, z),
         }
