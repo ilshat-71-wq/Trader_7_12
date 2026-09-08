@@ -1,3 +1,6 @@
+# macOS app build script for the single-window Trader_7_12 Pro application.
+# The application entry point is Program/main.py, which launches the unified
+# SPOT + Futures OI dashboard from Program/oi_watchlist_ui.py.
 #!/bin/zsh
 set -euo pipefail
 
@@ -7,7 +10,7 @@ APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
-APP_VERSION="2.3.1"
+APP_VERSION="2.4.0"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)"
@@ -49,8 +52,6 @@ PYTHONPATH=Program "${PYTHON_BIN}" -m pytest -q Program
 rm -rf "${DIST_DIR}/${APP_NAME}" "${BUILD_DIR}/Trader_7_12_Pro"
 mkdir -p "${BUILD_DIR}"
 
-# Restore the original Trader_7_12 Pro one-clock icon used by the old app.
-# It is generated locally so no binary icon is stored in Git.
 ICONSET="${BUILD_DIR}/Trader_7_12_Pro.iconset"
 ICNS="${BUILD_DIR}/Trader_7_12_Pro.icns"
 rm -rf "${ICONSET}" "${ICNS}"
@@ -163,6 +164,7 @@ printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" \
   "Bundle version: ${BUNDLE_VERSION}" \
   "Bundle source commit: ${BUNDLE_COMMIT}" \
   "Bundle icon: original one-clock" "" \
+  "Single-window dashboard: SPOT + Futures OI" \
   "Next: double-click '${APP_PATH}' in Finder." \
   "For a terminal-visible launch, use:" \
   "  open \"$(pwd)/${APP_PATH}\"" \
