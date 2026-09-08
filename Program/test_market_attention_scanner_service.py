@@ -159,14 +159,14 @@ def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):
     assert result
     assert scanner._last_scan_diagnostics["status"] == "INSUFFICIENT_COVERAGE"
     assert scanner._last_scan_diagnostics["coverage_percent"] == round(2 / 3 * 100, 1)
-    assert scanner._last_scan_diagnostics["selected"] == 2
+    assert scanner._last_scan_diagnostics["selected"] == 1
 
 
-def test_rs_magnitude_participates_in_ranking(monkeypatch):
-    rows = [_row("HIGH_RS", 1.0, 1_600_000), _row("HIGH_ATTENTION", 0.2, 3_000_000), _row("WEAK", -0.8, 1_500_000)]
+def test_neutral_market_has_no_strict_direction(monkeypatch):
+    rows = [_row("STRONG", 1.0, 2_000_000), _row("WEAK", -1.0, 1_900_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
-    result = scanner.scan(limit=3)
-    assert result == []
+    assert scanner.scan(limit=3) == []
+    assert scanner._last_scan_diagnostics["market_regime"] == "NEUTRAL"
 
 
 def test_acceleration_requires_two_complete_windows():
