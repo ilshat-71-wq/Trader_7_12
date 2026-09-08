@@ -6,7 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_submodules
 
 
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.4.3"
 BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
 SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
@@ -23,7 +23,6 @@ hiddenimports = [
     "services.history_candle_service",
     "services.market_session_service",
 ]
-
 hiddenimports += collect_submodules("api")
 hiddenimports += collect_submodules("services")
 
