@@ -11,7 +11,7 @@ from services.market_attention_scanner_service import MarketAttentionScannerServ
 class MarketInformationScannerService(_PipelineScanner):
     """Read-only information facade over the production market scanner."""
 
-    VERSION = "2.3.1"
+    VERSION = "2.4.1"
 
     def scan(self, limit=3):
         rows = super().scan(limit=limit)
@@ -33,5 +33,4 @@ class MarketInformationScannerService(_PipelineScanner):
         diagnostics["decision_policy"] = "NO_TRADE_DECISION"
         diagnostics["leader_role"] = "MARKET_LEADER"
         diagnostics["laggard_role"] = "MARKET_LAGGARD"
-        self._last_scan_diagnostics = diagnostics
         return translated
