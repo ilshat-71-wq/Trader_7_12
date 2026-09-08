@@ -10,9 +10,6 @@ class FuturesOIScannerService:
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
-    # MOEX's FUTOI service uses the short two-character futures code for
-    # ordinary futures. BCS exposes the underlying security code instead, so
-    # keep the authoritative mapping explicit and use metadata first.
     MOEX_SHORT_CODE_BY_UNDERLYING = {
         "AFLT": "AF", "ALRS": "AL", "AFKS": "AK", "CHMF": "CH",
         "FEES": "FS", "GAZP": "GZ", "GMKN": "GK", "HYDR": "HY",
@@ -29,12 +26,12 @@ class FuturesOIScannerService:
         "KMAZ": "KM", "ASTR": "AS", "SOFL": "S0", "SVCB": "SC",
         "RASP": "RA", "FESH": "FE", "RNFT": "RU", "LEAS": "LE",
         "BELUGA": "NB", "X5": "X5", "OZON": "ON", "DOMRF": "DR",
-        "IVAT": "IV", "ENPG": "EA", "POSI": "PS", "T": "TB",
+        "IVAT": "IV", "ENPG": "EA", "T": "TB",
         "ALIBABA": "BB", "BAIDU": "BD", "PDD": "DD", "JDCOM": "JD",
-        "TENCENT": "TC", "XIA": "XI", "TSMr": "TS", "SAP": "AP",
-        "SONY": "SY", "NOVARTIS": "NO", "TOYOTA": "TO", "KOREA": "KR",
-        "SAMSUNG": "SK", "HYNIX": "HX", "FIXR": "FI", "RAGR": "RZ",
-        "Si": "Si", "Eu": "Eu", "CNY": "CR", "GL": "GL", "S2": "SL",
+        "TENCENT": "TC", "XIA": "XI", "SAP": "AP", "SONY": "SY",
+        "NOVARTIS": "NO", "TOYOTA": "TO", "KOREA": "KR", "SAMSUNG": "SK",
+        "HYNIX": "HX", "FIXR": "FI", "RAGR": "RZ",
+        "SI": "SI", "EU": "EU", "CNY": "CR", "GL": "GL", "S2": "SL",
         "IMOEX": "IM", "MIX": "MX", "MXI": "MM", "MOEXCNY": "MY",
         "RTS": "RI", "RTSM": "RM", "RVI": "VI", "HOME": "HO",
         "OGI": "OG", "MMI": "MA", "FNI": "FN", "CNI": "CS",
@@ -44,6 +41,12 @@ class FuturesOIScannerService:
         "SNDKF": "SNDKF", "COHRF": "COHRF", "NBISF": "NBISF",
         "HOODF": "HOODF", "LITEF": "LITEF", "SP500F": "SP500F", "QQQF": "QQQF",
         "GAZPF": "GAZPF", "SBERF": "SBERF",
+    }
+
+    UNDERLYING_ALIASES = {
+        "USDRUB_TOM": "SI", "USDRUBTOM": "SI", "USDRUBF": "SI", "USDRUB": "SI",
+        "EURRUB_TOM": "EU", "EURRUBTOM": "EU", "EURRUBF": "EU", "EURRUB": "EU",
+        "CNYRUB_TOM": "CR", "CNYRUBTOM": "CR", "CNYRUBF": "CR", "CNYRUB": "CR",
     }
 
     def __init__(self, api=None, oi_service=None):
@@ -110,16 +113,14 @@ class FuturesOIScannerService:
         metadata_root = cls._oi_root_from_metadata(row)
         if metadata_root:
             return metadata_root
-
         underlying = str(underlying or "").upper().strip()
+        underlying = cls.UNDERLYING_ALIASES.get(underlying, underlying)
         mapped = cls.MOEX_SHORT_CODE_BY_UNDERLYING.get(underlying)
         if mapped:
             return mapped.upper()
-
         ticker_root = cls._root(ticker)
-        # If BCS already supplies a short MOEX code, retain it. Full security
-        # codes such as AFLT/ALRS must not be sent to FUTOI as roots.
-        if ticker_root in {str(v).upper() for v in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}:
+        known_roots = {str(v).upper() for v in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}
+        if ticker_root in known_roots:
             return ticker_root
         return ticker_root
 
@@ -127,10 +128,7 @@ class FuturesOIScannerService:
     def _normalize_underlying_display(code):
         code = str(code or "").upper().strip()
         aliases = {
-            "USDRUB_TOM": "USDRUB",
-            "USDRUBTOM": "USDRUB",
-            "USDRUBF": "USDRUB",
-            "USD/RUB": "USDRUB",
+            "USDRUB_TOM": "USDRUB", "USDRUBTOM": "USDRUB", "USDRUBF": "USDRUB", "USD/RUB": "USDRUB",
         }
         return aliases.get(code, code)
 
@@ -204,12 +202,7 @@ class FuturesOIScannerService:
             return ""
         return FuturesOIScannerService._text(
             row,
-            "expirationDate",
-            "expiration_date",
-            "lastTradingDate",
-            "expiryDate",
-            "expiration",
-            "expiry",
+            "expirationDate", "expiration_date", "lastTradingDate", "expiryDate", "expiration", "expiry",
         )
 
     def _enrich_contract_metadata(self, rows):
@@ -270,17 +263,10 @@ class FuturesOIScannerService:
         today = date.today().isoformat()
         grouped = {}
         diagnostics = {
-            "raw_contracts": raw_count,
-            "option_filtered": 0,
-            "expired_filtered": 0,
-            "active_contracts": 0,
-            "active_roots": 0,
-            "class_code_available": 0,
-            "class_code_fallback": 0,
-            "expiry_available": 0,
-            "oi_root_mapping": 0,
-            "oi_root_fallback": 0,
-            **metadata_diag,
+            "raw_contracts": raw_count, "option_filtered": 0, "expired_filtered": 0,
+            "active_contracts": 0, "active_roots": 0, "class_code_available": 0,
+            "class_code_fallback": 0, "expiry_available": 0, "oi_root_mapping": 0,
+            "oi_root_fallback": 0, **metadata_diag,
         }
         for raw in rows:
             source_ticker = self._text(raw, "ticker", "secCode", "securityCode")
@@ -313,20 +299,15 @@ class FuturesOIScannerService:
                 class_code = self.DEFAULT_FUTURES_CLASS_CODE
                 diagnostics["class_code_fallback"] += 1
             item = dict(raw)
-            item.update(
-                {
-                    "futures_root": futures_root,
-                    "oi_root": oi_root,
-                    "futures_ticker": source_ticker,
-                    "futures_ticker_normalized": ticker,
-                    "futures_class_code": class_code,
-                    "underlying_asset_source": underlying_source,
-                    "underlying_asset": self._normalize_underlying_display(underlying_source),
-                    "underlying_ticker": self._text(raw, "underlyingTicker", "underlyingSecCode") or underlying_source,
-                    "underlying_class_code": self._text(raw, "underlyingClassCode", "underlying_class_code", "underlyingClass"),
-                    "_expiry": expiry,
-                }
-            )
+            item.update({
+                "futures_root": futures_root, "oi_root": oi_root, "futures_ticker": source_ticker,
+                "futures_ticker_normalized": ticker, "futures_class_code": class_code,
+                "underlying_asset_source": underlying_source,
+                "underlying_asset": self._normalize_underlying_display(underlying_source),
+                "underlying_ticker": self._text(raw, "underlyingTicker", "underlyingSecCode") or underlying_source,
+                "underlying_class_code": self._text(raw, "underlyingClassCode", "underlying_class_code", "underlyingClass"),
+                "_expiry": expiry,
+            })
             grouped.setdefault(oi_root, []).append(item)
 
         result = []
@@ -354,8 +335,7 @@ class FuturesOIScannerService:
         quotes = self.api.get_quotes_batch(instruments)
         return {
             self._text(q, "ticker", "secCode", "securityCode").upper(): q
-            for q in quotes
-            if isinstance(q, dict)
+            for q in quotes if isinstance(q, dict)
         }
 
     def scan(self, as_of=None):
@@ -366,14 +346,12 @@ class FuturesOIScannerService:
         contracts = self._active_contracts()
         instruments = [
             {"ticker": x["futures_ticker"], "classCode": x["futures_class_code"]}
-            for x in contracts
-            if x.get("futures_class_code")
+            for x in contracts if x.get("futures_class_code")
         ]
         quotes = self.api.get_quotes_batch(instruments) if instruments else []
         quote_map = {
             self._text(q, "ticker", "secCode", "securityCode").upper(): q
-            for q in quotes
-            if isinstance(q, dict)
+            for q in quotes if isinstance(q, dict)
         }
         underlying_quotes = self._underlying_quotes(contracts)
 
@@ -385,7 +363,6 @@ class FuturesOIScannerService:
             if last is None or opening is None or opening <= 0:
                 skipped += 1
                 continue
-
             change = (last / opening - 1.0) * 100.0
             volume = self._float(quote, "volume", "volumeContracts", "totalVolume", "volume24h")
             oi = self.oi.analyze(contract["oi_root"], change, None, as_of=as_of)
@@ -394,63 +371,37 @@ class FuturesOIScannerService:
 
             underlying_ticker = str(contract.get("underlying_ticker") or "").upper()
             underlying_quote = underlying_quotes.get(underlying_ticker, {})
-            underlying_price = self._float(
-                underlying_quote,
-                "lastPrice", "last", "price", "currentPrice", "close",
-            )
-            underlying_open = self._float(
-                underlying_quote,
-                "openPrice", "open", "dayOpen", "openingPrice",
-            )
+            underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
+            underlying_open = self._float(underlying_quote, "openPrice", "open", "dayOpen", "openingPrice")
             underlying_change = (
                 (underlying_price / underlying_open - 1.0) * 100.0
-                if underlying_price is not None and underlying_open and underlying_open > 0
-                else None
+                if underlying_price is not None and underlying_open and underlying_open > 0 else None
             )
 
             row = dict(contract)
-            row.update(
-                {
-                    "price": last,
-                    "change_percent": round(change, 4),
-                    "volume": volume,
-                    "oi_analysis": oi,
-                    "underlying_price": underlying_price,
-                    "underlying_change_percent": None if underlying_change is None else round(underlying_change, 4),
-                    "underlying_data_status": "AVAILABLE" if underlying_price is not None else "UNAVAILABLE",
-                    "direction_alignment": (
-                        "ALIGNED_UP"
-                        if underlying_change is not None and change > 0 and underlying_change > 0
-                        else "ALIGNED_DOWN"
-                        if underlying_change is not None and change < 0 and underlying_change < 0
-                        else "DIVERGENCE"
-                        if underlying_change is not None and change * underlying_change < 0
-                        else "NEUTRAL"
-                    ),
-                    "data_status": "AVAILABLE" if oi.get("oi_status") != "UNAVAILABLE" else "OI_UNAVAILABLE",
-                }
-            )
+            row.update({
+                "price": last, "change_percent": round(change, 4), "volume": volume,
+                "oi_analysis": oi, "underlying_price": underlying_price,
+                "underlying_change_percent": None if underlying_change is None else round(underlying_change, 4),
+                "underlying_data_status": "AVAILABLE" if underlying_price is not None else "UNAVAILABLE",
+                "direction_alignment": (
+                    "ALIGNED_UP" if underlying_change is not None and change > 0 and underlying_change > 0
+                    else "ALIGNED_DOWN" if underlying_change is not None and change < 0 and underlying_change < 0
+                    else "DIVERGENCE" if underlying_change is not None and change * underlying_change < 0
+                    else "NEUTRAL"
+                ),
+                "data_status": "AVAILABLE" if oi.get("oi_status") != "UNAVAILABLE" else "OI_UNAVAILABLE",
+            })
             results.append(row)
 
-        results.sort(
-            key=lambda x: abs(float(x.get("oi_analysis", {}).get("oi_change_percent") or 0.0)),
-            reverse=True,
-        )
+        results.sort(key=lambda x: abs(float(x.get("oi_analysis", {}).get("oi_change_percent") or 0.0)), reverse=True)
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
-        diagnostics.update(
-            {
-                "status": "OK",
-                "version": self.VERSION,
-                "contracts": len(contracts),
-                "analyzed": len(results),
-                "oi_available": oi_available,
-                "skipped": skipped,
-                "quote_instruments": len(instruments),
-                "quote_records": len(quotes),
-                "oi_source": "MOEX_ISS_FUTOI",
-                "mapping": "BCS_FUTURES_METADATA_TO_MOEX_SHORT_CODE",
-                "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_MOEX_OI_ROOT",
-                "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
-            }
-        )
+        diagnostics.update({
+            "status": "OK", "version": self.VERSION, "contracts": len(contracts),
+            "analyzed": len(results), "oi_available": oi_available, "skipped": skipped,
+            "quote_instruments": len(instruments), "quote_records": len(quotes),
+            "oi_source": "MOEX_ISS_FUTOI", "mapping": "BCS_FUTURES_METADATA_TO_MOEX_SHORT_CODE",
+            "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_MOEX_OI_ROOT",
+            "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
+        })
         return results, diagnostics
