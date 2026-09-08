@@ -239,6 +239,16 @@ Futures/OI — отдельный контекстный слой.
 MOEX ISS → /iss/analyticalproducts/futoi/securities
 ```
 
+MOEX FUTOI использует короткий код инструмента для обычных фьючерсов; полный BCS security/underlying ticker нельзя автоматически считать OI root. Поэтому mapping выполняется в порядке приоритета:
+
+```text
+1. явный shortCode / futuresShortCode из BCS metadata
+2. каноническое соответствие underlying asset → MOEX short futures code
+3. безопасный ticker-root fallback только если он уже совпадает с известным MOEX OI root
+```
+
+Для вечных фьючерсов, у которых MOEX использует отдельный код (`APPF`, `AMDF`, `SBERF` и т.п.), root сохраняется отдельно и не смешивается с обычным двухсимвольным контрактом.
+
 OI рассчитывает/показывает:
 
 ```text
@@ -251,6 +261,8 @@ Price + OI regime
 Volume confirmation
 ```
 
+Агрегация client-group строк FUTOI использует обе стороны открытого интереса: при наличии `POS_LONG` и `POS_SHORT` берётся среднее gross-long/gross-short; `POS` используется как fallback. Это не допускает систематического завышения OI одной стороной.
+
 OI не создаёт SPOT-кандидата самостоятельно и не является торговым исполнителем.
 
 ### Futures metadata policy
@@ -259,7 +271,8 @@ OI не создаёт SPOT-кандидата самостоятельно и �
 - `classCode_fallback` диагностируется отдельно и не маскируется под metadata availability.
 - Истечение контракта фильтруется только при наличии распознанной даты expiry.
 - Если источник metadata не предоставляет expiry, контракт не объявляется истёкшим искусственно; состояние должно оставаться видимым в diagnostics.
-- Выбирается front non-expired contract на каждый futures root; OI остаётся root-level контекстом.
+- Выбирается front non-expired contract на каждый MOEX OI root; OI остаётся root-level контекстом.
+- Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records` и `expiry_available`.
 
 ## 16. Read-only boundary
 
@@ -287,6 +300,7 @@ NO PORTFOLIO MANAGEMENT
 8. M5/flow/acceleration участвуют в ranking и diagnostics.
 9. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
 10. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
-11. Futures OI остаётся отдельным context layer и проходит реальную проверку BCS + MOEX ISS.
-12. Полный regression suite и macOS build должны быть зелёными.
-13. macOS build обязан проходить compile + regression tests до упаковки приложения.
+11. Futures OI mapping использует корректные MOEX short roots и отдельно учитывает perpetual futures.
+12. Futures OI проходит реальную проверку BCS metadata → quotes → MOEX ISS OI.
+13. Полный regression suite и macOS build должны быть зелёными.
+14. macOS build обязан проходить compile + regression tests до упаковки приложения.
