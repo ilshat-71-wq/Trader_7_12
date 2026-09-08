@@ -1,44 +1,52 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
 **Дата актуализации:** 08.09.2026  
-**Репозиторий:** `ilshat-71-wq/Trader_7_12`  
+**Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
-**Версия pipeline:** 2.4.1
+**Версия pipeline:** 2.5.0
 
 ## 1. Назначение
 
-Trader_7_12 Pro — **read-only информационный сканер рынка**. Его задача — в течение текущего торгового дня показывать реальные факты о состоянии доступных BASE/SPOT-инструментов: дневную структуру, относительную силу/слабость к IMOEX2, текущую активность и денежный поток, раннее поведение и реакцию на внутридневные экстремумы индекса.
+Trader_7_12 Pro — read-only информационный сканер текущего рынка. Он анализирует реальные BASE/SPOT-инструменты и показывает объективные рыночные факты: D1-структуру, дневную и текущую относительную силу/слабость к IMOEX2, ликвидность, денежный поток, acceleration и внутридневное положение относительно рынка.
 
-Сканер не выставляет заявки, не управляет позициями, не рассчитывает размер позиции, SL/TP и **не принимает торговое решение за пользователя**.
+Сканер не выставляет заявки, не управляет позициями, не рассчитывает размер позиции, SL/TP и не исполняет сделки.
 
-## 2. Каноническая D1-классификация
+## 2. Главный принцип выбора возможности
 
-### STRONG — сильная дневная структура
+Ключевая идея проекта — **не абсолютное направление цены инструмента, а его поведение относительно рынка**.
 
-На последних **2–3 завершённых D1 свечах** одновременно:
+```text
+РЫНОК РАСТЁТ
+    → ищем СИЛЬНЫЕ относительно рынка инструменты
+    → сильнее IMOEX2 = Long-кандидат
 
-- все свечи зелёные (`Close > Open`);
-- High строго растёт от дня к дню;
-- Low строго растёт от дня к дню;
-- в каждый сопоставленный день актив сильнее IMOEX2: его дневная доходность выше доходности индекса.
+РЫНОК ПАДАЕТ
+    → ищем СЛАБЫЕ относительно рынка инструменты
+    → слабее IMOEX2 = Short-кандидат
+```
 
-Это объективная классификация состояния инструмента. Она не является торговой рекомендацией.
+Примеры:
 
-### WEAK — слабая дневная структура
+```text
+IMOEX2 -0.8%   акция -0.2%  → RS +0.6 п.п. → СИЛЬНАЯ относительно рынка
+IMOEX2 -0.8%   акция -2.5%  → RS -1.7 п.п. → СЛАБАЯ относительно рынка
 
-На последних **2–3 завершённых D1 свечах** одновременно:
+IMOEX2 +0.8%   акция +1.8%  → RS +1.0 п.п. → СИЛЬНАЯ относительно рынка
+IMOEX2 +0.8%   акция +0.1%  → RS -0.7 п.п. → СЛАБАЯ относительно рынка
+```
 
-- все свечи красные (`Close < Open`);
-- High строго падает от дня к дню;
-- Low строго падает от дня к дню;
-- в каждый сопоставленный день актив слабее IMOEX2: его дневная доходность ниже доходности индекса.
+Поэтому красная цена сама по себе не означает Short, а зелёная цена сама по себе не означает Long.
 
-Это объективная классификация состояния инструмента. Она не является торговой рекомендацией.
+При нейтральном рынке строгий направленный кандидат не создаётся только ради заполнения Radar.
 
-Смешанная структура или непоследовательный дневной RS не квалифицируют инструмент как STRONG/WEAK. Текущий M5 RS — отдельный текущий факт и не заменяет D1-классификацию.
+## 3. Цель Radar
 
-## 3. Канонический universe
+Сканер не должен искусственно выдавать ровно 2–3 инструмента. Его рабочая цель — **находить хотя бы 2–3 качественных кандидата, когда рынок предоставляет такое количество объективно подтверждённых возможностей**.
+
+Если подтверждённых кандидатов больше — допускается показать больше в пределах UI capacity. Если их меньше — система не ослабляет критерии искусственно и показывает доступные результаты/диагностику.
+
+## 4. Канонический universe
 
 ```text
 ALL MOEX TQBR STOCKS
@@ -48,14 +56,12 @@ GAS
 USDRUB
 ```
 
-- GOLD: `GLDRUB_TOM`, если доступен в BCS SPOT metadata.
-- USDRUB: реальный spot-инструмент из BCS metadata.
-- OIL/GAS: не заменяются фьючерсами; без real base/spot source → `UNAVAILABLE`.
-- Futures metadata, expiry, mapping и ranking обрабатываются отдельным futures OI слоем и не заменяют BASE/SPOT analysis.
-- На ДСВД stock universe фильтруется по MOEX `WEEKENDSESSION`, если поле доступно; `WEEKENDSESSION=N` исключается.
-- Если `WEEKENDSESSION` не отдан BCS, бумага не удаляется молча; фактическая M5-доступность может использоваться как дополнительная проверка.
+- GOLD: `GLDRUB_TOM`, если доступен как реальный SPOT/base asset в BCS metadata.
+- USDRUB: реальный SPOT-инструмент из BCS metadata.
+- OIL/GAS: не подменяются фьючерсами; без real base/spot source остаются `UNAVAILABLE`.
+- Futures metadata, expiry, mapping и OI — отдельный downstream слой и не заменяют SPOT-анализ.
 
-## 4. Production information pipeline
+## 5. Production information pipeline
 
 ```text
 BASE/SPOT UNIVERSE
@@ -69,51 +75,98 @@ BASE/SPOT UNIVERSE
 → ABSOLUTE LIQUIDITY GATE
 → FLOW ACCELERATION
 → CURRENT INTRADAY RS VS IMOEX2
-→ MARKET LEADERS / MARKET LAGGARDS
+→ MARKET REGIME
+→ STRONGER / WEAKER RELATION
+→ LONG / SHORT OPPORTUNITY CLASSIFICATION
 → ATTENTION RANKING
 ```
 
-Результат — информационная картина рынка на текущий момент. Программа не говорит пользователю, что покупать, продавать, лонговать, шортить или когда входить.
+## 6. D1 classification
 
-## 5. Daily Trend Profile contract
+`DailyTrendProfileService` работает детерминированно и без сети.
 
-`DailyTrendProfileService` is deterministic and network-free. The caller supplies historical D1 candles.
+Минимум — 2 завершённых D1 дня, целевой профиль — 3.
 
-- Current/incomplete trading day is excluded by trading date.
-- Daily candles are aligned to Moscow trading date.
-- Asset and benchmark are compared by common date, never merely by array position.
-- Minimum D1 history: 2 completed days; target: 3.
-- Strong/weak structure requires both rising/falling Highs and Lows plus all-green/all-red candles.
-- Daily relative confirmation must be consistent across all selected days.
-- The service never creates a directional trading signal from incomplete or mixed data.
+### STRONG
 
-## 6. Intraday information
+- все выбранные свечи зелёные;
+- High строго растёт;
+- Low строго растёт;
+- в каждый сопоставленный день актив сильнее IMOEX2.
 
-Основной внутридневной timeframe: M5. Recent flow window: 15 minutes.
+### WEAK
 
-Для каждой доступной бумаги по возможности показываются:
+- все выбранные свечи красные;
+- High строго падает;
+- Low строго падает;
+- в каждый сопоставленный день актив слабее IMOEX2.
 
-- текущая цена и изменение;
-- сессионный ₽×V;
-- сессионный ₽×V/min;
-- последние 15 минут ₽×V и ₽×V/min;
-- ускорение денежного потока;
-- текущий RS против IMOEX2;
-- ранняя активность;
-- реакция на дневной MIN и MAX IMOEX2;
-- текущая позиция относительно рынка.
+Смешанная структура или непоследовательный D1 RS не квалифицируют инструмент как STRONG/WEAK.
 
-## 7. Flow acceleration — production contract
+**Важно:** D1 — это контекст и качество состояния инструмента. D1 absolute direction не должен отменять текущую относительную силу/слабость относительно рынка.
 
-Acceleration compares two complete, equal 15-minute M5 windows:
+## 7. Current-session Relative Strength
+
+```text
+RS = asset_current_session_return - benchmark_current_session_return
+```
+
+Benchmark:
+
+```text
+IMOEX2 → IRUS2 fallback only if IMOEX2 unavailable/unfit
+```
+
+Минимальный meaningful current RS:
+
+```text
+MIN_MEANINGFUL_RS_PP = 0.10 п.п.
+```
+
+## 8. Market regime → direction contract
+
+Текущая торговая ориентация Radar определяется сначала рынком, затем RS инструмента:
+
+```text
+benchmark_change >= +0.10 п.п.
+    MARKET_REGIME = UP
+    RS >= +0.10 п.п. → LONG_CANDIDATE / MARKET_LEADER
+
+benchmark_change <= -0.10 п.п.
+    MARKET_REGIME = DOWN
+    RS <= -0.10 п.п. → SHORT_CANDIDATE / MARKET_LAGGARD
+
+между порогами
+    MARKET_REGIME = NEUTRAL
+    строгий Long/Short не создаётся
+```
+
+**Запрещено:** требовать `intraday direction == absolute D1 direction` как условие текущей возможности.
+
+Именно относительное поведение против рынка определяет сторону текущей возможности; D1 служит отдельным quality/context gate.
+
+## 9. Liquidity
+
+Percentile не может создать ликвидность.
+
+Production gates:
+
+```text
+MIN_MONEY_PER_MINUTE        = 8 000 ₽/min
+MIN_RECENT_MONEY_PER_MINUTE = 5 000 ₽/min
+```
+
+Оба условия обязательны для strict candidate.
+
+## 10. Flow acceleration
+
+Acceleration сравнивает две полные одинаковые 15-минутные M5-сессии:
 
 ```text
 recent 15-min pace / previous 15-min pace - 1
 ```
 
-Valid only when both windows contain 3 M5 candles and previous flow is positive. Otherwise `money_acceleration = 0.0`.
-
-No artificial acceleration cap is applied. Acceleration has only 10% weight in Attention and cannot alone determine market classification.
+Нужно по 3 M5 свечи в каждом окне и положительный предыдущий flow. Иначе acceleration = 0.
 
 Attention score:
 
@@ -124,83 +177,36 @@ Attention score:
 10% acceleration percentile
 ```
 
-## 8. Absolute liquidity gate
+## 11. Radar selection
 
-Percentile ranking is not allowed to manufacture liquidity. An instrument must first demonstrate meaningful absolute current activity; only then may it compete on relative ranking.
-
-Production scanner-operational thresholds:
+Strict candidates ранжируются по совокупности:
 
 ```text
-MIN_MONEY_PER_MINUTE        = 8 000 ₽/min
-MIN_RECENT_MONEY_PER_MINUTE = 5 000 ₽/min
+Relative Strength
++ Attention / flow
++ liquidity
++ D1 quality
 ```
 
-Both conditions are required.
+На растущем рынке Radar может показать несколько лучших сильных инструментов. На падающем рынке — несколько лучших слабых инструментов. Количество не фиксируется как «ровно 2–3».
 
-## 9. Benchmark / Relative Strength
+Целевая практическая выдача — минимум 2–3 качественных кандидата при наличии достаточного рынка; отсутствие необходимого количества не компенсируется снижением объективных критериев.
 
-Only the real market benchmark is allowed:
+Если strict qualification недоступна из-за недостатка D1/M5 данных, допускается `ATTENTION_WATCH / WATCH_ONLY`. Watch-only никогда не становится BUY/SELL.
+
+## 12. Coverage
+
+Минимальная production M5 coverage: **80%**.
+
+Ниже 80%:
 
 ```text
-IMOEX2 → IRUS2 fallback only if IMOEX2 unavailable/unfit
+status = INSUFFICIENT_COVERAGE
 ```
 
-Current-session RS:
+Coverage — диагностический gate полноты, а не причина скрывать весь рынок.
 
-```text
-RS = asset_current_session_return - benchmark_current_session_return
-```
-
-Daily RS:
-
-```text
-daily RS = asset_D1_return - IMOEX2_D1_return
-```
-
-Meaningful current RS floor:
-
-```text
-MIN_MEANINGFUL_RS_PP = 0.10 percentage points
-```
-
-## 10. Market leader / laggard selection
-
-The scanner may select at most the strongest current market leader and weakest current market laggard from instruments that satisfy all required objective information gates.
-
-This is an informational classification only. The application does not make a trade decision.
-
-When strict qualification is unavailable because D1 history or M5 coverage is insufficient, the radar does **not** erase the available market information. It may show up to the configured radar capacity as `ATTENTION_WATCH` / `WATCH_ONLY`, provided absolute liquidity and meaningful current RS are present. These rows are explicitly not strict qualifications and never become BUY/SELL or execution signals.
-
-## 11. Output / UI contract
-
-Основной экран ориентирован на фактическую картину рынка:
-
-```text
-ЛИДЕРЫ
-АУТСАЙДЕРЫ
-ТОП ПО ТЕКУЩЕМУ ИНТЕРЕСУ
-FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS
-```
-
-Для futures/OI в отдельной видимой панели показываются:
-
-```text
-FUTURES ROOT / CONTRACT
-UNDERLYING / BASE ASSET
-FUTURES PRICE CHANGE
-UNDERLYING PRICE CHANGE
-OPEN INTEREST
-ΔOI %
-OI Z-SCORE
-OI REGIME
-DIRECTION ALIGNMENT
-CURVE ROLE
-OI STRENGTH
-```
-
-## 12. Calendar / DSWD
-
-Weekend is not automatically CLOSED.
+## 13. Calendar / DSWD
 
 ```text
 ordinary:
@@ -212,42 +218,27 @@ DSWD:
   09:50–19:00 MSK
 ```
 
-**05.09.2026 is a real DSWD trading day, 09:50–19:00 MSK.**
+Weekend не считается автоматически закрытым.
 
-## 13. Coverage gate
+## 14. HTTP / data resilience
 
-Minimum production M5 coverage: **80%**.
+- один process-wide read-only BCS client;
+- bounded concurrency;
+- cache/retry для candle requests;
+- HTTP/SSL failure не трактуется как отсутствие торгов;
+- деградация данных должна отражаться в coverage и diagnostics.
 
-Below 80%:
+## 15. Futures OI
 
-```text
-status = INSUFFICIENT_COVERAGE
-```
+Futures/OI — отдельный контекстный слой.
 
-The 80% threshold remains a diagnostic completeness gate. It no longer deletes all visible candidates: strict `QUALIFIED` rows remain eligible, while objectively supported but incomplete rows may be shown as `ATTENTION_WATCH / WATCH_ONLY`. Partial scan is never relabeled as a complete market result.
-
-## 14. HTTP resilience
-
-- One process-wide read-only BCS client.
-- `MAX_WORKERS = 6`.
-- Global request-start throttle: `0.15 s` between requests.
-- Reusable `requests.Session` with connection pooling per worker.
-- HTTP/SSL failure is not interpreted as no trading.
-- 429/SSL degradation must reduce coverage and remain visible in diagnostics.
-
-## 15. Open Interest — futures analytics
-
-OI is a separate, reusable analytics layer for **all supported MOEX futures roots**, not a SI-only rule.
-
-Source:
+Источник OI:
 
 ```text
 MOEX ISS → /iss/analyticalproducts/futoi/securities
 ```
 
-The MOEX derivatives market publishes open interest alongside price, volume and trades; MOEX also exposes underlying information for futures contracts.
-
-The production OI layer calculates:
+OI рассчитывает/показывает:
 
 ```text
 OI
@@ -259,124 +250,33 @@ Price + OI regime
 Volume confirmation
 ```
 
-Canonical regimes:
+OI не создаёт SPOT-кандидата самостоятельно и не является торговым исполнителем.
+
+## 16. Read-only boundary
+
+Программа только показывает рыночную информацию и классификации.
 
 ```text
-PRICE ↑ + OI ↑ → NEW_POSITION_BUILDING_UP
-PRICE ↑ + OI ↓ → SHORT_COVERING
-PRICE ↓ + OI ↑ → NEW_POSITION_BUILDING_DOWN
-PRICE ↓ + OI ↓ → LONG_LIQUIDATION
+NO ORDER EXECUTION
+NO BUY/SELL COMMAND
+NO POSITION SIZE
+NO SL/TP EXECUTION
+NO PORTFOLIO MANAGEMENT
 ```
 
-OI itself never determines direction. Price is the directional axis; volume is the activity confirmation; OI explains whether open exposure is building or unwinding.
+## 17. Operational acceptance criteria
 
-### OI Z-score
+Перед объявлением версии готовой проверяются:
 
-Z-score is calculated from historical daily percentage changes in OI, using the latest 20 observations when sufficient history exists:
-
-```text
-|Z| < 1   NORMAL
-1–2      ELEVATED
-2–3      STRONG
->3       ANOMALOUS
-```
-
-### 15.1 Futures → underlying mapping — generic
-
-The mapping is **not hardcoded for SI**. Runtime BCS futures metadata is the source of truth for each futures root.
-
-BCS `/instruments/by-type` can return the futures universe without `classCode` and expiry fields. The production scanner therefore enriches each futures ticker through BCS `/instruments/by-tickers` before requesting quotes. `classCode` is never guessed or hardcoded.
-
-```text
-FUTURES ROOT / CONTRACT
-        ↓
-BCS /by-tickers metadata enrichment
-        ↓
-underlyingAsset / underlyingTicker / classCode / expiry
-        ↓
-FUTURES QUOTE + BASE/UNDERLYING QUOTE
-        ↓
-MOEX FUTOI by futures root
-```
-
-For example, SI is represented as:
-
-```text
-Si-9.26
-futures_root = SI
-underlying_asset = USDRUB
-```
-
-The source code may be `USDRUB_TOM`; the UI normalizes this to the display name `USDRUB` while retaining the source code internally.
-
-The same mechanism is used for every futures root returned by BCS metadata: currency, index, commodity and single-stock futures. There is no SI-only branch in the analytics logic.
-
-The scanner keeps **futures price/change** and **underlying price/change** as separate facts. They are not substituted for one another. A `DIVERGENCE` state is exposed when their directions disagree.
-
-### 15.2 Curve / rollover handling
-
-For each futures root the scanner keeps the nearest non-expired contract as `FRONT` and exposes curve rank/role metadata for `NEXT` and deferred maturities. MOEX FUTOI is treated as root-level OI; the front contract is therefore not allowed to masquerade as the entire root's OI during rollover.
-
-This is important for SI and every other futures curve: falling OI in an expiring front contract is not automatically interpreted as market-wide short covering.
-
-### 15.3 Visible application output
-
-The application contains a dedicated read-only `FUTURES OI` panel. For every analyzed futures root it shows:
-
-```text
-ROOT / CONTRACT
-BASE ASSET
-FUT Δ%
-BASE Δ%
-OI
-ΔOI%
-Z
-REGIME
-ALIGNMENT
-CURVE ROLE
-OI STRENGTH
-```
-
-The panel is updated asynchronously after the main SPOT market scan so the GUI remains responsive. Failure to obtain futures/OI data is shown explicitly and is never converted into a false `0` or `CLOSED` state.
-
-### 15.4 Runtime diagnostics
-
-The futures scanner exposes counts for:
-
-```text
-raw_contracts
-metadata_lookup_batches
-metadata_lookup_ok
-metadata_lookup_records
-option_filtered
-expired_filtered
-expiry_available
-class_code_available
-active_contracts
-active_roots
-quote_instruments
-quote_records
-analyzed
-skipped
-```
-
-This makes an upstream metadata/API failure distinguishable from an actual absence of futures activity.
-
-### 15.5 Information boundary
-
-OI is informational/confirming context. It does not create BUY/SELL, LONG/SHORT, entry, position-sizing or execution decisions.
-
-## 16. Safety boundary
-
-The application is strictly read-only:
-
-```text
-NO ORDERS
-NO POSITION SIZING
-NO SL/TP
-NO TRADE EXECUTION
-NO AUTOMATIC ENTRY DECISION
-NO TRADE RECOMMENDATION
-```
-
-The application reports facts and market classifications only. Final decisions remain completely outside the application.
+1. SPOT universe и benchmark доступны.
+2. RS действительно считается относительно IMOEX2/IRUS2.
+3. На UP market сильнейшие относительно рынка проходят в Long Radar.
+4. На DOWN market слабейшие относительно рынка проходят в Short Radar.
+5. Абсолютная красная/зелёная свеча не подменяет relative-strength logic.
+6. D1 quality не конфликтует с текущей market-regime logic.
+7. Liquidity gate остаётся hard gate.
+8. M5/flow/acceleration участвуют в ranking и diagnostics.
+9. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
+10. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
+11. Futures OI остаётся отдельным context layer.
+12. Полный regression suite и macOS build должны быть зелёными.
