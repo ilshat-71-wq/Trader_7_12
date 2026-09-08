@@ -33,4 +33,5 @@ class MarketInformationScannerService(_PipelineScanner):
         diagnostics["decision_policy"] = "NO_TRADE_DECISION"
         diagnostics["leader_role"] = "MARKET_LEADER"
         diagnostics["laggard_role"] = "MARKET_LAGGARD"
+        self._last_scan_diagnostics = diagnostics
         return translated
