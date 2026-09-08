@@ -26,6 +26,12 @@ def test_moex_short_code_mapping_for_standard_stock_futures():
     assert FuturesOIScannerService._oi_root({"underlyingAsset": "ALRS"}, "ALRS-9.26", "ALRS") == "AL"
 
 
+def test_ticker_root_fallback_uses_canonical_mapping_when_underlying_is_missing():
+    assert FuturesOIScannerService._oi_root({}, "AFLT-9.26", "") == "AF"
+    assert FuturesOIScannerService._oi_root({}, "SBER-9.26", "") == "SR"
+    assert FuturesOIScannerService._oi_root({}, "LKOH-9.26", "") == "LK"
+
+
 def test_invalid_metadata_contract_identifier_does_not_override_underlying_mapping():
     row = {"underlyingAsset": "AFLT", "shortCode": "AFLT-9.26"}
     assert FuturesOIScannerService._oi_root(row, "AFLT-9.26", "AFLT") == "AF"
