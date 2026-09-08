@@ -1,3 +1,4 @@
+from api.request_helper import RequestHelper
 from services.futures_oi_scanner_service import FuturesOIScannerService
 from services.open_interest_service import OpenInterestService
 
@@ -68,17 +69,20 @@ def test_open_interest_aggregation_uses_both_sides():
     assert aggregate["oi"] == 200
 
 
-def test_open_interest_http_error_is_not_silently_converted_to_empty_data():
+def test_open_interest_http_error_is_not_silently_converted_to_empty_data(monkeypatch):
     class ErrorResponse:
         def raise_for_status(self):
             raise RuntimeError("HTTP 403")
 
-    def http_get(url, timeout=8):
+        def json(self):
+            return {}
+
+    def fake_get(*args, **kwargs):
         return ErrorResponse()
 
-    service = OpenInterestService(http_get=http_get)
+    monkeypatch.setattr(RequestHelper, "get", staticmethod(fake_get))
     try:
-        service._request_all({"date": "2026-09-08"})
+        OpenInterestService._default_get("https://example.invalid", timeout=1)
     except RuntimeError as exc:
         assert "HTTP 403" in str(exc)
     else:
