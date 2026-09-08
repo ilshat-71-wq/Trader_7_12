@@ -1,54 +1,26 @@
 #!/bin/zsh
-# macOS app build script for the single-window Trader_7_12 Pro application.
-# The application entry point is Program/main.py, which launches the unified
-# SPOT + Futures OI dashboard from Program/oi_watchlist_ui.py.
+# macOS app build script for Trader_7_12 Pro.
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
 
 APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
-APP_VERSION="2.4.1"
+APP_VERSION="2.4.3"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
-printf '%s\n' "Repository: $(pwd)"
-printf '%s\n' "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"
-printf '%s\n' "Commit: $(git rev-parse HEAD)"
+printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/null || echo unknown)" "Commit: $(git rev-parse HEAD)"
 
-if [[ "$(git branch --show-current 2>/dev/null)" != "main" ]]; then
-  echo "ERROR: build must run from main branch."
-  exit 1
-fi
-
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "ERROR: local working tree is not clean. Commit or stash local changes first."
-  git status --short
-  exit 1
-fi
-
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "ERROR: this build is for macOS only."
-  exit 1
-fi
-
+[[ "$(git branch --show-current 2>/dev/null)" == "main" ]] || { echo "ERROR: build must run from main branch."; exit 1; }
+[[ -z "$(git status --porcelain)" ]] || { echo "ERROR: local working tree is not clean."; git status --short; exit 1; }
+[[ "$(uname -s)" == "Darwin" ]] || { echo "ERROR: this build is for macOS only."; exit 1; }
 PYTHON_BIN="$(command -v python3)"
-if [[ -z "${PYTHON_BIN}" ]]; then
-  echo "ERROR: python3 not found."
-  exit 1
-fi
-
-if ! "${PYTHON_BIN}" -c 'import PyInstaller' >/dev/null 2>&1; then
-  echo "ERROR: PyInstaller is not installed for ${PYTHON_BIN}."
-  echo "Install it once with:"
-  echo "  ${PYTHON_BIN} -m pip install pyinstaller"
-  exit 1
-fi
+[[ -n "${PYTHON_BIN}" ]] || { echo "ERROR: python3 not found."; exit 1; }
+"${PYTHON_BIN}" -c 'import PyInstaller' >/dev/null 2>&1 || { echo "ERROR: PyInstaller is not installed."; exit 1; }
 
 "${PYTHON_BIN}" -m compileall -q Program
 PYTHONPATH=Program "${PYTHON_BIN}" -m pytest -q Program
-
 rm -rf "${DIST_DIR}/${APP_NAME}" "${BUILD_DIR}/Trader_7_12_Pro"
 mkdir -p "${BUILD_DIR}"
 
@@ -58,115 +30,72 @@ rm -rf "${ICONSET}" "${ICNS}"
 mkdir -p "${ICONSET}"
 
 ROOT="$(pwd)" ICONSET="${ICONSET}" "${PYTHON_BIN}" - <<'PY'
-import math
-import os
-import sys
+import math, os, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QRadialGradient, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QApplication
 
 iconset = Path(os.environ["ICONSET"])
 app = QApplication.instance() or QApplication(sys.argv)
 S = 1024
 image = QImage(S, S, QImage.Format_ARGB32_Premultiplied)
-image.fill(QColor("#11161b"))
-p = QPainter(image)
-p.setRenderHint(QPainter.Antialiasing, True)
+image.fill(QColor("#061416"))
+p = QPainter(image); p.setRenderHint(QPainter.Antialiasing, True)
 
-bg = QLinearGradient(0, 0, 0, S)
-bg.setColorAt(0, QColor("#11161b")); bg.setColorAt(.55, QColor("#171c21")); bg.setColorAt(1, QColor("#0f1418"))
+bg = QRadialGradient(S*.50, S*.46, S*.56)
+bg.setColorAt(0, QColor("#0e5552")); bg.setColorAt(.62, QColor("#073b3b")); bg.setColorAt(1, QColor("#061416"))
 p.fillRect(0, 0, S, S, bg)
-halo = QRadialGradient(S*.50, S*.48, S*.48)
-halo.setColorAt(0, QColor(190,214,120,34)); halo.setColorAt(.55, QColor(190,214,120,12)); halo.setColorAt(1, QColor(190,214,120,0))
-p.fillRect(0, 0, S, S, halo)
 
-x, y, r = S*.50, S*.43, S*.32
-p.save(); p.translate(x, y)
-clock_halo = QRadialGradient(0, 0, r*1.35)
-clock_halo.setColorAt(0, QColor(205,218,154,42)); clock_halo.setColorAt(1, QColor(205,218,154,0))
-p.setPen(Qt.NoPen); p.setBrush(clock_halo); p.drawEllipse(QPointF(0,0), r*1.35, r*1.35)
-face = QRadialGradient(-r*.25, -r*.30, r*1.15)
-face.setColorAt(0, QColor("#f1e7c8")); face.setColorAt(.72, QColor("#d8c99f")); face.setColorAt(1, QColor("#a99972"))
-p.setBrush(face); p.setPen(QPen(QColor("#806f4d"), max(3, r*.045))); p.drawEllipse(QPointF(0,0), r, r)
-melt = QLinearGradient(0, r*.50, 0, r*1.72)
-melt.setColorAt(0, QColor("#d8c99f")); melt.setColorAt(1, QColor("#8f7e58"))
-p.setBrush(melt); p.setPen(Qt.NoPen)
-p.drawRoundedRect(-r*.46, r*.55, r*.92, r*1.34, r*.18, r*.18)
-p.drawEllipse(QPointF(-r*.24, r*1.18), r*.16, r*.25)
-p.drawEllipse(QPointF(r*.22, r*1.34), r*.13, r*.21)
-p.setPen(QPen(QColor("#6c6046"), max(2, r*.025)))
+cx, cy, r = S*.50, S*.48, S*.34
+halo = QRadialGradient(cx, cy, r*1.28)
+halo.setColorAt(0, QColor(42, 220, 204, 70)); halo.setColorAt(1, QColor(42, 220, 204, 0))
+p.setPen(Qt.NoPen); p.setBrush(halo); p.drawEllipse(QPointF(cx,cy), r*1.28, r*1.28)
+p.setBrush(QColor("#08736e")); p.setPen(QPen(QColor("#d8b85b"), 20)); p.drawEllipse(QPointF(cx,cy), r, r)
+p.setPen(QPen(QColor("#f2d47b"), 5)); p.drawEllipse(QPointF(cx,cy), r*.91, r*.91)
+
+p.setPen(QPen(QColor("#f2d47b"), 13, Qt.SolidLine, Qt.RoundCap))
 for i in range(12):
-    a = math.radians(i*30-90)
-    p.drawLine(QPointF(math.cos(a)*r*.78, math.sin(a)*r*.78), QPointF(math.cos(a)*r*.88, math.sin(a)*r*.88))
-a = math.radians(28)
-p.setPen(QPen(QColor("#3e392d"), max(3, r*.035), Qt.SolidLine, Qt.RoundCap))
-p.drawLine(QPointF(0,0), QPointF(math.cos(a)*r*.54, math.sin(a)*r*.54))
-a2 = math.radians(336)
-p.setPen(QPen(QColor("#514a3a"), max(2, r*.025), Qt.SolidLine, Qt.RoundCap))
-p.drawLine(QPointF(0,0), QPointF(math.cos(a2)*r*.72, math.sin(a2)*r*.72))
-p.setBrush(QColor("#514a3a")); p.setPen(Qt.NoPen); p.drawEllipse(QPointF(0,0), r*.06, r*.06)
-p.restore(); p.end()
+    a=math.radians(i*30-90); outer=r*.82; inner=r*(.69 if i%3 else .64)
+    p.drawLine(QPointF(cx+math.cos(a)*inner,cy+math.sin(a)*inner),QPointF(cx+math.cos(a)*outer,cy+math.sin(a)*outer))
 
-rounded = QImage(S, S, QImage.Format_ARGB32_Premultiplied); rounded.fill(Qt.transparent)
-p = QPainter(rounded); p.setRenderHint(QPainter.Antialiasing, True)
-path = QPainterPath(); path.addRoundedRect(8, 8, S-16, S-16, 210, 210); p.setClipPath(path); p.drawImage(0,0,image); p.end()
+for angle,length,width in ((138,r*.50,25),(18,r*.66,18)):
+    a=math.radians(angle-90); p.setPen(QPen(QColor("#f4d47a"),width,Qt.SolidLine,Qt.RoundCap))
+    p.drawLine(QPointF(cx,cy),QPointF(cx+math.cos(a)*length,cy+math.sin(a)*length))
+# Static second hand points upward; the live splash animates this hand.
+a=math.radians(-90)
+p.setPen(QPen(QColor("#d4ad4d"),9,Qt.SolidLine,Qt.RoundCap))
+p.drawLine(QPointF(cx,cy),QPointF(cx+math.cos(a)*r*.76,cy+math.sin(a)*r*.76))
+p.setBrush(QColor("#f3d477")); p.setPen(Qt.NoPen); p.drawEllipse(QPointF(cx,cy),25,25)
+p.setBrush(QColor("#08736e")); p.drawEllipse(QPointF(cx,cy),10,10)
+p.end()
 
-sizes = [(16,"16x16"),(32,"16x16@2x"),(32,"32x32"),(64,"32x32@2x"),(128,"128x128"),(256,"128x128@2x"),(256,"256x256"),(512,"256x256@2x"),(512,"512x512"),(1024,"512x512@2x")]
-for size, name in sizes:
-    scaled = rounded.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-    if not scaled.save(str(iconset / f"icon_{name}.png"), "PNG"):
+rounded=QImage(S,S,QImage.Format_ARGB32_Premultiplied); rounded.fill(Qt.transparent)
+p=QPainter(rounded); p.setRenderHint(QPainter.Antialiasing,True)
+p.setBrush(Qt.NoBrush)
+from PySide6.QtGui import QPainterPath
+path=QPainterPath(); path.addRoundedRect(8,8,S-16,S-16,210,210); p.setClipPath(path); p.drawImage(0,0,image); p.end()
+
+sizes=[(16,"16x16"),(32,"16x16@2x"),(32,"32x32"),(64,"32x32@2x"),(128,"128x128"),(256,"128x128@2x"),(256,"256x256"),(512,"256x256@2x"),(512,"512x512"),(1024,"512x512@2x")]
+for size,name in sizes:
+    if not rounded.scaled(size,size,Qt.IgnoreAspectRatio,Qt.SmoothTransformation).save(str(iconset/f"icon_{name}.png"),"PNG"):
         raise RuntimeError(f"failed to save {name}")
 PY
 
-if ! command -v iconutil >/dev/null 2>&1; then
-  echo "ERROR: iconutil is required to build the macOS application icon."
-  exit 1
-fi
+command -v iconutil >/dev/null 2>&1 || { echo "ERROR: iconutil is required."; exit 1; }
 iconutil -c icns "${ICONSET}" -o "${ICNS}"
 rm -rf "${ICONSET}"
-
 export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
-"${PYTHON_BIN}" -m PyInstaller \
-  --noconfirm \
-  --clean \
-  "${SPEC}"
+"${PYTHON_BIN}" -m PyInstaller --noconfirm --clean "${SPEC}"
 
 APP_PATH="${DIST_DIR}/${APP_NAME}"
-if [[ ! -d "${APP_PATH}" ]]; then
-  echo "ERROR: expected app bundle was not created: ${APP_PATH}"
-  exit 1
-fi
-
-if [[ ! -x "${APP_PATH}/Contents/MacOS/Trader_7_12_Pro" ]]; then
-  echo "ERROR: app executable is missing."
-  exit 1
-fi
-
+[[ -d "${APP_PATH}" ]] || { echo "ERROR: app bundle was not created."; exit 1; }
+[[ -x "${APP_PATH}/Contents/MacOS/Trader_7_12_Pro" ]] || { echo "ERROR: app executable is missing."; exit 1; }
 BUNDLE_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "${APP_PATH}/Contents/Info.plist")"
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP_PATH}/Contents/Info.plist")"
 ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${APP_PATH}/Contents/Info.plist")"
-if [[ "${BUNDLE_COMMIT}" != "${TRADER_BUILD_COMMIT}" ]]; then
-  echo "ERROR: bundle provenance mismatch."
-  exit 1
-fi
-if [[ "${BUNDLE_VERSION}" != "${APP_VERSION}" ]]; then
-  echo "ERROR: bundle version mismatch."
-  exit 1
-fi
-if [[ "${ICON_FILE}" != "Trader_7_12_Pro.icns" || ! -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]]; then
-  echo "ERROR: one-clock app icon is missing from the bundle."
-  exit 1
-fi
+[[ "${BUNDLE_COMMIT}" == "${TRADER_BUILD_COMMIT}" ]] || { echo "ERROR: bundle provenance mismatch."; exit 1; }
+[[ "${BUNDLE_VERSION}" == "${APP_VERSION}" ]] || { echo "ERROR: bundle version mismatch."; exit 1; }
+[[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
-printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" \
-  "Bundle identifier: com.ilshat.trader712pro" \
-  "Bundle version: ${BUNDLE_VERSION}" \
-  "Bundle source commit: ${BUNDLE_COMMIT}" \
-  "Bundle icon: original one-clock" "" \
-  "Single-window dashboard: SPOT + Futures OI" \
-  "Next: double-click '${APP_PATH}' in Finder." \
-  "For a terminal-visible launch, use:" \
-  "  open \"$(pwd)/${APP_PATH}\"" \
-  "Direct executable for diagnostics:" \
-  "  \"$(pwd)/${APP_PATH}/Contents/MacOS/Trader_7_12_Pro\""
+printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Single-window dashboard: SPOT + Futures OI"
