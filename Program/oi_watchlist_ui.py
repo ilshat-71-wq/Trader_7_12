@@ -29,7 +29,7 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """The single Trader_7_12 Pro window: SPOT radar + visible futures/OI context."""
 
-    VERSION = "2.4.1"
+    VERSION = "2.4.2"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -95,10 +95,14 @@ class OIWatchlistTraderWindow(TraderWindow):
             "FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS",
             "═" * 118,
             f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • "
-            f"АНАЛИЗ: {diagnostics.get('analyzed', 0)} • "
+            f"КОНТРАКТЫ АНАЛИЗА: {diagnostics.get('analyzed', 0)} • "
+            f"OI AVAILABLE: {diagnostics.get('oi_available', 0)} • "
             f"ИСТОЧНИК OI: {escape(str(diagnostics.get('oi_source') or '—'))}",
             f"КОНТРАКТОВ: {diagnostics.get('active_contracts', 0)} • ROOTS: {diagnostics.get('active_roots', 0)} • "
             f"QUOTE: {diagnostics.get('quote_records', 0)} • METADATA: {diagnostics.get('metadata_lookup_records', 0)}",
+            f"MAPPING: {escape(str(diagnostics.get('mapping') or '—'))} • "
+            f"OI ROOT MAPPED: {diagnostics.get('oi_root_mapping', 0)} • "
+            f"EXPIRY: {diagnostics.get('expiry_available', 0)}",
             "",
             "ROOT / КОНТРАКТ          БАЗОВЫЙ АКТИВ       FUT Δ%    BASE Δ%       OI        ΔOI%   Z     РЕЖИМ",
             "─" * 118,
@@ -108,7 +112,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         else:
             for item in results:
                 oi = item.get("oi_analysis") or {}
-                root = str(item.get("futures_root") or item.get("oi_root") or "—")
+                root = str(item.get("oi_root") or item.get("futures_root") or "—")
                 contract = str(item.get("futures_ticker") or "—")
                 base = str(item.get("underlying_asset") or "—")
                 lines.append(
