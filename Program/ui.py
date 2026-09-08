@@ -176,6 +176,7 @@ class TraderWindow(QWidget):
                  f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • BENCHMARK: {escape(str(diagnostics.get('benchmark') or '—'))}",
                  f"UNIVERSE: {diagnostics.get('universe_total', 0)} • АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} • ПОКРЫТИЕ: {_number(diagnostics.get('coverage_percent'), 1)}%",
                  f"D1: {diagnostics.get('daily_benchmark_days', 0)} свечей • D1 QUALIFIED: {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY PASS: {diagnostics.get('liquidity_passed', 0)} • DIRECTIONAL QUALIFIED: {diagnostics.get('directional_qualified', 0)}",
+                 f"STRICT RADAR: {diagnostics.get('strict_selected', 0)} • WATCH-ONLY: {diagnostics.get('watch_selected', 0)}",
                  "", "RADAR: TOP OBJECTIVE OPPORTUNITIES (не торговая рекомендация)",
                  "─" * 112,
                  "#  TICKER    ROLE             D1             D1-RS     RS       Δ%      ₽/мин       15m ₽×V   ACCEL     SCORE",
@@ -185,6 +186,8 @@ class TraderWindow(QWidget):
         else:
             for idx, item in enumerate(results, 1):
                 role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "WATCH")
+                if item.get("qualification_status") == "WATCH_ONLY":
+                    role = "WATCH-ONLY"
                 d1 = str(item.get("daily_structure") or "NEUTRAL")[:10]
                 lines.append(
                     f"{idx:>2}  {str(item.get('spot_ticker') or '—'):<8} {role:<16} {d1:<10} "
@@ -192,7 +195,8 @@ class TraderWindow(QWidget):
                     f"{_number(item.get('change_percent'), 2):>7}  {_money(item.get('money_per_minute')):>12} "
                     f"{_money(item.get('recent_money')):>12}  {_number(item.get('money_acceleration'), 1):>7}%  {_number(item.get('directional_score'), 1):>6}"
                 )
-        lines += ["", "DETAIL: выбранный инструмент проходит D1 + дневной RS + текущий RS + абсолютную ликвидность + flow.",
+        lines += ["", "DETAIL: QUALIFIED = D1 + дневной RS + текущий RS + абсолютная ликвидность + flow.",
+                   "WATCH-ONLY = объективный текущий интерес при недостаточной полноте строгой квалификации; это не торговый сигнал.",
                    f"SKIP REASONS: {escape(str(diagnostics.get('skip_reasons') or 'нет'))}",
                    "READ-ONLY: программа показывает рыночные данные и классификации; BUY/SELL и исполнение отсутствуют.", "═" * 112, "</pre>"]
         self.result_box.setHtml("\n".join(lines))
