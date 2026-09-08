@@ -6,7 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_submodules
 
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 BUILD_COMMIT = os.environ.get("TRADER_BUILD_COMMIT", "unknown")
 SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, ".."))
