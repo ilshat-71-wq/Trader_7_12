@@ -6,8 +6,9 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with generic futures -> underlying mapping."""
 
-    VERSION = "2.1.1"
+    VERSION = "2.2.0"
     ENRICH_BATCH_SIZE = 100
+    DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
     def __init__(self, api=None, oi_service=None):
         from api.bcs_api import BCSAPI
@@ -145,8 +146,9 @@ class FuturesOIScannerService:
         """Resolve classCode/expiry from BCS ticker lookup.
 
         BCS /by-type currently supplies the futures universe but may omit
-        classCode and expiration fields. Do not infer classCode locally;
-        resolve it through the authoritative ticker lookup endpoint.
+        classCode and expiration fields. Resolve them through ticker lookup;
+        scan() has a MOEX SPBFUT fallback when the read-only metadata service
+        does not expose classCode.
         """
         source_rows = [dict(row) for row in rows if isinstance(row, dict)]
         tickers = [self._text(row, "ticker", "secCode", "securityCode") for row in source_rows]
@@ -207,6 +209,7 @@ class FuturesOIScannerService:
             "active_contracts": 0,
             "active_roots": 0,
             "class_code_available": 0,
+            "class_code_fallback": 0,
             "expiry_available": 0,
             **metadata_diag,
         }
@@ -231,6 +234,12 @@ class FuturesOIScannerService:
             class_code = self._metadata_class_code(raw)
             if class_code:
                 diagnostics["class_code_available"] += 1
+            else:
+                # MOEX derivatives market uses SPBFUT for futures quotes.
+                # BCS's instrument metadata endpoint can omit classCode even
+                # though the contract itself is valid and quoteable.
+                class_code = self.DEFAULT_FUTURES_CLASS_CODE
+                diagnostics["class_code_fallback"] += 1
             item = dict(raw)
             item.update(
                 {
