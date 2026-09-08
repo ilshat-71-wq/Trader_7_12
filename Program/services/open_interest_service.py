@@ -11,11 +11,11 @@ class OpenInterestService:
     """Professional read-only MOEX futures OI analytics."""
 
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
-    USER_AGENT = "Trader_7_12/1.1"
+    USER_AGENT = "Trader_7_12/1.2"
 
     REGIMES = {
         "PRICE_UP_OI_UP": "NEW_POSITION_BUILDING_UP",
@@ -28,10 +28,10 @@ class OpenInterestService:
     def __init__(self, http_get=None):
         self._http_get = http_get or self._default_get
         self._history_cache = {}
+        self._all_cache = {}
 
     @classmethod
     def _default_get(cls, url, timeout=8):
-        """Use the application's shared HTTP/TLS layer for MOEX ISS."""
         response = RequestHelper.get(
             url,
             headers={"User-Agent": cls.USER_AGENT, "Accept": "application/json"},
@@ -68,19 +68,36 @@ class OpenInterestService:
 
     @classmethod
     def _aggregate_rows(cls, rows):
+        """Aggregate client-group rows into the contract's open interest.
+
+        MOEX FUTOI reports POS separately for client groups and signs short
+        positions negatively. Gross long and gross short therefore represent
+        the two sides of the same open interest. The robust aggregate is the
+        mean of the two sides when both exist; POS absolute values provide the
+        fallback for feeds that omit POS_LONG/POS_SHORT.
+        """
         if not rows:
             return None
         ticker = str(rows[0].get("ticker") or "").upper()
         long_oi = sum(max(0.0, cls._number(row.get("pos_long"))) for row in rows)
         short_oi = sum(abs(cls._number(row.get("pos_short"))) for row in rows)
-        oi = long_oi if long_oi > 0 else short_oi
-        if oi <= 0:
+        if long_oi > 0 and short_oi > 0:
+            oi = (long_oi + short_oi) / 2.0
+        else:
             oi = sum(abs(cls._number(row.get("pos"))) for row in rows) / 2.0
-        return {"ticker": ticker, "oi": oi, "oi_long": long_oi, "oi_short": short_oi}
+        return {
+            "ticker": ticker,
+            "oi": oi,
+            "oi_long": long_oi,
+            "oi_short": short_oi,
+        }
 
     def load_all(self, trading_date: str | date, latest=True):
         if isinstance(trading_date, date):
             trading_date = trading_date.isoformat()
+        key = (str(trading_date), bool(latest))
+        if key in self._all_cache:
+            return dict(self._all_cache[key])
         rows = self._parse_block(self._request_all({"date": trading_date, "latest": int(bool(latest))}))
         grouped = {}
         for row in rows:
@@ -90,6 +107,7 @@ class OpenInterestService:
             aggregate = self._aggregate_rows(group)
             if ticker and aggregate:
                 result[ticker] = aggregate
+        self._all_cache[key] = dict(result)
         return result
 
     def load_history(self, root, start, end, latest=True):
