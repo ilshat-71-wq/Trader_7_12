@@ -11,7 +11,7 @@ from services.market_attention_scanner_service import MarketAttentionScannerServ
 class MarketInformationScannerService(_PipelineScanner):
     """Read-only information facade over the production market scanner."""
 
-    VERSION = "2.4.1"
+    VERSION = "2.5.0"
 
     def scan(self, limit=3):
         rows = super().scan(limit=limit)
