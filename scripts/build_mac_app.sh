@@ -1,7 +1,7 @@
+#!/bin/zsh
 # macOS app build script for the single-window Trader_7_12 Pro application.
 # The application entry point is Program/main.py, which launches the unified
 # SPOT + Futures OI dashboard from Program/oi_watchlist_ui.py.
-#!/bin/zsh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
