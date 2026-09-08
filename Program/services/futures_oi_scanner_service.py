@@ -6,41 +6,35 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.3.0"
+    VERSION = "2.3.1"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
     MOEX_SHORT_CODE_BY_UNDERLYING = {
-        "AFLT": "AF", "ALRS": "AL", "AFKS": "AK", "CHMF": "CH",
-        "FEES": "FS", "GAZP": "GZ", "GMKN": "GK", "HYDR": "HY",
-        "LKOH": "LK", "MGNT": "MN", "MOEX": "ME", "MTSI": "MT",
-        "NLMK": "NM", "NOTK": "NK", "ROSN": "RN", "RTKM": "RT",
-        "SBER": "SR", "SBERP": "SP", "SNGP": "SG", "SNGS": "SN",
-        "TATN": "TT", "TATP": "TP", "TRNF": "TN", "VTBR": "VB",
-        "MAGN": "MG", "PLZL": "PZ", "YDEX": "YD", "SMLT": "SS",
-        "POSI": "PS", "SPBE": "SE", "RUAL": "RL", "PHOR": "PH",
-        "PIKK": "PI", "POLY": "PO", "RSTI": "RE", "SIBN": "SO",
-        "TCSI": "TI", "VKCO": "VK", "SPYF": "SF", "NASD": "NA",
-        "QQQ": "NA", "WUSH": "WU", "MVID": "MV", "CBOM": "CM",
-        "SGZH": "SZ", "FLOT": "FL", "BSPB": "BS", "BANE": "BN",
-        "KMAZ": "KM", "ASTR": "AS", "SOFL": "S0", "SVCB": "SC",
-        "RASP": "RA", "FESH": "FE", "RNFT": "RU", "LEAS": "LE",
-        "BELUGA": "NB", "X5": "X5", "OZON": "ON", "DOMRF": "DR",
-        "IVAT": "IV", "ENPG": "EA", "T": "TB",
-        "ALIBABA": "BB", "BAIDU": "BD", "PDD": "DD", "JDCOM": "JD",
-        "TENCENT": "TC", "XIA": "XI", "SAP": "AP", "SONY": "SY",
-        "NOVARTIS": "NO", "TOYOTA": "TO", "KOREA": "KR", "SAMSUNG": "SK",
-        "HYNIX": "HX", "FIXR": "FI", "RAGR": "RZ",
-        "SI": "SI", "EU": "EU", "CNY": "CR", "GL": "GL", "S2": "SL",
-        "IMOEX": "IM", "MIX": "MX", "MXI": "MM", "MOEXCNY": "MY",
-        "RTS": "RI", "RTSM": "RM", "RVI": "VI", "HOME": "HO",
-        "OGI": "OG", "MMI": "MA", "FNI": "FN", "CNI": "CS",
-        "RGBI": "RB", "IMOEXF": "IMOEXF", "IPO": "IP", "ETH": "EH",
-        "BTC": "BT", "SOL": "S3", "XRP": "XR", "TRX": "TX", "BNB": "BC",
-        "RUONIA": "RF", "APPF": "APPF", "AMDF": "AMDF", "TSLAF": "TSLAF",
-        "SNDKF": "SNDKF", "COHRF": "COHRF", "NBISF": "NBISF",
-        "HOODF": "HOODF", "LITEF": "LITEF", "SP500F": "SP500F", "QQQF": "QQQF",
-        "GAZPF": "GAZPF", "SBERF": "SBERF",
+        "AFLT": "AF", "ALRS": "AL", "AFKS": "AK", "CHMF": "CH", "FEES": "FS",
+        "GAZP": "GZ", "GMKN": "GK", "HYDR": "HY", "LKOH": "LK", "MGNT": "MN",
+        "MOEX": "ME", "MTSI": "MT", "NLMK": "NM", "NOTK": "NK", "ROSN": "RN",
+        "RTKM": "RT", "SBER": "SR", "SBERP": "SP", "SNGP": "SG", "SNGS": "SN",
+        "TATN": "TT", "TATP": "TP", "TRNF": "TN", "VTBR": "VB", "MAGN": "MG",
+        "PLZL": "PZ", "YDEX": "YD", "SMLT": "SS", "POSI": "PS", "SPBE": "SE",
+        "RUAL": "RL", "PHOR": "PH", "PIKK": "PI", "POLY": "PO", "RSTI": "RE",
+        "SIBN": "SO", "TCSI": "TI", "VKCO": "VK", "SPYF": "SF", "NASD": "NA",
+        "QQQ": "NA", "WUSH": "WU", "MVID": "MV", "CBOM": "CM", "SGZH": "SZ",
+        "FLOT": "FL", "BSPB": "BS", "BANE": "BN", "KMAZ": "KM", "ASTR": "AS",
+        "SOFL": "S0", "SVCB": "SC", "RASP": "RA", "FESH": "FE", "RNFT": "RU",
+        "LEAS": "LE", "BELUGA": "NB", "X5": "X5", "OZON": "ON", "DOMRF": "DR",
+        "IVAT": "IV", "ENPG": "EA", "T": "TB", "ALIBABA": "BB", "BAIDU": "BD",
+        "PDD": "DD", "JDCOM": "JD", "TENCENT": "TC", "XIA": "XI", "SAP": "AP",
+        "SONY": "SY", "NOVARTIS": "NO", "TOYOTA": "TO", "KOREA": "KR", "SAMSUNG": "SK",
+        "HYNIX": "HX", "FIXR": "FI", "RAGR": "RZ", "SI": "SI", "EU": "EU",
+        "CNY": "CR", "GL": "GL", "S2": "SL", "IMOEX": "IM", "MIX": "MX",
+        "MXI": "MM", "MOEXCNY": "MY", "RTS": "RI", "RTSM": "RM", "RVI": "VI",
+        "HOME": "HO", "OGI": "OG", "MMI": "MA", "FNI": "FN", "CNI": "CS",
+        "RGBI": "RB", "IMOEXF": "IMOEXF", "IPO": "IP", "ETH": "EH", "BTC": "BT",
+        "SOL": "S3", "XRP": "XR", "TRX": "TX", "BNB": "BC", "RUONIA": "RF",
+        "APPF": "APPF", "AMDF": "AMDF", "TSLAF": "TSLAF", "SNDKF": "SNDKF",
+        "COHRF": "COHRF", "NBISF": "NBISF", "HOODF": "HOODF", "LITEF": "LITEF",
+        "SP500F": "SP500F", "QQQF": "QQQF", "GAZPF": "GAZPF", "SBERF": "SBERF",
     }
 
     UNDERLYING_ALIASES = {
@@ -51,7 +45,6 @@ class FuturesOIScannerService:
 
     def __init__(self, api=None, oi_service=None):
         from api.bcs_api import BCSAPI
-
         self.api = api or BCSAPI()
         self.oi = oi_service or OpenInterestService()
 
@@ -74,62 +67,51 @@ class FuturesOIScannerService:
 
     @classmethod
     def _root(cls, ticker):
-        ticker = str(ticker or "").upper().strip()
-        return ticker.split("-", 1)[0]
+        return str(ticker or "").upper().strip().split("-", 1)[0]
 
     @classmethod
     def _underlying_code(cls, row):
-        value = cls._text(
-            row,
-            "underlyingAsset",
-            "underlying",
-            "underlyingTicker",
-            "underlyingSecCode",
-            "assetCode",
-            "baseAsset",
-            "baseTicker",
-        )
+        value = cls._text(row, "underlyingAsset", "underlying", "underlyingTicker", "underlyingSecCode", "assetCode", "baseAsset", "baseTicker")
         return value.upper() if value else ""
 
     @classmethod
     def _oi_root_from_metadata(cls, row):
-        value = cls._text(
-            row,
-            "shortCode",
-            "short_code",
-            "futuresShortCode",
-            "futures_short_code",
-            "derivativesTicker",
-            "derivatives_ticker",
-            "shortTicker",
-            "shortTickerCode",
-            "underlyingFuturesCode",
-            "underlying_futures_code",
-        )
+        value = cls._text(row, "shortCode", "short_code", "futuresShortCode", "futures_short_code", "derivativesTicker", "derivatives_ticker", "shortTicker", "shortTickerCode", "underlyingFuturesCode", "underlying_futures_code")
         return value.upper() if value else ""
 
     @classmethod
+    def _known_oi_roots(cls):
+        return {str(value).upper() for value in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}
+
+    @classmethod
     def _oi_root(cls, row, ticker, underlying):
-        metadata_root = cls._oi_root_from_metadata(row)
-        if metadata_root:
-            return metadata_root
+        """Return a canonical MOEX FUTOI root, never a full contract ticker.
+
+        BCS metadata fields named shortCode/derivativesTicker are not trusted
+        blindly: in live metadata they may contain a contract identifier such
+        as AFLT-9.26 or another non-canonical value. For standard underlyings,
+        the explicit BCS underlying-to-MOEX mapping is authoritative. A
+        metadata value is accepted only when it is itself a known canonical
+        FUTOI root (including perpetual roots).
+        """
         underlying = str(underlying or "").upper().strip()
         underlying = cls.UNDERLYING_ALIASES.get(underlying, underlying)
         mapped = cls.MOEX_SHORT_CODE_BY_UNDERLYING.get(underlying)
         if mapped:
             return mapped.upper()
+
+        metadata_root = cls._oi_root_from_metadata(row)
+        known_roots = cls._known_oi_roots()
+        if metadata_root and "-" not in metadata_root and metadata_root in known_roots:
+            return metadata_root
+
         ticker_root = cls._root(ticker)
-        known_roots = {str(v).upper() for v in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}
-        if ticker_root in known_roots:
-            return ticker_root
         return ticker_root
 
     @staticmethod
     def _normalize_underlying_display(code):
         code = str(code or "").upper().strip()
-        aliases = {
-            "USDRUB_TOM": "USDRUB", "USDRUBTOM": "USDRUB", "USDRUBF": "USDRUB", "USD/RUB": "USDRUB",
-        }
+        aliases = {"USDRUB_TOM": "USDRUB", "USDRUBTOM": "USDRUB", "USDRUBF": "USDRUB", "USD/RUB": "USDRUB"}
         return aliases.get(code, code)
 
     @staticmethod
@@ -146,8 +128,7 @@ class FuturesOIScannerService:
         text = str(value).strip()
         if not text:
             return "9999-99-99"
-        candidates = [text, text.replace("Z", "+00:00")]
-        for candidate in candidates:
+        for candidate in (text, text.replace("Z", "+00:00")):
             try:
                 return datetime.fromisoformat(candidate).date().isoformat()
             except (TypeError, ValueError):
@@ -185,10 +166,9 @@ class FuturesOIScannerService:
                     if value:
                         code = value
                         break
-                if not code:
-                    continue
-                exchange = str(board.get("exchange") or board.get("exchangeName") or "").strip().upper()
-                candidates.append((exchange == "MOEX", code))
+                if code:
+                    exchange = str(board.get("exchange") or board.get("exchangeName") or "").strip().upper()
+                    candidates.append((exchange == "MOEX", code))
             for is_moex, code in candidates:
                 if is_moex:
                     return code
@@ -200,18 +180,13 @@ class FuturesOIScannerService:
     def _metadata_expiry(row):
         if not isinstance(row, dict):
             return ""
-        return FuturesOIScannerService._text(
-            row,
-            "expirationDate", "expiration_date", "lastTradingDate", "expiryDate", "expiration", "expiry",
-        )
+        return FuturesOIScannerService._text(row, "expirationDate", "expiration_date", "lastTradingDate", "expiryDate", "expiration", "expiry")
 
     def _enrich_contract_metadata(self, rows):
         source_rows = [dict(row) for row in rows if isinstance(row, dict)]
         tickers = [self._text(row, "ticker", "secCode", "securityCode") for row in source_rows]
         tickers = [ticker for ticker in tickers if ticker]
-        enriched = {}
-        lookup_ok = 0
-        lookup_records = 0
+        enriched, lookup_ok, lookup_records = {}, 0, 0
         for start in range(0, len(tickers), self.ENRICH_BATCH_SIZE):
             batch = tickers[start:start + self.ENRICH_BATCH_SIZE]
             try:
@@ -227,9 +202,7 @@ class FuturesOIScannerService:
                     enriched[ticker.upper()] = record
 
         result = []
-        metadata_class_code_available = 0
-        metadata_expiry_available = 0
-        metadata_oi_root_available = 0
+        metadata_class_code_available = metadata_expiry_available = metadata_oi_root_available = 0
         for row in source_rows:
             ticker = self._text(row, "ticker", "secCode", "securityCode")
             meta = enriched.get(ticker.upper(), {})
@@ -246,7 +219,6 @@ class FuturesOIScannerService:
             if self._oi_root_from_metadata(meta) or self._oi_root_from_metadata(row):
                 metadata_oi_root_available += 1
             result.append(merged)
-
         return result, {
             "metadata_lookup_batches": (len(tickers) + self.ENRICH_BATCH_SIZE - 1) // self.ENRICH_BATCH_SIZE,
             "metadata_lookup_ok": lookup_ok,
@@ -333,28 +305,17 @@ class FuturesOIScannerService:
         if not instruments:
             return {}
         quotes = self.api.get_quotes_batch(instruments)
-        return {
-            self._text(q, "ticker", "secCode", "securityCode").upper(): q
-            for q in quotes if isinstance(q, dict)
-        }
+        return {self._text(q, "ticker", "secCode", "securityCode").upper(): q for q in quotes if isinstance(q, dict)}
 
     def scan(self, as_of=None):
         as_of = as_of or date.today()
         if not self.api.access_token and not self.api.authorize():
             return [], {"status": "BCS_AUTH_FAILED", "version": self.VERSION}
-
         contracts = self._active_contracts()
-        instruments = [
-            {"ticker": x["futures_ticker"], "classCode": x["futures_class_code"]}
-            for x in contracts if x.get("futures_class_code")
-        ]
+        instruments = [{"ticker": x["futures_ticker"], "classCode": x["futures_class_code"]} for x in contracts if x.get("futures_class_code")]
         quotes = self.api.get_quotes_batch(instruments) if instruments else []
-        quote_map = {
-            self._text(q, "ticker", "secCode", "securityCode").upper(): q
-            for q in quotes if isinstance(q, dict)
-        }
+        quote_map = {self._text(q, "ticker", "secCode", "securityCode").upper(): q for q in quotes if isinstance(q, dict)}
         underlying_quotes = self._underlying_quotes(contracts)
-
         results, skipped, oi_available = [], 0, 0
         for contract in contracts:
             quote = quote_map.get(contract["futures_ticker"].upper(), {})
@@ -368,20 +329,15 @@ class FuturesOIScannerService:
             oi = self.oi.analyze(contract["oi_root"], change, None, as_of=as_of)
             if oi.get("oi_status") in {"AVAILABLE", "CURRENT_ONLY"}:
                 oi_available += 1
-
             underlying_ticker = str(contract.get("underlying_ticker") or "").upper()
             underlying_quote = underlying_quotes.get(underlying_ticker, {})
             underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
             underlying_open = self._float(underlying_quote, "openPrice", "open", "dayOpen", "openingPrice")
-            underlying_change = (
-                (underlying_price / underlying_open - 1.0) * 100.0
-                if underlying_price is not None and underlying_open and underlying_open > 0 else None
-            )
-
+            underlying_change = ((underlying_price / underlying_open - 1.0) * 100.0 if underlying_price is not None and underlying_open and underlying_open > 0 else None)
             row = dict(contract)
             row.update({
-                "price": last, "change_percent": round(change, 4), "volume": volume,
-                "oi_analysis": oi, "underlying_price": underlying_price,
+                "price": last, "change_percent": round(change, 4), "volume": volume, "oi_analysis": oi,
+                "underlying_price": underlying_price,
                 "underlying_change_percent": None if underlying_change is None else round(underlying_change, 4),
                 "underlying_data_status": "AVAILABLE" if underlying_price is not None else "UNAVAILABLE",
                 "direction_alignment": (
@@ -393,14 +349,13 @@ class FuturesOIScannerService:
                 "data_status": "AVAILABLE" if oi.get("oi_status") != "UNAVAILABLE" else "OI_UNAVAILABLE",
             })
             results.append(row)
-
         results.sort(key=lambda x: abs(float(x.get("oi_analysis", {}).get("oi_change_percent") or 0.0)), reverse=True)
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
         diagnostics.update({
-            "status": "OK", "version": self.VERSION, "contracts": len(contracts),
-            "analyzed": len(results), "oi_available": oi_available, "skipped": skipped,
-            "quote_instruments": len(instruments), "quote_records": len(quotes),
-            "oi_source": "MOEX_ISS_FUTOI", "mapping": "BCS_FUTURES_METADATA_TO_MOEX_SHORT_CODE",
+            "status": "OK", "version": self.VERSION, "contracts": len(contracts), "analyzed": len(results),
+            "oi_available": oi_available, "skipped": skipped, "quote_instruments": len(instruments),
+            "quote_records": len(quotes), "oi_source": "MOEX_ISS_FUTOI",
+            "mapping": "BCS_UNDERLYING_TO_CANONICAL_MOEX_SHORT_CODE",
             "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_MOEX_OI_ROOT",
             "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
         })
