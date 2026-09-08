@@ -6,7 +6,7 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.3.1"
+    VERSION = "2.4.0"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
@@ -84,21 +84,33 @@ class FuturesOIScannerService:
         return {str(value).upper() for value in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}
 
     @classmethod
+    def _canonical_moex_root(cls, code):
+        code = str(code or "").upper().strip()
+        if not code:
+            return ""
+        code = cls._root(code)
+        code = cls.UNDERLYING_ALIASES.get(code, code)
+        return str(cls.MOEX_SHORT_CODE_BY_UNDERLYING.get(code) or "").upper()
+
+    @classmethod
     def _oi_root(cls, row, ticker, underlying):
         """Return a canonical MOEX FUTOI root, never a full contract ticker.
 
-        BCS metadata fields named shortCode/derivativesTicker are not trusted
-        blindly: in live metadata they may contain a contract identifier such
-        as AFLT-9.26 or another non-canonical value. For standard underlyings,
-        the explicit BCS underlying-to-MOEX mapping is authoritative. A
-        metadata value is accepted only when it is itself a known canonical
-        FUTOI root (including perpetual roots).
+        BCS metadata can omit the underlying asset entirely and can also expose
+        contract identifiers in fields such as shortCode. Therefore mapping is
+        attempted in this order: explicit underlying -> ticker root -> trusted
+        canonical metadata root -> raw ticker root as a last resort.
         """
         underlying = str(underlying or "").upper().strip()
         underlying = cls.UNDERLYING_ALIASES.get(underlying, underlying)
+
         mapped = cls.MOEX_SHORT_CODE_BY_UNDERLYING.get(underlying)
         if mapped:
             return mapped.upper()
+
+        ticker_mapped = cls._canonical_moex_root(ticker)
+        if ticker_mapped:
+            return ticker_mapped
 
         metadata_root = cls._oi_root_from_metadata(row)
         known_roots = cls._known_oi_roots()
