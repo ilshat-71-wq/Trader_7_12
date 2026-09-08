@@ -105,13 +105,18 @@ def test_d1_confirmation_overrides_intraday_direction(monkeypatch):
     rows = [_row("A", 1.5, 3_000_000), _row("B", -1.5, 2_000_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
     monkeypatch.setattr(scanner, "_daily_profile", lambda item, *args: _qualified_profile("SHORT" if item["spot_ticker"] == "A" else "LONG"))
-    assert scanner.scan(limit=3) == []
+    result = scanner.scan(limit=3)
+    assert result
+    assert all(x["qualification_status"] == "WATCH_ONLY" for x in result)
 
 
-def test_d1_benchmark_unavailable_blocks_direction(monkeypatch):
+def test_d1_benchmark_unavailable_creates_watch_only(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("A", 2.0, 2_000_000), _row("B", -2.0, 1_900_000)], 0.0)
     monkeypatch.setattr(scanner, "_benchmark_daily", lambda *args: [])
-    assert scanner.scan(limit=3) == []
+    result = scanner.scan(limit=3)
+    assert result
+    assert all(x["qualification_status"] == "WATCH_ONLY" for x in result)
+    assert all(x["watch_reason"] == "D1_HISTORY_INSUFFICIENT" for x in result)
     assert scanner._last_scan_diagnostics["daily_benchmark_available"] is False
 
 
@@ -130,13 +135,15 @@ def test_scanner_continues_after_preferred_window(monkeypatch):
     assert scanner._last_scan_diagnostics["scan_window"] == "10:00-до закрытия MSK"
 
 
-def test_coverage_gate_suppresses_partial_market(monkeypatch):
+def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):
     rows = [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000), _row("C", 0.8, 1_800_000)]
     scanner = _scanner(monkeypatch, rows, 0.2)
     monkeypatch.setattr(scanner, "_analyze_one", lambda item, *args: None if item["spot_ticker"] == "C" else dict(item))
-    assert scanner.scan(limit=2) == []
+    result = scanner.scan(limit=2)
+    assert result
     assert scanner._last_scan_diagnostics["status"] == "INSUFFICIENT_COVERAGE"
     assert scanner._last_scan_diagnostics["coverage_percent"] == round(2 / 3 * 100, 1)
+    assert scanner._last_scan_diagnostics["selected"] == 2
 
 
 def test_rs_magnitude_participates_in_ranking(monkeypatch):
