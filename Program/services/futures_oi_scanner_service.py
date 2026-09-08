@@ -4,11 +4,47 @@ from services.open_interest_service import OpenInterestService
 
 
 class FuturesOIScannerService:
-    """Read-only futures OI scanner with generic futures -> underlying mapping."""
+    """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.2.0"
+    VERSION = "2.3.0"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
+
+    # MOEX's FUTOI service uses the short two-character futures code for
+    # ordinary futures. BCS exposes the underlying security code instead, so
+    # keep the authoritative mapping explicit and use metadata first.
+    MOEX_SHORT_CODE_BY_UNDERLYING = {
+        "AFLT": "AF", "ALRS": "AL", "AFKS": "AK", "CHMF": "CH",
+        "FEES": "FS", "GAZP": "GZ", "GMKN": "GK", "HYDR": "HY",
+        "LKOH": "LK", "MGNT": "MN", "MOEX": "ME", "MTSI": "MT",
+        "NLMK": "NM", "NOTK": "NK", "ROSN": "RN", "RTKM": "RT",
+        "SBER": "SR", "SBERP": "SP", "SNGP": "SG", "SNGS": "SN",
+        "TATN": "TT", "TATP": "TP", "TRNF": "TN", "VTBR": "VB",
+        "MAGN": "MG", "PLZL": "PZ", "YDEX": "YD", "SMLT": "SS",
+        "POSI": "PS", "SPBE": "SE", "RUAL": "RL", "PHOR": "PH",
+        "PIKK": "PI", "POLY": "PO", "RSTI": "RE", "SIBN": "SO",
+        "TCSI": "TI", "VKCO": "VK", "SPYF": "SF", "NASD": "NA",
+        "QQQ": "NA", "WUSH": "WU", "MVID": "MV", "CBOM": "CM",
+        "SGZH": "SZ", "FLOT": "FL", "BSPB": "BS", "BANE": "BN",
+        "KMAZ": "KM", "ASTR": "AS", "SOFL": "S0", "SVCB": "SC",
+        "RASP": "RA", "FESH": "FE", "RNFT": "RU", "LEAS": "LE",
+        "BELUGA": "NB", "X5": "X5", "OZON": "ON", "DOMRF": "DR",
+        "IVAT": "IV", "ENPG": "EA", "POSI": "PS", "T": "TB",
+        "ALIBABA": "BB", "BAIDU": "BD", "PDD": "DD", "JDCOM": "JD",
+        "TENCENT": "TC", "XIA": "XI", "TSMr": "TS", "SAP": "AP",
+        "SONY": "SY", "NOVARTIS": "NO", "TOYOTA": "TO", "KOREA": "KR",
+        "SAMSUNG": "SK", "HYNIX": "HX", "FIXR": "FI", "RAGR": "RZ",
+        "Si": "Si", "Eu": "Eu", "CNY": "CR", "GL": "GL", "S2": "SL",
+        "IMOEX": "IM", "MIX": "MX", "MXI": "MM", "MOEXCNY": "MY",
+        "RTS": "RI", "RTSM": "RM", "RVI": "VI", "HOME": "HO",
+        "OGI": "OG", "MMI": "MA", "FNI": "FN", "CNI": "CS",
+        "RGBI": "RB", "IMOEXF": "IMOEXF", "IPO": "IP", "ETH": "EH",
+        "BTC": "BT", "SOL": "S3", "XRP": "XR", "TRX": "TX", "BNB": "BC",
+        "RUONIA": "RF", "APPF": "APPF", "AMDF": "AMDF", "TSLAF": "TSLAF",
+        "SNDKF": "SNDKF", "COHRF": "COHRF", "NBISF": "NBISF",
+        "HOODF": "HOODF", "LITEF": "LITEF", "SP500F": "SP500F", "QQQF": "QQQF",
+        "GAZPF": "GAZPF", "SBERF": "SBERF",
+    }
 
     def __init__(self, api=None, oi_service=None):
         from api.bcs_api import BCSAPI
@@ -51,6 +87,41 @@ class FuturesOIScannerService:
             "baseTicker",
         )
         return value.upper() if value else ""
+
+    @classmethod
+    def _oi_root_from_metadata(cls, row):
+        value = cls._text(
+            row,
+            "shortCode",
+            "short_code",
+            "futuresShortCode",
+            "futures_short_code",
+            "derivativesTicker",
+            "derivatives_ticker",
+            "shortTicker",
+            "shortTickerCode",
+            "underlyingFuturesCode",
+            "underlying_futures_code",
+        )
+        return value.upper() if value else ""
+
+    @classmethod
+    def _oi_root(cls, row, ticker, underlying):
+        metadata_root = cls._oi_root_from_metadata(row)
+        if metadata_root:
+            return metadata_root
+
+        underlying = str(underlying or "").upper().strip()
+        mapped = cls.MOEX_SHORT_CODE_BY_UNDERLYING.get(underlying)
+        if mapped:
+            return mapped.upper()
+
+        ticker_root = cls._root(ticker)
+        # If BCS already supplies a short MOEX code, retain it. Full security
+        # codes such as AFLT/ALRS must not be sent to FUTOI as roots.
+        if ticker_root in {str(v).upper() for v in cls.MOEX_SHORT_CODE_BY_UNDERLYING.values()}:
+            return ticker_root
+        return ticker_root
 
     @staticmethod
     def _normalize_underlying_display(code):
@@ -96,7 +167,6 @@ class FuturesOIScannerService:
 
     @staticmethod
     def _metadata_class_code(row):
-        """Extract classCode from direct or nested BCS board metadata."""
         if not isinstance(row, dict):
             return ""
         for key in ("classCode", "class_code", "classcode"):
@@ -143,13 +213,6 @@ class FuturesOIScannerService:
         )
 
     def _enrich_contract_metadata(self, rows):
-        """Resolve classCode/expiry from BCS ticker lookup.
-
-        BCS /by-type currently supplies the futures universe but may omit
-        classCode and expiration fields. Resolve them through ticker lookup;
-        scan() has a MOEX SPBFUT fallback when the read-only metadata service
-        does not expose classCode.
-        """
         source_rows = [dict(row) for row in rows if isinstance(row, dict)]
         tickers = [self._text(row, "ticker", "secCode", "securityCode") for row in source_rows]
         tickers = [ticker for ticker in tickers if ticker]
@@ -173,6 +236,7 @@ class FuturesOIScannerService:
         result = []
         metadata_class_code_available = 0
         metadata_expiry_available = 0
+        metadata_oi_root_available = 0
         for row in source_rows:
             ticker = self._text(row, "ticker", "secCode", "securityCode")
             meta = enriched.get(ticker.upper(), {})
@@ -186,6 +250,8 @@ class FuturesOIScannerService:
             if expiry:
                 merged["expirationDate"] = expiry
                 metadata_expiry_available += 1
+            if self._oi_root_from_metadata(meta) or self._oi_root_from_metadata(row):
+                metadata_oi_root_available += 1
             result.append(merged)
 
         return result, {
@@ -194,6 +260,7 @@ class FuturesOIScannerService:
             "metadata_lookup_records": lookup_records,
             "metadata_class_code_available": metadata_class_code_available,
             "metadata_expiry_available": metadata_expiry_available,
+            "metadata_oi_root_available": metadata_oi_root_available,
         }
 
     def _active_contracts(self):
@@ -211,6 +278,8 @@ class FuturesOIScannerService:
             "class_code_available": 0,
             "class_code_fallback": 0,
             "expiry_available": 0,
+            "oi_root_mapping": 0,
+            "oi_root_fallback": 0,
             **metadata_diag,
         }
         for raw in rows:
@@ -231,20 +300,23 @@ class FuturesOIScannerService:
                 continue
             futures_root = self._root(ticker)
             underlying_source = self._underlying_code(raw)
+            oi_root = self._oi_root(raw, ticker, underlying_source)
+            if oi_root:
+                diagnostics["oi_root_mapping"] += 1
+            else:
+                diagnostics["oi_root_fallback"] += 1
+                oi_root = futures_root
             class_code = self._metadata_class_code(raw)
             if class_code:
                 diagnostics["class_code_available"] += 1
             else:
-                # MOEX derivatives market uses SPBFUT for futures quotes.
-                # BCS's instrument metadata endpoint can omit classCode even
-                # though the contract itself is valid and quoteable.
                 class_code = self.DEFAULT_FUTURES_CLASS_CODE
                 diagnostics["class_code_fallback"] += 1
             item = dict(raw)
             item.update(
                 {
                     "futures_root": futures_root,
-                    "oi_root": futures_root,
+                    "oi_root": oi_root,
                     "futures_ticker": source_ticker,
                     "futures_ticker_normalized": ticker,
                     "futures_class_code": class_code,
@@ -255,7 +327,7 @@ class FuturesOIScannerService:
                     "_expiry": expiry,
                 }
             )
-            grouped.setdefault(futures_root, []).append(item)
+            grouped.setdefault(oi_root, []).append(item)
 
         result = []
         for root, items in grouped.items():
@@ -305,7 +377,7 @@ class FuturesOIScannerService:
         }
         underlying_quotes = self._underlying_quotes(contracts)
 
-        results, skipped = [], 0
+        results, skipped, oi_available = [], 0, 0
         for contract in contracts:
             quote = quote_map.get(contract["futures_ticker"].upper(), {})
             last = self._float(quote, "lastPrice", "last", "price", "currentPrice", "close")
@@ -317,23 +389,18 @@ class FuturesOIScannerService:
             change = (last / opening - 1.0) * 100.0
             volume = self._float(quote, "volume", "volumeContracts", "totalVolume", "volume24h")
             oi = self.oi.analyze(contract["oi_root"], change, None, as_of=as_of)
+            if oi.get("oi_status") in {"AVAILABLE", "CURRENT_ONLY"}:
+                oi_available += 1
 
             underlying_ticker = str(contract.get("underlying_ticker") or "").upper()
             underlying_quote = underlying_quotes.get(underlying_ticker, {})
             underlying_price = self._float(
                 underlying_quote,
-                "lastPrice",
-                "last",
-                "price",
-                "currentPrice",
-                "close",
+                "lastPrice", "last", "price", "currentPrice", "close",
             )
             underlying_open = self._float(
                 underlying_quote,
-                "openPrice",
-                "open",
-                "dayOpen",
-                "openingPrice",
+                "openPrice", "open", "dayOpen", "openingPrice",
             )
             underlying_change = (
                 (underlying_price / underlying_open - 1.0) * 100.0
@@ -376,12 +443,13 @@ class FuturesOIScannerService:
                 "version": self.VERSION,
                 "contracts": len(contracts),
                 "analyzed": len(results),
+                "oi_available": oi_available,
                 "skipped": skipped,
                 "quote_instruments": len(instruments),
                 "quote_records": len(quotes),
                 "oi_source": "MOEX_ISS_FUTOI",
-                "mapping": "BCS_FUTURES_METADATA_UNDERLYING",
-                "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_FUTURES_ROOT",
+                "mapping": "BCS_FUTURES_METADATA_TO_MOEX_SHORT_CODE",
+                "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_MOEX_OI_ROOT",
                 "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
             }
         )
