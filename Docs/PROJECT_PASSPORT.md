@@ -226,7 +226,8 @@ Weekend не считается автоматически закрытым.
 - bounded concurrency;
 - cache/retry для candle requests;
 - HTTP/SSL failure не трактуется как отсутствие торгов;
-- деградация данных должна отражаться в coverage и diagnostics.
+- деградация данных должна отражаться в coverage и diagnostics;
+- MOEX ISS Futures OI использует общий `RequestHelper` с нормальной TLS-проверкой и retry-политикой, а не отдельный `urllib`-клиент.
 
 ## 15. Futures OI
 
@@ -251,6 +252,14 @@ Volume confirmation
 ```
 
 OI не создаёт SPOT-кандидата самостоятельно и не является торговым исполнителем.
+
+### Futures metadata policy
+
+- Для quote-запросов используется `SPBFUT`, если BCS metadata не предоставляет `classCode`.
+- `classCode_fallback` диагностируется отдельно и не маскируется под metadata availability.
+- Истечение контракта фильтруется только при наличии распознанной даты expiry.
+- Если источник metadata не предоставляет expiry, контракт не объявляется истёкшим искусственно; состояние должно оставаться видимым в diagnostics.
+- Выбирается front non-expired contract на каждый futures root; OI остаётся root-level контекстом.
 
 ## 16. Read-only boundary
 
@@ -278,5 +287,6 @@ NO PORTFOLIO MANAGEMENT
 8. M5/flow/acceleration участвуют в ranking и diagnostics.
 9. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
 10. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
-11. Futures OI остаётся отдельным context layer.
+11. Futures OI остаётся отдельным context layer и проходит реальную проверку BCS + MOEX ISS.
 12. Полный regression suite и macOS build должны быть зелёными.
+13. macOS build обязан проходить compile + regression tests до упаковки приложения.
