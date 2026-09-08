@@ -3,18 +3,19 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from statistics import mean, pstdev
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-import json
+
+from api.request_helper import RequestHelper
 
 
 class OpenInterestService:
     """Professional read-only MOEX futures OI analytics."""
 
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
+    USER_AGENT = "Trader_7_12/1.1"
 
     REGIMES = {
         "PRICE_UP_OI_UP": "NEW_POSITION_BUILDING_UP",
@@ -28,11 +29,16 @@ class OpenInterestService:
         self._http_get = http_get or self._default_get
         self._history_cache = {}
 
-    @staticmethod
-    def _default_get(url, timeout=8):
-        request = Request(url, headers={"User-Agent": "Trader_7_12/1.0"})
-        with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+    @classmethod
+    def _default_get(cls, url, timeout=8):
+        """Use the application's shared HTTP/TLS layer for MOEX ISS."""
+        response = RequestHelper.get(
+            url,
+            headers={"User-Agent": cls.USER_AGENT, "Accept": "application/json"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
 
     @staticmethod
     def _parse_block(payload, name="futoi"):
