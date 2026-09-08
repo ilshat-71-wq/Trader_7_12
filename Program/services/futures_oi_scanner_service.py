@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from services.open_interest_service import OpenInterestService
 
@@ -6,7 +6,8 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with generic futures -> underlying mapping."""
 
-    VERSION = "2.0.1"
+    VERSION = "2.1.0"
+    ENRICH_BATCH_SIZE = 100
 
     def __init__(self, api=None, oi_service=None):
         from api.bcs_api import BCSAPI
@@ -61,34 +62,122 @@ class FuturesOIScannerService:
         }
         return aliases.get(code, code)
 
+    @staticmethod
+    def _normalize_expiry(value):
+        if value in (None, ""):
+            return "9999-99-99"
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if hasattr(value, "isoformat") and not isinstance(value, str):
+            try:
+                return value.isoformat()[:10]
+            except (TypeError, ValueError):
+                pass
+        text = str(value).strip()
+        if not text:
+            return "9999-99-99"
+        candidates = [text, text.replace("Z", "+00:00")]
+        for candidate in candidates:
+            try:
+                return datetime.fromisoformat(candidate).date().isoformat()
+            except (TypeError, ValueError):
+                pass
+        for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(text[:10], fmt).date().isoformat()
+            except ValueError:
+                pass
+        return "9999-99-99"
+
     @classmethod
     def _contract_sort_key(cls, item):
         return item.get("_expiry", "9999-99-99")
 
+    def _enrich_contract_metadata(self, rows):
+        """Resolve classCode/expiry from BCS ticker lookup.
+
+        BCS /by-type currently supplies the futures universe but may omit
+        classCode and expiration fields. Do not infer classCode locally;
+        resolve it through the authoritative ticker lookup endpoint.
+        """
+        source_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        tickers = [self._text(row, "ticker", "secCode", "securityCode") for row in source_rows]
+        tickers = [ticker for ticker in tickers if ticker]
+        enriched = {}
+        lookup_ok = 0
+        lookup_records = 0
+        for start in range(0, len(tickers), self.ENRICH_BATCH_SIZE):
+            batch = tickers[start:start + self.ENRICH_BATCH_SIZE]
+            try:
+                records = self.api.get_instruments_by_tickers(batch)
+            except Exception as exc:
+                print("⚠️ Futures metadata lookup failed:", type(exc).__name__)
+                continue
+            lookup_ok += 1
+            lookup_records += len(records) if isinstance(records, list) else 0
+            for record in records if isinstance(records, list) else []:
+                ticker = self._text(record, "ticker", "secCode", "securityCode")
+                if ticker:
+                    enriched[ticker.upper()] = record
+
+        result = []
+        for row in source_rows:
+            ticker = self._text(row, "ticker", "secCode", "securityCode")
+            meta = enriched.get(ticker.upper(), {})
+            merged = dict(row)
+            merged.update({k: v for k, v in meta.items() if v not in (None, "")})
+            result.append(merged)
+
+        return result, {
+            "metadata_lookup_batches": (len(tickers) + self.ENRICH_BATCH_SIZE - 1) // self.ENRICH_BATCH_SIZE,
+            "metadata_lookup_ok": lookup_ok,
+            "metadata_lookup_records": lookup_records,
+        }
+
     def _active_contracts(self):
         rows = self.api.get_instruments("FUTURES")
+        raw_count = len(rows) if isinstance(rows, list) else 0
+        rows, metadata_diag = self._enrich_contract_metadata(rows)
         today = date.today().isoformat()
         grouped = {}
-        for raw in rows if isinstance(rows, list) else []:
+        diagnostics = {
+            "raw_contracts": raw_count,
+            "option_filtered": 0,
+            "expired_filtered": 0,
+            "active_contracts": 0,
+            "active_roots": 0,
+            "class_code_available": 0,
+            "expiry_available": 0,
+            **metadata_diag,
+        }
+        for raw in rows:
             source_ticker = self._text(raw, "ticker", "secCode", "securityCode")
             if not source_ticker:
                 continue
             ticker = source_ticker.upper()
             kind = self._text(raw, "type", "instrumentType", "securityType").upper()
             if "OPTION" in kind or "OPT" in kind:
+                diagnostics["option_filtered"] += 1
                 continue
-            expiry = self._text(
+            expiry_raw = self._text(
                 raw,
                 "expirationDate",
                 "expiration_date",
                 "lastTradingDate",
                 "expiryDate",
                 "expiration",
-            ) or "9999-99-99"
+            )
+            expiry = self._normalize_expiry(expiry_raw)
+            if expiry_raw:
+                diagnostics["expiry_available"] += 1
             if expiry < today:
+                diagnostics["expired_filtered"] += 1
                 continue
             futures_root = self._root(ticker)
             underlying_source = self._underlying_code(raw)
+            class_code = self._text(raw, "classCode", "class_code")
+            if class_code:
+                diagnostics["class_code_available"] += 1
             item = dict(raw)
             item.update(
                 {
@@ -96,7 +185,7 @@ class FuturesOIScannerService:
                     "oi_root": futures_root,
                     "futures_ticker": source_ticker,
                     "futures_ticker_normalized": ticker,
-                    "futures_class_code": self._text(raw, "classCode", "class_code"),
+                    "futures_class_code": class_code,
                     "underlying_asset_source": underlying_source,
                     "underlying_asset": self._normalize_underlying_display(underlying_source),
                     "underlying_ticker": self._text(raw, "underlyingTicker", "underlyingSecCode") or underlying_source,
@@ -113,6 +202,10 @@ class FuturesOIScannerService:
                 item["curve_rank"] = index + 1
                 item["curve_role"] = "FRONT" if index == 0 else "NEXT" if index == 1 else "DEFERRED"
             result.append(ordered[0])
+        diagnostics["active_contracts"] = len(result)
+        diagnostics["active_roots"] = len(grouped)
+        self._last_contract_diagnostics = diagnostics
+        print("Futures OI metadata:", diagnostics)
         return result
 
     def _underlying_quotes(self, contracts):
@@ -214,14 +307,20 @@ class FuturesOIScannerService:
             key=lambda x: abs(float(x.get("oi_analysis", {}).get("oi_change_percent") or 0.0)),
             reverse=True,
         )
-        return results, {
-            "status": "OK",
-            "version": self.VERSION,
-            "contracts": len(contracts),
-            "analyzed": len(results),
-            "skipped": skipped,
-            "oi_source": "MOEX_ISS_FUTOI",
-            "mapping": "BCS_FUTURES_METADATA_UNDERLYING",
-            "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_FUTURES_ROOT",
-            "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
-        }
+        diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
+        diagnostics.update(
+            {
+                "status": "OK",
+                "version": self.VERSION,
+                "contracts": len(contracts),
+                "analyzed": len(results),
+                "skipped": skipped,
+                "quote_instruments": len(instruments),
+                "quote_records": len(quotes),
+                "oi_source": "MOEX_ISS_FUTOI",
+                "mapping": "BCS_FUTURES_METADATA_UNDERLYING",
+                "selection_policy": "FRONT_NONEXPIRED_CONTRACT_PER_FUTURES_ROOT",
+                "rollover_policy": "OI_IS_ROOT_LEVEL; FRONT_AND_NEXT_CONTRACTS_EXPOSED",
+            }
+        )
+        return results, diagnostics
