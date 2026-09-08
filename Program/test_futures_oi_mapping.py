@@ -1,5 +1,3 @@
-from datetime import date
-
 from services.futures_oi_scanner_service import FuturesOIScannerService
 from services.open_interest_service import OpenInterestService
 
@@ -80,13 +78,7 @@ def test_open_interest_http_error_is_not_silently_converted_to_empty_data():
 
     service = OpenInterestService(http_get=http_get)
     try:
-        service._default_get("https://example.invalid", timeout=1)
-    except Exception:
-        pass
-
-    # The injected transport remains testable; production uses RequestHelper.
-    try:
-        service._request_all({"date": date(2026, 9, 8).isoformat()})
+        service._request_all({"date": "2026-09-08"})
     except RuntimeError as exc:
         assert "HTTP 403" in str(exc)
     else:
