@@ -6,7 +6,7 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with generic futures -> underlying mapping."""
 
-    VERSION = "2.1.0"
+    VERSION = "2.1.1"
     ENRICH_BATCH_SIZE = 100
 
     def __init__(self, api=None, oi_service=None):
@@ -93,6 +93,54 @@ class FuturesOIScannerService:
     def _contract_sort_key(cls, item):
         return item.get("_expiry", "9999-99-99")
 
+    @staticmethod
+    def _metadata_class_code(row):
+        """Extract classCode from direct or nested BCS board metadata."""
+        if not isinstance(row, dict):
+            return ""
+        for key in ("classCode", "class_code", "classcode"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return value
+        boards = row.get("boards")
+        if isinstance(boards, dict):
+            boards = [boards]
+        if isinstance(boards, list):
+            candidates = []
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+                code = ""
+                for key in ("classCode", "class_code", "classcode"):
+                    value = str(board.get(key) or "").strip()
+                    if value:
+                        code = value
+                        break
+                if not code:
+                    continue
+                exchange = str(board.get("exchange") or board.get("exchangeName") or "").strip().upper()
+                candidates.append((exchange == "MOEX", code))
+            for is_moex, code in candidates:
+                if is_moex:
+                    return code
+            if candidates:
+                return candidates[0][1]
+        return ""
+
+    @staticmethod
+    def _metadata_expiry(row):
+        if not isinstance(row, dict):
+            return ""
+        return FuturesOIScannerService._text(
+            row,
+            "expirationDate",
+            "expiration_date",
+            "lastTradingDate",
+            "expiryDate",
+            "expiration",
+            "expiry",
+        )
+
     def _enrich_contract_metadata(self, rows):
         """Resolve classCode/expiry from BCS ticker lookup.
 
@@ -121,17 +169,29 @@ class FuturesOIScannerService:
                     enriched[ticker.upper()] = record
 
         result = []
+        metadata_class_code_available = 0
+        metadata_expiry_available = 0
         for row in source_rows:
             ticker = self._text(row, "ticker", "secCode", "securityCode")
             meta = enriched.get(ticker.upper(), {})
             merged = dict(row)
             merged.update({k: v for k, v in meta.items() if v not in (None, "")})
+            class_code = self._metadata_class_code(meta) or self._metadata_class_code(row)
+            expiry = self._metadata_expiry(meta) or self._metadata_expiry(row)
+            if class_code:
+                merged["classCode"] = class_code
+                metadata_class_code_available += 1
+            if expiry:
+                merged["expirationDate"] = expiry
+                metadata_expiry_available += 1
             result.append(merged)
 
         return result, {
             "metadata_lookup_batches": (len(tickers) + self.ENRICH_BATCH_SIZE - 1) // self.ENRICH_BATCH_SIZE,
             "metadata_lookup_ok": lookup_ok,
             "metadata_lookup_records": lookup_records,
+            "metadata_class_code_available": metadata_class_code_available,
+            "metadata_expiry_available": metadata_expiry_available,
         }
 
     def _active_contracts(self):
@@ -159,14 +219,7 @@ class FuturesOIScannerService:
             if "OPTION" in kind or "OPT" in kind:
                 diagnostics["option_filtered"] += 1
                 continue
-            expiry_raw = self._text(
-                raw,
-                "expirationDate",
-                "expiration_date",
-                "lastTradingDate",
-                "expiryDate",
-                "expiration",
-            )
+            expiry_raw = self._metadata_expiry(raw)
             expiry = self._normalize_expiry(expiry_raw)
             if expiry_raw:
                 diagnostics["expiry_available"] += 1
@@ -175,7 +228,7 @@ class FuturesOIScannerService:
                 continue
             futures_root = self._root(ticker)
             underlying_source = self._underlying_code(raw)
-            class_code = self._text(raw, "classCode", "class_code")
+            class_code = self._metadata_class_code(raw)
             if class_code:
                 diagnostics["class_code_available"] += 1
             item = dict(raw)
