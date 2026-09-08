@@ -10,11 +10,19 @@ from PySide6.QtCore import QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
+# The production app uses one premium scan visual across the UI.  Patch the
+# legacy widget name before TraderWindow is imported so the old three-dial
+# animation cannot be instantiated by the application.
+import ui as trader_ui
+from premium_scan_visual import PremiumScanVisual
+
+trader_ui.MeltingClocksWidget = PremiumScanVisual
+
 from oi_watchlist_ui import OIWatchlistTraderWindow
 
 
 class ScanningSplash(QSplashScreen):
-    """Minimal luxury watch-style splash with a moving second hand."""
+    """Luxury startup splash using the same turquoise/gold watch language."""
 
     def __init__(self):
         size = 520
@@ -56,36 +64,43 @@ class ScanningSplash(QSplashScreen):
         p.setBrush(halo)
         p.drawEllipse(QPointF(cx, cy), r * 1.28, r * 1.28)
 
-        # Turquoise dial with a restrained gold bezel.
         p.setBrush(QColor("#075e5a"))
         p.setPen(QPen(QColor("#d4af55"), 7))
         p.drawEllipse(QPointF(cx, cy), r, r)
         p.setPen(QPen(QColor("#f0d27a"), 2))
         p.drawEllipse(QPointF(cx, cy), r * 0.92, r * 0.92)
 
-        # Hour markers.
         p.setPen(QPen(QColor("#f1d57d"), 4, Qt.SolidLine, Qt.RoundCap))
         for i in range(12):
             a = math.radians(i * 30 - 90)
             outer = r * 0.84
             inner = r * (0.72 if i % 3 else 0.68)
-            p.drawLine(QPointF(cx + math.cos(a) * inner, cy + math.sin(a) * inner),
-                       QPointF(cx + math.cos(a) * outer, cy + math.sin(a) * outer))
+            p.drawLine(
+                QPointF(cx + math.cos(a) * inner, cy + math.sin(a) * inner),
+                QPointF(cx + math.cos(a) * outer, cy + math.sin(a) * outer),
+            )
 
-        # Gold hour/minute hands.
         for angle, length, width in ((126, r * 0.50, 7), (18, r * 0.67, 5)):
             a = math.radians(angle - 90)
             p.setPen(QPen(QColor("#f4d47a"), width, Qt.SolidLine, Qt.RoundCap))
-            p.drawLine(QPointF(cx, cy), QPointF(cx + math.cos(a) * length, cy + math.sin(a) * length))
+            p.drawLine(
+                QPointF(cx, cy),
+                QPointF(cx + math.cos(a) * length, cy + math.sin(a) * length),
+            )
 
-        # Animated second hand and subtle sweep trail.
         a = math.radians(self._angle - 90)
         p.setPen(QPen(QColor(91, 239, 224, 55), 6, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(cx, cy), QPointF(cx + math.cos(a - math.radians(18)) * r * 0.76,
-                                           cy + math.sin(a - math.radians(18)) * r * 0.76))
+        p.drawLine(
+            QPointF(cx, cy),
+            QPointF(cx + math.cos(a - math.radians(18)) * r * 0.76,
+                     cy + math.sin(a - math.radians(18)) * r * 0.76),
+        )
         p.setPen(QPen(QColor("#d9b64f"), 3, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(cx, cy), QPointF(cx + math.cos(a) * r * 0.78,
-                                           cy + math.sin(a) * r * 0.78))
+        p.drawLine(
+            QPointF(cx, cy),
+            QPointF(cx + math.cos(a) * r * 0.78,
+                     cy + math.sin(a) * r * 0.78),
+        )
         p.setBrush(QColor("#f3d477"))
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(cx, cy), 8, 8)
@@ -117,8 +132,6 @@ def main():
     window.raise_()
     window.activateWindow()
 
-    # Keep the animation visible briefly so the user can immediately see that
-    # the application is working; the actual scan continues in the main UI.
     QTimer.singleShot(900, splash.close)
     print(f"🖥️ GUI window visible: {window.isVisible()}")
     print(f"🖥️ GUI platform: {app.platformName()}")
