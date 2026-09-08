@@ -26,6 +26,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller pytest PySide6 requests
 
+      - name: Compile Python sources
+        run: python -m compileall -q Program
+
+      - name: Run regression tests
+        run: python -m pytest -q
+
       - name: Build app
         run: ./scripts/build_mac_app.sh
 
