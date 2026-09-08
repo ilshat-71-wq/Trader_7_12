@@ -83,7 +83,7 @@ def test_multiple_strong_instruments_on_up_market_are_long_candidates(monkeypatc
     result = scanner.scan(limit=3)
     assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
     assert all(x["selection_role"] == "MARKET_LEADER" for x in result)
-    assert all(x["direction"] == "LONG" for x in result)
+    assert all(x["market_state"] == "STRONG" for x in result)
 
 
 def test_weak_on_up_market_is_not_a_short_candidate(monkeypatch):
@@ -98,7 +98,7 @@ def test_strong_on_down_market_is_not_long_candidate(monkeypatch):
     result = scanner.scan(limit=2)
     assert result[0]["selection_role"] == "MARKET_LAGGARD"
     assert result[0]["spot_ticker"] == "WEAK"
-    assert result[0]["direction"] == "SHORT"
+    assert result[0]["market_state"] == "WEAK"
 
 
 def test_multiple_weak_instruments_on_down_market_are_short_candidates(monkeypatch):
@@ -107,7 +107,7 @@ def test_multiple_weak_instruments_on_down_market_are_short_candidates(monkeypat
     result = scanner.scan(limit=3)
     assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
     assert all(x["selection_role"] == "MARKET_LAGGARD" for x in result)
-    assert all(x["direction"] == "SHORT" for x in result)
+    assert all(x["market_state"] == "WEAK" for x in result)
 
 
 def test_tiny_relative_strength_is_not_directional(monkeypatch):
@@ -122,12 +122,12 @@ def test_d1_direction_does_not_override_market_relative_direction(monkeypatch):
     result = scanner.scan(limit=3)
     assert result
     assert result[0]["spot_ticker"] == "B"
-    assert result[0]["direction"] == "SHORT"
+    assert result[0]["market_state"] == "WEAK"
     assert result[0]["qualification_status"] == "QUALIFIED"
 
 
 def test_d1_benchmark_unavailable_creates_watch_only(monkeypatch):
-    scanner = _scanner(monkeypatch, [_row("A", 2.0, 2_000_000), _row("B", -2.0, 1_900_000)], 0.0)
+    scanner = _scanner(monkeypatch, [_row("A", 2.0, 2_000_000), _row("B", 1.5, 1_900_000)], 0.7)
     monkeypatch.setattr(scanner, "_benchmark_daily", lambda *args: [])
     result = scanner.scan(limit=3)
     assert result
