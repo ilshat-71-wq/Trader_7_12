@@ -137,7 +137,11 @@ class OpenInterestService:
                     except ValueError:
                         pass
         if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():
-            year, month = 2000 + int(secid[-1]), cls.MONTH_CODES[secid[-2]]
+            digit, month = int(secid[-1]), cls.MONTH_CODES[secid[-2]]
+            reference_year = (as_of.year if isinstance(as_of, date) else date.today().year)
+            decade = (reference_year // 10) * 10
+            candidates = [decade - 10 + digit, decade + digit, decade + 10 + digit]
+            year = min(candidates, key=lambda candidate: abs(candidate - reference_year))
             return date(year, month, calendar.monthrange(year, month)[1])
         return date.max
 
