@@ -13,15 +13,12 @@ class OpenInterestService:
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
     FUTURES_MARKETDATA_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities"
     FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"
-    VERSION = "1.3.1"
+    VERSION = "1.4.0"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
-    USER_AGENT = "Trader_7_12/1.3"
+    USER_AGENT = "Trader_7_12/1.4"
 
-    # MOEX FUTOI roots and MOEX contract prefixes are not identical for every
-    # underlying. Keep the exceptions explicit; direct contract lookup is used
-    # whenever a real MOEX SECID is known.
     MOEX_PREFIX_BY_ROOT = {
         "AF": "AFLT", "AL": "ALRS", "SR": "SBRF", "GZ": "GAZR", "LK": "LKOH",
         "RN": "ROSN", "CH": "CHMF", "NM": "NLMK", "MG": "MAGN", "SZ": "SGZH",
@@ -30,11 +27,12 @@ class OpenInterestService:
         "KM": "KMAZ", "FL": "FLOT", "MV": "MVID", "CM": "CBOM", "FE": "FESH",
         "RT": "RTKM", "SO": "SIBN", "TI": "TCSI", "VK": "VKCO", "PO": "POLY",
         "PZ": "PLZL", "YD": "YDEX", "SS": "SMLT", "PS": "POSI", "SE": "SPBE",
-        "RL": "RUAL", "RE": "RSTI", "BS": "BSPB", "NA": "QQQ", "MX": "MIX",
-        "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI", "SI": "Si",
-        "EU": "Eu", "CR": "CNY", "BR": "BR", "GD": "GOLD", "GL": "GL",
-        "NG": "NG", "CL": "CL", "WT": "WT", "SV": "SILV", "PD": "PLAT",
+        "RL": "RUAL", "RE": "RSTI", "NA": "QQQ", "MX": "MIX", "MM": "MXI",
+        "RI": "RTS", "RM": "RTSM", "VI": "RVI", "SI": "Si", "EU": "Eu",
+        "CR": "CNY", "BR": "BR", "GD": "GOLD", "GL": "GL", "NG": "NG",
+        "CL": "CL", "WT": "WT", "SV": "SILV", "PD": "PLAT",
     }
+    MONTH_CODES = {"H": 3, "M": 6, "U": 9, "Z": 12}
 
     REGIMES = {
         "PRICE_UP_OI_UP": "NEW_POSITION_BUILDING_UP",
@@ -92,37 +90,108 @@ class OpenInterestService:
         self._marketdata_cache[ticker] = row
         return row
 
-    def _request_marketdata_family(self, root):
-        root = str(root or "").strip().upper()
-        if not root:
-            return None
+    def _load_marketdata_all(self):
         if self._marketdata_all_cache is None:
             try:
                 payload = self._http_get(self.FUTURES_MARKETDATA_ALL_URL, timeout=self.TIMEOUT)
                 self._marketdata_all_cache = self._parse_block(payload, "marketdata")
             except Exception:
                 self._marketdata_all_cache = []
+        return list(self._marketdata_all_cache)
+
+    @classmethod
+    def _marketdata_family(cls, secid):
+        """Return the MOEX futures family/root from a real SECID.
+
+        Dated contracts can be written as PREFIX-U6 (or PREFIX-9.26 in some
+        feeds), while current RFUD SECIDs commonly use PREFIXU6.  The family
+        is therefore resolved from known MOEX prefixes before the expiry suffix.
+        """
+        secid = str(secid or "").strip().upper()
+        if not secid:
+            return ""
+        if "-" in secid:
+            return secid.split("-", 1)[0]
+        prefixes = {str(value).upper() for value in cls.MOEX_PREFIX_BY_ROOT.values()}
+        for prefix in sorted(prefixes, key=len, reverse=True):
+            if secid.startswith(prefix) and len(secid) > len(prefix):
+                tail = secid[len(prefix):]
+                if len(tail) == 2 and tail[0] in cls.MONTH_CODES and tail[1].isdigit():
+                    return prefix
+        return secid
+
+    @classmethod
+    def _marketdata_expiry(cls, secid, as_of=None):
+        """Parse RFUD SECID expiry; perpetual/daily contracts have no expiry."""
+        secid = str(secid or "").strip().upper()
+        if not secid:
+            return date.max
+        if "-" in secid:
+            tail = secid.rsplit("-", 1)[1]
+            if "." in tail:
+                month_s, year_s = tail.split(".", 1)
+                if month_s.isdigit() and year_s.isdigit():
+                    try:
+                        return date(2000 + int(year_s), int(month_s), 1)
+                    except ValueError:
+                        pass
+        family = cls._marketdata_family(secid)
+        tail = secid[len(family):]
+        if len(tail) == 2 and tail[0] in cls.MONTH_CODES and tail[1].isdigit():
+            return date(2000 + int(tail[1]), cls.MONTH_CODES[tail[0]], 1)
+        return date.max
+
+    @classmethod
+    def _front_marketdata_rows(cls, rows, as_of=None):
+        """Select one active, non-zero-OI front contract per MOEX family."""
+        as_of = as_of or date.today()
+        if isinstance(as_of, datetime):
+            as_of = as_of.date()
+        grouped = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            secid = str(row.get("secid") or row.get("ticker") or "").upper()
+            family = cls._marketdata_family(secid)
+            oi = cls._number(row.get("openposition"))
+            if not secid or not family or oi <= 0:
+                continue
+            expiry = cls._marketdata_expiry(secid, as_of)
+            if expiry != date.max and expiry < as_of:
+                continue
+            grouped.setdefault(family, []).append((expiry, secid, row))
+        selected = {}
+        for family, candidates in grouped.items():
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            expiry, secid, row = candidates[0]
+            selected[family] = dict(row)
+            selected[family]["_moex_family"] = family
+            selected[family]["_moex_expiry"] = None if expiry == date.max else expiry.isoformat()
+        return selected
+
+    def marketdata_front_contracts(self, as_of=None):
+        """Return the current front RFUD contract with OI>0 for each MOEX family."""
+        return self._front_marketdata_rows(self._load_marketdata_all(), as_of=as_of)
+
+    def _request_marketdata_family(self, root):
+        root = str(root or "").strip().upper()
+        if not root:
+            return None
+        rows = self._load_marketdata_all()
+        selected = self._front_marketdata_rows(rows).get(root)
+        if selected:
+            return selected
         prefix = self.MOEX_PREFIX_BY_ROOT.get(root, root)
         candidates = []
-        for row in self._marketdata_all_cache:
+        for row in rows:
             secid = str(row.get("secid") or row.get("ticker") or "").upper()
             if secid == prefix or secid.startswith(prefix + "-"):
-                oi = self._number(row.get("openposition"))
-                if oi > 0:
+                if self._number(row.get("openposition")) > 0:
                     candidates.append(row)
         if not candidates:
             return None
-
-        def expiry_key(row):
-            secid = str(row.get("secid") or row.get("ticker") or "").upper()
-            try:
-                tail = secid.rsplit("-", 1)[1]
-                month_s, year_s = tail.split(".", 1)
-                return (2000 + int(year_s), int(month_s))
-            except (ValueError, IndexError):
-                return (9999, 99)
-
-        return sorted(candidates, key=expiry_key)[0]
+        candidates.sort(key=lambda row: self._marketdata_expiry(row.get("secid") or row.get("ticker")))
+        return candidates[0]
 
     @staticmethod
     def _number(value):
