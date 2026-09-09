@@ -1,6 +1,6 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 08.09.2026  
+**Дата актуализации:** 09.09.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
@@ -194,7 +194,27 @@ Relative Strength
 
 Если strict qualification недоступна из-за недостатка D1/M5 данных, допускается `ATTENTION_WATCH / WATCH_ONLY`. Watch-only никогда не становится BUY/SELL.
 
-## 12. Coverage
+## 12. Broker-style primary radar table
+
+Основная таблица должна читаться как компактная профессиональная market-monitoring таблица без необходимости расшифровывать `RS` по контексту.
+
+```text
+# TICKER  ROLE  D1  D1-RS  IDX Δ%  PRICE Δ%  RS vs IDX  ₽/мин  SESSION ₽×V  15m ₽×V  ACCEL  SCORE
+```
+
+Определения:
+
+- `IDX Δ%` — текущее изменение выбранного benchmark, фактически `IMOEX2`, либо `IRUS2` при fallback.
+- `PRICE Δ%` — текущее изменение конкретного инструмента относительно начала текущей торговой сессии.
+- `RS vs IDX` — `PRICE Δ% − IDX Δ%`, в процентных пунктах.
+- `₽/мин` — средняя скорость реального денежного оборота с начала текущей торговой сессии.
+- `SESSION ₽×V` — накопленный реальный денежный оборот с начала текущей торговой сессии **до момента сканирования**.
+- `15m ₽×V` — реальный денежный оборот последних 15 минут.
+- `ACCEL` — изменение скорости потока относительно предыдущего полного 15-минутного окна.
+
+Таким образом, текущая таблица одновременно показывает абсолютное движение цены, движение индекса, relative strength и фактический денежный поток. `SESSION ₽×V` не является прогнозом и не является «мгновенным» оборотом: это накопленный оборот на момент конкретного сканирования.
+
+## 13. Coverage
 
 Минимальная production M5 coverage: **80%**.
 
@@ -206,7 +226,7 @@ status = INSUFFICIENT_COVERAGE
 
 Coverage — диагностический gate полноты, а не причина скрывать весь рынок.
 
-## 13. Calendar / DSWD
+## 14. Calendar / DSWD
 
 ```text
 ordinary:
@@ -220,7 +240,7 @@ DSWD:
 
 Weekend не считается автоматически закрытым.
 
-## 14. HTTP / data resilience
+## 15. HTTP / data resilience
 
 - один process-wide read-only BCS client;
 - bounded concurrency;
@@ -229,7 +249,7 @@ Weekend не считается автоматически закрытым.
 - деградация данных должна отражаться в coverage и diagnostics;
 - MOEX ISS Futures OI использует общий `RequestHelper` с нормальной TLS-проверкой и retry-политикой, а не отдельный `urllib`-клиент.
 
-## 15. Futures OI
+## 16. Futures OI
 
 Futures/OI — отдельный контекстный слой.
 
@@ -274,7 +294,7 @@ OI не создаёт SPOT-кандидата самостоятельно и �
 - Выбирается front non-expired contract на каждый MOEX OI root; OI остаётся root-level контекстом.
 - Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records` и `expiry_available`.
 
-## 16. Read-only boundary
+## 17. Read-only boundary
 
 Программа только показывает рыночную информацию и классификации.
 
@@ -286,21 +306,23 @@ NO SL/TP EXECUTION
 NO PORTFOLIO MANAGEMENT
 ```
 
-## 17. Operational acceptance criteria
+## 18. Operational acceptance criteria
 
 Перед объявлением версии готовой проверяются:
 
 1. SPOT universe и benchmark доступны.
 2. RS действительно считается относительно IMOEX2/IRUS2.
-3. На UP market сильнейшие относительно рынка проходят в Long Radar.
-4. На DOWN market слабейшие относительно рынка проходят в Short Radar.
-5. Абсолютная красная/зелёная свеча не подменяет relative-strength logic.
-6. D1 quality не конфликтует с текущей market-regime logic.
-7. Liquidity gate остаётся hard gate.
-8. M5/flow/acceleration участвуют в ranking и diagnostics.
-9. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
-10. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
-11. Futures OI mapping использует корректные MOEX short roots и отдельно учитывает perpetual futures.
-12. Futures OI проходит реальную проверку BCS metadata → quotes → MOEX ISS OI.
-13. Полный regression suite и macOS build должны быть зелёными.
-14. macOS build обязан проходить compile + regression tests до упаковки приложения.
+3. Основная таблица явно показывает `IDX Δ%`, `PRICE Δ%` и `RS vs IDX`.
+4. Основная таблица показывает реальный накопленный `SESSION ₽×V` на момент сканирования.
+5. На UP market сильнейшие относительно рынка проходят в Long Radar.
+6. На DOWN market слабейшие относительно рынка проходят в Short Radar.
+7. Абсолютная красная/зелёная свеча не подменяет relative-strength logic.
+8. D1 quality не конфликтует с текущей market-regime logic.
+9. Liquidity gate остаётся hard gate.
+10. M5/flow/acceleration участвуют в ranking и diagnostics.
+11. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
+12. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
+13. Futures OI mapping использует корректные MOEX short roots и отдельно учитывает perpetual futures.
+14. Futures OI проходит реальную проверку BCS metadata → quotes → MOEX ISS OI.
+15. Полный regression suite и macOS build должны быть зелёными.
+16. macOS build обязан проходить compile + regression tests до упаковки приложения.
