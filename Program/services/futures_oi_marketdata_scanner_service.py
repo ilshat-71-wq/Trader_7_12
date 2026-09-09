@@ -7,8 +7,24 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-session liquidity TOP."""
 
-    VERSION = "2.7.2"
+    VERSION = "2.7.3"
     LIQUIDITY_TOP_LIMIT = 20
+    LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
+    ECONOMIC_EXPOSURE_GROUPS = {
+        "USD_RUB": {"SI", "USDRUBF"},
+        "EUR_RUB": {"EU"},
+        "CNY_RUB": {"CR", "CNY"},
+        "GOLD": {"GD", "GL"},
+        "MOEX_INDEX": {"MX", "MM"},
+    }
+
+    @classmethod
+    def _economic_exposure_group(cls, family):
+        family = str(family or "").upper()
+        for group, roots in cls.ECONOMIC_EXPOSURE_GROUPS.items():
+            if family in roots:
+                return group
+        return family
 
     @staticmethod
     def _family_to_underlying(family):
@@ -106,7 +122,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if hasattr(self.oi, "marketdata_front_contracts"):
             front_contracts = self.oi.marketdata_front_contracts(as_of=as_of)
         else:
-            # Compatibility for test/dummy OI adapters predating the family API.
             front_contracts = {}
             for contract in bcs_contracts:
                 family = str(contract.get("oi_root") or "").upper()
@@ -172,6 +187,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 "curve_rank": 1, "curve_role": "FRONT",
                 "_expiry": marketdata.get("_moex_expiry") or "9999-99-99",
                 "underlying_ticker": underlying_ticker, "underlying_asset": underlying_ticker,
+                "economic_exposure_group": self._economic_exposure_group(family),
                 "price": last, "change_percent": round(change, 4), "volume": volume,
                 "session_turnover_rub": round(turnover_rub, 2) if turnover_rub else 0.0,
                 "turnover_source": turnover_source,
@@ -192,6 +208,18 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
         candidates.sort(key=lambda x: (float(x.get("session_turnover_rub") or 0.0), float(x.get("liquidity_score") or 0.0), float((x.get("oi_analysis") or {}).get("oi") or 0.0)), reverse=True)
         liquidity_rows = [x for x in candidates if x.get("liquidity_available")]
+
+        liquidity_probe = {}
+        for rank, item in enumerate(liquidity_rows, 1):
+            root = str(item.get("futures_root") or "").upper()
+            if root in self.LIQUIDITY_PROBE_ROOTS:
+                liquidity_probe[root] = {
+                    "rank": rank,
+                    "contract": item.get("futures_ticker"),
+                    "turnover_rub": item.get("session_turnover_rub"),
+                    "oi": (item.get("oi_analysis") or {}).get("oi"),
+                }
+
         selected = liquidity_rows[: self.LIQUIDITY_TOP_LIMIT]
         if len(selected) < self.LIQUIDITY_TOP_LIMIT:
             selected_ids = {id(x) for x in selected}
@@ -200,6 +228,13 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         for rank, item in enumerate(selected, 1):
             item["liquidity_rank"] = rank
             item["liquidity_tier"] = "LIQUIDITY_TOP"
+
+        economic_overlap = {}
+        for item in candidates:
+            group = str(item.get("economic_exposure_group") or "")
+            if group:
+                economic_overlap.setdefault(group, []).append(item.get("futures_root"))
+        economic_overlap = {key: sorted(set(values)) for key, values in economic_overlap.items() if len(set(values)) > 1}
 
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
         diagnostics.update({
@@ -211,6 +246,8 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "liquidity_metric": "MOEX_RFUD_CURRENT_SESSION_MONETARY_TURNOVER",
             "turnover_source": "VALTODAY_ONLY",
             "turnover_source_counts": turnover_source_counts,
+            "liquidity_probe_roots": liquidity_probe,
+            "economic_overlap_groups": economic_overlap,
             "base_change_available": base_change_available,
             "base_change_missing": max(0, len(candidates) - base_change_available),
             "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY",
