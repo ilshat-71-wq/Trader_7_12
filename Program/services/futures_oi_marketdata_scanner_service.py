@@ -68,10 +68,26 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 family = str(contract.get("oi_root") or "").upper()
                 if not family:
                     continue
-                row = self.oi._request_marketdata_family(family)
+                # Legacy adapters may expect either the canonical OI family
+                # or the raw BCS futures root. Try both without affecting the
+                # primary one-request-per-family path used by the real service.
+                request_roots = [family]
+                raw_root = self._root(contract.get("futures_ticker") or contract.get("ticker"))
+                if raw_root and raw_root not in request_roots:
+                    request_roots.append(raw_root)
+                row = None
+                for request_root in request_roots:
+                    row = self.oi._request_marketdata_family(request_root)
+                    if row:
+                        break
                 if row and self._float(row, "openposition", "oi", "openInterest") not in (None, 0) and self._float(row, "openposition", "oi", "openInterest") > 0:
-                    front_contracts.setdefault(family, dict(row))
-                    front_contracts[family]["_moex_family"] = family
+                    resolved_family = family
+                    if request_root != family and str(request_root).upper() == raw_root:
+                        secid_root = self._root(row.get("secid") or row.get("ticker"))
+                        if secid_root:
+                            resolved_family = family
+                    front_contracts.setdefault(resolved_family, dict(row))
+                    front_contracts[resolved_family]["_moex_family"] = resolved_family
         candidates = []
         skipped = 0
         oi_available = 0
