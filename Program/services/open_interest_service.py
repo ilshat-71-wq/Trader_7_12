@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, timedelta
 from statistics import mean, pstdev
 from urllib.parse import quote, urlencode
@@ -13,7 +14,7 @@ class OpenInterestService:
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
     FUTURES_MARKETDATA_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities"
     FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"
-    VERSION = "1.4.1"
+    VERSION = "1.4.2"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
@@ -107,9 +108,6 @@ class OpenInterestService:
             return ""
         if "-" in secid:
             return secid.split("-", 1)[0]
-        # Standard MOEX quarterly code: FAMILY + month letter + year digit,
-        # e.g. ALU6, ALZ6, SiM7, MXU6, NAU6. This generic rule also covers
-        # families that are not in our static reverse map.
         if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():
             return secid[:-2]
         prefixes = {str(value).upper() for value in cls.MOEX_PREFIX_BY_ROOT.values()}
@@ -120,7 +118,11 @@ class OpenInterestService:
 
     @classmethod
     def _marketdata_expiry(cls, secid, as_of=None):
-        """Parse RFUD SECID expiry; perpetual/daily contracts have no expiry."""
+        """Parse RFUD SECID expiry as the end of its contract month.
+
+        Exact last-trading-day rules differ by contract. Month-end is used only
+        for the active/non-expired filter; front ordering is still by year/month.
+        """
         secid = str(secid or "").strip().upper()
         if not secid:
             return date.max
@@ -130,11 +132,13 @@ class OpenInterestService:
                 month_s, year_s = tail.split(".", 1)
                 if month_s.isdigit() and year_s.isdigit():
                     try:
-                        return date(2000 + int(year_s), int(month_s), 1)
+                        year, month = 2000 + int(year_s), int(month_s)
+                        return date(year, month, calendar.monthrange(year, month)[1])
                     except ValueError:
                         pass
         if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():
-            return date(2000 + int(secid[-1]), cls.MONTH_CODES[secid[-2]], 1)
+            year, month = 2000 + int(secid[-1]), cls.MONTH_CODES[secid[-2]]
+            return date(year, month, calendar.monthrange(year, month)[1])
         return date.max
 
     @classmethod
