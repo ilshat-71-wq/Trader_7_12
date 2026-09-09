@@ -256,18 +256,26 @@ Futures/OI — отдельный контекстный слой.
 Источник OI:
 
 ```text
-MOEX ISS → /iss/analyticalproducts/futoi/securities
+MOEX ISS → /iss/engines/futures/markets/forts/boards/RFUD/securities
 ```
 
-MOEX FUTOI использует короткий код инструмента для обычных фьючерсов; полный BCS security/underlying ticker нельзя автоматически считать OI root. Поэтому mapping выполняется в порядке приоритета:
+Первичный OI в production-сканере берётся из MOEX RFUD marketdata по реальному `SECID`; FUTOI остаётся дополнительным participant-structure слоем, когда доступен. Это исключает зависимость основного OI-сканера от платного FUTOI.
+
+Для обычных квартальных контрактов семейство строится из SECID (`ALU6 → AL`, `ALZ6 → AL`, `SiM7 → SI`). Expiry для компактного кода интерпретируется как конец контрактного месяца и используется только для active/non-expired фильтра и front ordering.
+
+### Front-contract policy
+
+Для каждого MOEX family выбирается ровно один:
 
 ```text
-1. явный shortCode / futuresShortCode из BCS metadata
-2. каноническое соответствие underlying asset → MOEX short futures code
-3. безопасный ticker-root fallback только если он уже совпадает с известным MOEX OI root
+ACTIVE
+→ NON-EXPIRED
+→ OI > 0
+→ NEAREST EXPIRY
+→ FRONT
 ```
 
-Для вечных фьючерсов, у которых MOEX использует отдельный код (`APPF`, `AMDF`, `SBERF` и т.п.), root сохраняется отдельно и не смешивается с обычным двухсимвольным контрактом.
+Таким образом `ALU6`, `ALZ6`, `ALM7` не становятся тремя независимыми «root»; root = `AL`, а контракт = конкретный `SECID`.
 
 OI рассчитывает/показывает:
 
@@ -281,9 +289,50 @@ Price + OI regime
 Volume confirmation
 ```
 
-Агрегация client-group строк FUTOI использует обе стороны открытого интереса: при наличии `POS_LONG` и `POS_SHORT` берётся среднее gross-long/gross-short; `POS` используется как fallback. Это не допускает систематического завышения OI одной стороной.
+Режимы:
 
-OI не создаёт SPOT-кандидата самостоятельно и не является торговым исполнителем.
+```text
+↑ price + ↑ OI → NEW_POSITION_BUILDING_UP
+↑ price + ↓ OI → SHORT_COVERING
+↓ price + ↑ OI → NEW_POSITION_BUILDING_DOWN
+↓ price + ↓ OI → LONG_LIQUIDATION
+```
+
+### Futures liquidity policy
+
+Ранжирование Liquidity TOP20 использует только биржевой денежный оборот текущей сессии `VALTODAY` из MOEX RFUD marketdata.
+
+```text
+VALTODAY → SESSION ₽×V
+```
+
+Запрещены для этого ранжирования:
+
+```text
+PRICE × VOLUME
+неопределённое поле VALUE
+синтетический оборот
+```
+
+Если `VALTODAY` отсутствует/нулевой, контракт не получает статус liquidity-available и не подменяет оборот синтетическим расчётом.
+
+### Futures base-change enrichment
+
+`BASE Δ%` должен браться из реального BCS quote underlying. Приоритет:
+
+```text
+1. прямое changePercent / lastChangePercent поле BCS
+2. LAST / OPEN
+3. LAST / PREVIOUS
+```
+
+Если ни один источник недоступен, показывается `—`, а diagnostics увеличивает `base_change_missing`; отсутствие данных не заменяется изменением самого фьючерса.
+
+### Economic-overlap policy
+
+Экономически близкие инструменты (`SI`/FX, `CR`/CNY, `GD`/`GL`, `MX`/`MM` и т.п.) не удаляются только по названию. Они считаются отдельными продуктами до тех пор, пока metadata/specification не подтверждает, что это дубликаты одного и того же контракта. В Liquidity TOP приоритет определяется фактическим `VALTODAY`, а не ручным «проталкиванием» ожидаемых тикеров.
+
+BR, RI, MX, SI, золото, нефть, газ и валютные продукты не обязаны присутствовать в TOP20 при каждом сканировании: их место определяется реальным текущим оборотом и OI. Полный universe при этом не теряется — TOP20 является только представлением ликвиднейших front-контрактов.
 
 ### Futures metadata policy
 
@@ -291,8 +340,8 @@ OI не создаёт SPOT-кандидата самостоятельно и �
 - `classCode_fallback` диагностируется отдельно и не маскируется под metadata availability.
 - Истечение контракта фильтруется только при наличии распознанной даты expiry.
 - Если источник metadata не предоставляет expiry, контракт не объявляется истёкшим искусственно; состояние должно оставаться видимым в diagnostics.
-- Выбирается front non-expired contract на каждый MOEX OI root; OI остаётся root-level контекстом.
-- Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records` и `expiry_available`.
+- Выбирается front non-expired contract на каждый MOEX family; OI остаётся отдельным contract/family context.
+- Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records`, `expiry_available`, `base_change_available` и `base_change_missing`.
 
 ## 17. Read-only boundary
 
@@ -322,7 +371,10 @@ NO PORTFOLIO MANAGEMENT
 10. M5/flow/acceleration участвуют в ranking и diagnostics.
 11. 2–3 качественных кандидата являются целевым минимумом при наличии возможностей, но не искусственным лимитом.
 12. При недостатке данных система показывает диагностику и WATCH_ONLY, а не выдумывает сигнал.
-13. Futures OI mapping использует корректные MOEX short roots и отдельно учитывает perpetual futures.
-14. Futures OI проходит реальную проверку BCS metadata → quotes → MOEX ISS OI.
-15. Полный regression suite и macOS build должны быть зелёными.
-16. macOS build обязан проходить compile + regression tests до упаковки приложения.
+13. Futures OI mapping использует корректные MOEX family/SECID и отдельно учитывает perpetual futures.
+14. Futures OI passes real MOEX RFUD marketdata → OI → front-contract selection.
+15. `SESSION ₽×V` подтверждён как exchange-supplied `VALTODAY`, без synthetic price×volume.
+16. `BASE Δ%` имеет проверяемый источник и не маскирует отсутствие данных.
+17. Front selection проверен на нескольких контрактных месяцах одной family.
+18. Full regression suite и macOS build должны быть зелёными.
+19. macOS build обязан проходить compile + regression tests до упаковки приложения.
