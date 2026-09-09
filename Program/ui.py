@@ -39,7 +39,8 @@ def _money(value):
 
 
 class MeltingClocksWidget(QWidget):
-    """Animated scan-state visual."""
+    """Animated scan-state visual; replaced by PremiumScanVisual by main.py."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.phase = 0.0
@@ -123,18 +124,19 @@ class TraderWindow(QWidget):
         self.scanner = MarketAttentionScannerService() if scanner_enabled else None
         self.scanner_enabled = scanner_enabled; self.scan_thread = None; self.scan_worker = None
         self.session_service = MarketSessionService(); self.animation_step = 0
+        self._last_diagnostics = None
         self.clock_timer = QTimer(self); self.clock_timer.timeout.connect(self._update_session_header)
         self.scan_animation_timer = QTimer(self); self.scan_animation_timer.timeout.connect(self._animate_scan)
         self.init_ui(); self.clock_timer.start(1000); self._update_session_header()
 
     def init_ui(self):
-        self.setStyleSheet("""QWidget { background:#20252b; color:#e6e9ed; font-family:'Helvetica Neue',Arial,sans-serif; } QLabel { color:#e6e9ed; } QPushButton { background:#30373f; color:#f0f2f4; border:1px solid #46505a; border-radius:8px; padding:10px 18px; } QPushButton:hover { background:#38414a; } QPushButton:disabled { background:#30372e; border:1px solid #59634a; } QTextEdit { background:#171b20; color:#dfe3e7; border:1px solid #394149; border-radius:8px; padding:14px; }""")
+        self.setStyleSheet("""QWidget { background:#20252b; color:#e6e9ed; font-family:'Helvetica Neue',Arial,sans-serif; } QLabel { color:#e6e9ed; } QPushButton { background:#30373f; color:#f0f2f4; border:1px solid #46505a; border-radius:8px; padding:10px 18px; } QPushButton:hover { background:#38414a; } QPushButton:disabled { background:#30372e; border:1px solid #59634a; } QTextEdit { background:#171b20; color:#dfe3e7; border:1px solid #394149; border-radius:8px; padding:9px 12px; }""")
         self.title = QLabel("TRADER_7_12 PRO"); self.title.setAlignment(Qt.AlignCenter); self.title.setStyleSheet("font-size:29px;font-weight:800;letter-spacing:1px;padding:8px")
-        self.subtitle = QLabel("D1 • MARKET MAP • OPPORTUNITY RADAR • MONEY FLOW • RS • FUTURES OI • READ-ONLY"); self.subtitle.setAlignment(Qt.AlignCenter); self.subtitle.setStyleSheet("font-size:13px;color:#89939d;padding:1px")
-        self.session_label = QLabel(); self.session_label.setAlignment(Qt.AlignCenter); self.session_label.setStyleSheet("font-size:20px;font-weight:700;color:#cbd1d7;padding:4px")
-        self.clock_label = QLabel(); self.clock_label.setAlignment(Qt.AlignCenter); self.clock_label.setStyleSheet("font-size:14px;color:#9fa8b1;padding-bottom:4px")
+        self.subtitle = QLabel("D1 • MARKET MAP • MONEY FLOW • RS • FUTURES OI • READ-ONLY"); self.subtitle.setAlignment(Qt.AlignCenter); self.subtitle.setStyleSheet("font-size:13px;color:#89939d;padding:1px")
+        self.session_label = QLabel(); self.session_label.setAlignment(Qt.AlignCenter); self.session_label.hide()
+        self.clock_label = QLabel(); self.clock_label.setAlignment(Qt.AlignCenter); self.clock_label.hide()
         self.scan_button = QPushButton("●  СКАНИРОВАТЬ РЫНОК"); self.scan_button.setMinimumHeight(54); self.scan_button.clicked.connect(self.run_market_scan); self._set_scan_button_style()
-        self.result_box = QTextEdit(); self.result_box.setReadOnly(True); self.result_box.setStyleSheet("font-size:14px")
+        self.result_box = QTextEdit(); self.result_box.setReadOnly(True); self.result_box.setFixedHeight(82); self.result_box.setStyleSheet("font-size:13px;font-weight:600")
         self.result_table = MarketTableWidget(
             ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "RS", "₽/min", "Session", "15m", "Accel", "Score"],
             [42, 76, 118, 88, 68, 72, 82, 72, 92, 108, 92, 72, 68],
@@ -143,11 +145,14 @@ class TraderWindow(QWidget):
         result_layout.addWidget(self.result_box); result_layout.addWidget(self.result_table)
         self.result_table.hide()
         self.scan_visual = MeltingClocksWidget(); self.result_stack = QStackedWidget(); self.result_stack.addWidget(self.result_panel); self.result_stack.addWidget(self.scan_visual); self.result_stack.setCurrentWidget(self.result_panel)
-        self.result_box.setText("БКС ПОДКЛЮЧЁН\n\nНажмите «СКАНИРОВАТЬ РЫНОК».\nБудет проанализирован максимально полный доступный SPOT universe, а не только 2–3 инструмента.") if self.scanner_enabled else self.result_box.setText("РЕЖИМ ПРОСМОТРА\n\nБКС временно недоступен.")
         self.scan_button.setEnabled(self.scanner_enabled)
-        layout = QVBoxLayout(); layout.setContentsMargins(18, 14, 18, 18); layout.setSpacing(6)
-        for widget in (self.title, self.subtitle, self.session_label, self.clock_label, self.scan_button, self.result_stack): layout.addWidget(widget)
+        layout = QVBoxLayout(); layout.setContentsMargins(18, 10, 18, 18); layout.setSpacing(6)
+        for widget in (self.title, self.subtitle, self.scan_button, self.result_stack): layout.addWidget(widget)
         self.setLayout(layout)
+        if self.scanner_enabled:
+            self.result_box.setPlainText("БКС ПОДКЛЮЧЁН • Нажмите «СКАНИРОВАТЬ РЫНОК».")
+        else:
+            self.result_box.setPlainText("РЕЖИМ ПРОСМОТРА • БКС временно недоступен.")
 
     def _set_scan_button_style(self, color=NEUTRAL_COLOR):
         self.scan_button.setStyleSheet(f"font-size:18px;font-weight:700;color:{color};background:#30373f;border:1px solid #46505a;border-radius:8px;padding:10px 18px")
@@ -156,6 +161,8 @@ class TraderWindow(QWidget):
         info = self.session_service.get_session_info(); session = info.get("session", "CLOSED")
         self.session_label.setText(SESSION_LABELS.get(session, session)); state = "РЫНОК ОТКРЫТ" if info.get("market_open") else "РЫНОК ЗАКРЫТ"
         self.clock_label.setText(f"{info.get('date','—')} • МСК {info.get('time','—')} • {state}")
+        if self._last_diagnostics is None and self.result_table.isHidden():
+            self.result_box.setPlainText(f"{SESSION_LABELS.get(session, session)} • {info.get('date','—')} • МСК {info.get('time','—')} • {state}")
 
     def _animate_scan(self):
         self.animation_step = (self.animation_step + 1) % len(SCAN_COLORS); self.scan_button.setText("●  ИДЁТ АНАЛИЗ D1 + M5 + RS"); self._set_scan_button_style(SCAN_COLORS[self.animation_step])
@@ -174,17 +181,13 @@ class TraderWindow(QWidget):
         except Exception as exc: self._scan_failed(f"{type(exc).__name__}: {exc}")
 
     def _scan_finished(self, results, diagnostics):
-        self.scan_button.setEnabled(True); self._stop_scan_animation(); info = self.session_service.get_session_info(); session_name = SESSION_LABELS.get(info.get("session", "CLOSED"), "РЫНОК")
+        self.scan_button.setEnabled(True); self._stop_scan_animation(); self._last_diagnostics = diagnostics or {}
+        info = self.session_service.get_session_info(); session_name = SESSION_LABELS.get(info.get("session", "CLOSED"), "РЫНОК")
         benchmark = str(diagnostics.get("benchmark") or "—")
-        meta = [
-            f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
-            f"СТАТУС: {diagnostics.get('status') or '—'} • BENCHMARK: {benchmark}",
-            f"UNIVERSE: {diagnostics.get('universe_total', 0)} • АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} • ПОКРЫТИЕ: {_number(diagnostics.get('coverage_percent'), 1)}%",
-            f"D1: {diagnostics.get('daily_benchmark_days', 0)} свечей • D1 QUALIFIED: {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY PASS: {diagnostics.get('liquidity_passed', 0)} • DIRECTIONAL QUALIFIED: {diagnostics.get('directional_qualified', 0)}",
-            f"STRICT RADAR: {diagnostics.get('strict_selected', 0)} • WATCH-ONLY: {diagnostics.get('watch_selected', 0)}",
-            "RADAR: TOP OBJECTIVE OPPORTUNITIES (не торговая рекомендация)",
-        ]
-        self.result_box.setPlainText("\n".join(meta))
+        line1 = f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}"
+        line2 = f"{diagnostics.get('status') or '—'} • {benchmark} • UNIVERSE {diagnostics.get('universe_total', 0)} • COVERAGE {_number(diagnostics.get('coverage_percent'), 1)}%"
+        line3 = f"D1 {_number(diagnostics.get('daily_benchmark_days'), 0)} • QUALIFIED {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY {diagnostics.get('liquidity_passed', 0)} • STRICT {diagnostics.get('strict_selected', 0)} • WATCH {diagnostics.get('watch_selected', 0)}"
+        self.result_box.setPlainText("\n".join((line1, line2, line3)))
         rows = []
         for idx, item in enumerate(results or [], 1):
             role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "WATCH")
@@ -203,10 +206,10 @@ class TraderWindow(QWidget):
                 numeric(_number(item.get("directional_score"), 1)),
             ])
         self.result_table.set_rows(rows)
-        self.result_table.setToolTip("Расчёты, ranking и порядок результатов не изменены. Таблица — только новый способ представления данных.")
+        self.result_table.setToolTip("Расчёты, qualification, ranking и порядок результатов не изменены. Таблица — только представление данных.")
         self.result_table.setVisible(bool(rows))
         if not rows:
-            self.result_box.setPlainText("\n".join(meta + ["", "Нет квалифицированных результатов.", f"Причины пропуска: {diagnostics.get('skip_reasons') or '—'}"]))
+            self.result_box.setPlainText("\n".join((line1, line2, line3, "", "Нет квалифицированных результатов.", f"Причины пропуска: {diagnostics.get('skip_reasons') or '—'}")))
 
     def _scan_failed(self, error):
         self.scan_button.setEnabled(True); self._stop_scan_animation(); self.result_table.hide(); self.result_box.setText(f"ОШИБКА СКАНИРОВАНИЯ\n\n{error}")
