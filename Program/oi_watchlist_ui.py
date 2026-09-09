@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QTextEdit
 
 from ui import TraderWindow
-from services.futures_oi_scanner_service import FuturesOIScannerService
+from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.market_information_scanner_service import MarketInformationScannerService
 
 
@@ -29,7 +29,7 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """The single Trader_7_12 Pro window: SPOT radar + visible futures/OI context."""
 
-    VERSION = "2.4.2"
+    VERSION = "2.5.0"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -66,7 +66,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             return
         self.oi_box.setText("FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS\n\nИдёт загрузка фьючерсной кривой и MOEX OI…")
         self.oi_thread = QThread(self)
-        self.oi_worker = FuturesOIWorker(FuturesOIScannerService())
+        self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
         self.oi_worker.moveToThread(self.oi_thread)
         self.oi_thread.started.connect(self.oi_worker.run)
         self.oi_worker.finished.connect(self._oi_finished)
