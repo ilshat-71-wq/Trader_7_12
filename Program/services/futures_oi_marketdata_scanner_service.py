@@ -7,12 +7,18 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-session liquidity TOP."""
 
-    VERSION = "2.7.0"
+    VERSION = "2.7.1"
     LIQUIDITY_TOP_LIMIT = 20
 
     @staticmethod
     def _family_to_underlying(family):
         family = str(family or "").upper()
+        explicit = {
+            "SBRF": "SBER",
+            "SR": "SBER",
+        }
+        if family in explicit:
+            return explicit[family]
         reverse = {}
         for root, prefix in FuturesOIScannerService.__dict__.get("MOEX_SHORT_CODE_BY_UNDERLYING", {}).items():
             reverse.setdefault(str(prefix).upper(), str(root).upper())
@@ -53,7 +59,19 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
         bcs_contracts = self._active_contracts()
         underlying_quotes = self._underlying_quotes(bcs_contracts)
-        front_contracts = self.oi.marketdata_front_contracts(as_of=as_of)
+        if hasattr(self.oi, "marketdata_front_contracts"):
+            front_contracts = self.oi.marketdata_front_contracts(as_of=as_of)
+        else:
+            # Compatibility for test/dummy OI adapters predating the family API.
+            front_contracts = {}
+            for contract in bcs_contracts:
+                family = str(contract.get("oi_root") or "").upper()
+                if not family:
+                    continue
+                row = self.oi._request_marketdata_family(family)
+                if row and self.oi._number(row.get("openposition")) > 0:
+                    front_contracts.setdefault(family, dict(row))
+                    front_contracts[family]["_moex_family"] = family
         candidates = []
         skipped = 0
         oi_available = 0
