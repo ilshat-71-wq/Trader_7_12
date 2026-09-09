@@ -6,9 +6,9 @@ from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataSc
 
 def test_marketdata_family_and_expiry_parse_quarterly_contracts():
     assert OpenInterestService._marketdata_family("ALU6") == "AL"
-    assert OpenInterestService._marketdata_expiry("ALU6") == date(2026, 9, 1)
+    assert OpenInterestService._marketdata_expiry("ALU6") == date(2026, 9, 30)
     assert OpenInterestService._marketdata_family("ALZ6") == "AL"
-    assert OpenInterestService._marketdata_expiry("ALZ6") == date(2026, 12, 1)
+    assert OpenInterestService._marketdata_expiry("ALZ6") == date(2026, 12, 31)
     assert OpenInterestService._marketdata_family("NAU6") == "NA"
     assert OpenInterestService._marketdata_family("SiM7") == "SI"
 
