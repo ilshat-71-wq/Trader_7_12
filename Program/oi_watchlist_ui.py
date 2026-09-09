@@ -27,9 +27,9 @@ class FuturesOIWorker(QObject):
 
 
 class OIWatchlistTraderWindow(TraderWindow):
-    """The single Trader_7_12 Pro window: SPOT radar + visible futures/OI context."""
+    """The single Trader_7_12 Pro window: SPOT radar + Futures OI Liquidity TOP."""
 
-    VERSION = "2.5.0"
+    VERSION = "2.7.0"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -38,7 +38,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.setWindowTitle("Trader_7_12 Pro — Market Information Radar")
         self.resize(1280, 980)
         self.setMinimumSize(1120, 900)
-        self.subtitle.setText("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • FUTURES OI • READ-ONLY")
+        self.subtitle.setText("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • FUTURES OI LIQUIDITY TOP • READ-ONLY")
 
         self.oi_box = QTextEdit()
         self.oi_box.setReadOnly(True)
@@ -50,9 +50,10 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.oi_thread = None
         self.oi_worker = None
         self.oi_box.setText(
-            "FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS\n\n"
-            "Единое окно Trader_7_12 Pro. После сканирования SPOT здесь автоматически\n"
-            "появятся фьючерс → базовый актив → FUT Δ → BASE Δ → OI → ΔOI → Z-score → режим."
+            "FUTURES OI — LIQUIDITY TOP 20\n\n"
+            "После сканирования SPOT здесь автоматически появятся только\n"
+            "наиболее ликвидные front-контракты, где есть реальные деньги\n"
+            "в текущей торговой сессии: FUT Δ → BASE Δ → OI → ΔOI → Оборот ₽ → режим."
             if scanner_enabled else "FUTURES OI\n\nBCS временно недоступен."
         )
 
@@ -64,7 +65,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_box.setText("FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS\n\nИдёт загрузка фьючерсной кривой и MOEX OI…")
+        self.oi_box.setText("FUTURES OI — LIQUIDITY TOP 20\n\nИдёт загрузка front-контрактов, MOEX OI и текущего оборота…")
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
         self.oi_worker.moveToThread(self.oi_thread)
@@ -90,47 +91,63 @@ class OIWatchlistTraderWindow(TraderWindow):
         except (TypeError, ValueError):
             return "—"
 
+    @staticmethod
+    def _money(value):
+        try:
+            value = float(value)
+            if value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.2f} млрд"
+            if value >= 1_000_000:
+                return f"{value / 1_000_000:.2f} млн"
+            if value >= 1_000:
+                return f"{value / 1_000:.1f} тыс"
+            return f"{value:.0f}"
+        except (TypeError, ValueError):
+            return "—"
+
     def _oi_finished(self, results, diagnostics):
         lines = [
-            "FUTURES OI — ВСЕ ДОСТУПНЫЕ ROOTS",
-            "═" * 118,
+            "FUTURES OI — LIQUIDITY TOP 20",
+            "═" * 128,
             f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • "
-            f"КОНТРАКТЫ АНАЛИЗА: {diagnostics.get('analyzed', 0)} • "
+            f"TOP: {diagnostics.get('liquidity_top_returned', len(results))} • "
             f"OI AVAILABLE: {diagnostics.get('oi_available', 0)} • "
+            f"LIQUIDITY WITH MONEY: {diagnostics.get('liquidity_available', 0)} • "
             f"ИСТОЧНИК OI: {escape(str(diagnostics.get('oi_source') or '—'))}",
-            f"КОНТРАКТОВ: {diagnostics.get('active_contracts', 0)} • ROOTS: {diagnostics.get('active_roots', 0)} • "
-            f"QUOTE: {diagnostics.get('quote_records', 0)} • METADATA: {diagnostics.get('metadata_lookup_records', 0)}",
-            f"MAPPING: {escape(str(diagnostics.get('mapping') or '—'))} • "
-            f"OI ROOT MAPPED: {diagnostics.get('oi_root_mapping', 0)} • "
-            f"EXPIRY: {diagnostics.get('expiry_available', 0)}",
+            f"FRONT FAMILIES: {diagnostics.get('contracts', 0)} • FULL OI ANALYSIS: {diagnostics.get('analyzed', 0)} • "
+            f"TURNOVER SOURCE: {escape(str(diagnostics.get('liquidity_metric') or '—'))}",
             "",
-            "ROOT / КОНТРАКТ          БАЗОВЫЙ АКТИВ       FUT Δ%    BASE Δ%       OI        ΔOI%   Z     РЕЖИМ",
-            "─" * 118,
+            "#  ROOT     CONTRACT           BASE         FUT Δ%    BASE Δ%        OI       ΔOI%    SESSION ₽×V       MODE",
+            "─" * 128,
         ]
         if not results:
-            lines.append("Нет доступных фьючерсных данных. Это не означает отсутствия торгов.")
+            lines.append("Нет ликвидных front-контрактов с текущим денежным оборотом.")
         else:
             for item in results:
                 oi = item.get("oi_analysis") or {}
+                rank = int(item.get("liquidity_rank") or 0)
                 root = str(item.get("oi_root") or item.get("futures_root") or "—")
                 contract = str(item.get("futures_ticker") or "—")
                 base = str(item.get("underlying_asset") or "—")
+                turnover = item.get("session_turnover_rub")
                 lines.append(
-                    f"{root:<8} / {contract:<17} {base:<18} "
+                    f"{rank:>2}  {root:<8} {contract:<18} {base:<10} "
                     f"{self._signed(item.get('change_percent'), 2):>8} "
                     f"{self._signed(item.get('underlying_change_percent'), 2):>9} "
                     f"{self._fmt(oi.get('oi'), 0):>11} "
                     f"{self._signed(oi.get('oi_change_percent'), 2):>8} "
-                    f"{self._fmt(oi.get('oi_zscore'), 2):>5}  {oi.get('oi_regime', '—')}"
+                    f"{self._money(turnover):>15}  {oi.get('oi_regime', '—')}"
                 )
                 lines.append(
-                    f"    → mapping={base} | alignment={item.get('direction_alignment', '—')} | "
-                    f"curve={item.get('curve_role', '—')} | OI strength={oi.get('oi_strength', '—')}"
+                    f"    → liquidity #{rank} | money={self._money(turnover)} ₽ | "
+                    f"OI strength={oi.get('oi_strength', '—')} | alignment={item.get('direction_alignment', '—')} | FRONT"
                 )
         lines += [
             "",
-            "РЕЖИМЫ OI: ↑цена+↑OI = набор вверх | ↑цена+↓OI = short covering | "
-            "↓цена+↑OI = набор вниз | ↓цена+↓OI = long liquidation",
+            "LIQUIDITY TOP = front-контракты с OI>0, отсортированные по реальному денежному обороту текущей сессии.",
+            "Синтетический PRICE × VOLUME для ранжирования не используется.",
+            "OI: ↑цена+↑OI = набор вверх | ↑цена+↓OI = short covering | ↓цена+↑OI = набор вниз | ↓цена+↓OI = long liquidation.",
+            "Остальной futures universe не потерян из источника: в основной таблице показывается только TOP ликвидности, чтобы убрать шум.",
             "OI — подтверждающий/контекстный слой. BUY/SELL и исполнение отсутствуют.",
         ]
         self.oi_box.setPlainText("\n".join(lines))
