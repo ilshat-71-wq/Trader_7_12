@@ -69,7 +69,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 if not family:
                     continue
                 row = self.oi._request_marketdata_family(family)
-                if row and self.oi._number(row.get("openposition")) > 0:
+                if row and self._float(row, "openposition", "oi", "openInterest") not in (None, 0) and self._float(row, "openposition", "oi", "openInterest") > 0:
                     front_contracts.setdefault(family, dict(row))
                     front_contracts[family]["_moex_family"] = family
         candidates = []
