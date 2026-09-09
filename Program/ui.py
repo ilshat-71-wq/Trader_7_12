@@ -163,24 +163,23 @@ class TraderWindow(QWidget):
         if not self.scanner_enabled or (self.scan_thread is not None and self.scan_thread.isRunning()): return
         self.scan_button.setEnabled(False); self._start_scan_animation()
         try:
-            self.scan_thread = QThread(self); self.scan_worker = MarketScanWorker(self.scanner, limit=self.RADAR_LIMIT); self.scan_worker.moveToThread(self.scan_thread)
-            self.scan_thread.started.connect(self.scan_worker.run); self.scan_worker.finished.connect(self._scan_finished); self.scan_worker.failed.connect(self._scan_failed)
-            self.scan_worker.finished.connect(self.scan_thread.quit); self.scan_worker.failed.connect(self.scan_thread.quit); self.scan_thread.finished.connect(self._scan_thread_finished); self.scan_thread.start()
+            self.scan_thread = QThread(self); self.scan_worker = MarketScanWorker(self.scanner, limit=self.RADAR_LIMIT); self.scan_worker.moveToThread(self.scan_thread); self.scan_thread.started.connect(self.scan_worker.run); self.scan_worker.finished.connect(self._scan_finished); self.scan_worker.failed.connect(self._scan_failed); self.scan_worker.finished.connect(self.scan_thread.quit); self.scan_worker.failed.connect(self.scan_thread.quit); self.scan_thread.finished.connect(self._scan_thread_finished); self.scan_thread.start()
         except Exception as exc: self._scan_failed(f"{type(exc).__name__}: {exc}")
 
     def _scan_finished(self, results, diagnostics):
         self.scan_button.setEnabled(True); self._stop_scan_animation(); info = self.session_service.get_session_info(); session_name = SESSION_LABELS.get(info.get("session", "CLOSED"), "РЫНОК")
-        lines = ["<pre style='font-family:Menlo,Monaco,monospace;font-size:13px;color:#dfe3e7'>", "═" * 112,
-                 "TRADER_7_12 PRO — MARKET MAP + OPPORTUNITY RADAR", "═" * 112, "",
+        benchmark = escape(str(diagnostics.get("benchmark") or "—"))
+        lines = ["<pre style='font-family:Menlo,Monaco,monospace;font-size:12px;color:#dfe3e7'>", "═" * 128,
+                 "TRADER_7_12 PRO — MARKET MAP + OPPORTUNITY RADAR", "═" * 128, "",
                  f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
-                 f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • BENCHMARK: {escape(str(diagnostics.get('benchmark') or '—'))}",
+                 f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • BENCHMARK: {benchmark}",
                  f"UNIVERSE: {diagnostics.get('universe_total', 0)} • АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} • ПОКРЫТИЕ: {_number(diagnostics.get('coverage_percent'), 1)}%",
                  f"D1: {diagnostics.get('daily_benchmark_days', 0)} свечей • D1 QUALIFIED: {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY PASS: {diagnostics.get('liquidity_passed', 0)} • DIRECTIONAL QUALIFIED: {diagnostics.get('directional_qualified', 0)}",
                  f"STRICT RADAR: {diagnostics.get('strict_selected', 0)} • WATCH-ONLY: {diagnostics.get('watch_selected', 0)}",
                  "", "RADAR: TOP OBJECTIVE OPPORTUNITIES (не торговая рекомендация)",
-                 "─" * 112,
-                 "#  TICKER    ROLE             D1             D1-RS     RS       Δ%      ₽/мин       15m ₽×V   ACCEL     SCORE",
-                 "─" * 112]
+                 "─" * 128,
+                 "#  TICKER    ROLE             D1          D1-RS    IDX Δ%    PRICE Δ%   RS vs IDX    ₽/мин       SESSION ₽×V      15m ₽×V     ACCEL    SCORE",
+                 "─" * 128]
         if not results:
             lines += ["Нет квалифицированных результатов.", "", f"Причины пропуска: {escape(str(diagnostics.get('skip_reasons') or '—'))}"]
         else:
@@ -191,14 +190,18 @@ class TraderWindow(QWidget):
                 d1 = str(item.get("daily_structure") or "NEUTRAL")[:10]
                 lines.append(
                     f"{idx:>2}  {str(item.get('spot_ticker') or '—'):<8} {role:<16} {d1:<10} "
-                    f"{_number(item.get('daily_relative_mean_pp'), 2):>7}  {_number(item.get('relative_strength'), 2):>7} "
-                    f"{_number(item.get('change_percent'), 2):>7}  {_money(item.get('money_per_minute')):>12} "
-                    f"{_money(item.get('recent_money')):>12}  {_number(item.get('money_acceleration'), 1):>7}%  {_number(item.get('directional_score'), 1):>6}"
+                    f"{_number(item.get('daily_relative_mean_pp'), 2):>7}  {_number(item.get('benchmark_change_percent'), 2):>8} "
+                    f"{_number(item.get('change_percent'), 2):>9}  {_number(item.get('relative_strength'), 2):>10} "
+                    f"{_money(item.get('money_per_minute')):>12}  {_money(item.get('session_money')):>15} "
+                    f"{_money(item.get('recent_money')):>13}  {_number(item.get('money_acceleration'), 1):>7}%  {_number(item.get('directional_score'), 1):>6}"
                 )
-        lines += ["", "DETAIL: QUALIFIED = D1 + дневной RS + текущий RS + абсолютная ликвидность + flow.",
+        lines += ["", f"IDX Δ% = изменение {benchmark}; PRICE Δ% = изменение инструмента; RS vs IDX = PRICE Δ% − IDX Δ%.",
+                   "SESSION ₽×V = накопленный реальный оборот с начала текущей торговой сессии до момента сканирования.",
+                   "₽/мин = средняя скорость оборота за текущую сессию; 15m ₽×V = оборот последних 15 минут; ACCEL = ускорение потока.",
+                   "DETAIL: QUALIFIED = D1 + дневной RS + текущий RS + абсолютная ликвидность + flow.",
                    "WATCH-ONLY = объективный текущий интерес при недостаточной полноте строгой квалификации; это не торговый сигнал.",
                    f"SKIP REASONS: {escape(str(diagnostics.get('skip_reasons') or 'нет'))}",
-                   "READ-ONLY: программа показывает рыночные данные и классификации; BUY/SELL и исполнение отсутствуют.", "═" * 112, "</pre>"]
+                   "READ-ONLY: программа показывает рыночные данные и классификации; BUY/SELL и исполнение отсутствуют.", "═" * 128, "</pre>"]
         self.result_box.setHtml("\n".join(lines))
 
     def _scan_failed(self, error):
