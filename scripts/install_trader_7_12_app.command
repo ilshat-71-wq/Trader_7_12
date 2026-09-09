@@ -7,6 +7,9 @@ CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 KEYCHAIN_SERVICE="Trader_7_12 BCS Refresh Token"
+APP_VERSION="2.4.3"
+BUILD_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+APP_BUNDLE_IDENTIFIER="com.ilshat.trader712pro"
 
 # Keep the BCS refresh token outside Git and outside the app bundle.
 # Prefer the current shell environment, then the existing local credential file.
@@ -213,7 +216,7 @@ fi
 iconutil -c icns "$ICONSET" -o "$ICNS"
 rm -rf "$ICONSET"
 
-cat > "$CONTENTS/Info.plist" <<'PLIST'
+cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -227,15 +230,17 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 	<key>CFBundleIconFile</key>
 	<string>Trader_7_12_Pro.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.trader712.pro</string>
+	<string>${APP_BUNDLE_IDENTIFIER}</string>
 	<key>CFBundleName</key>
 	<string>Trader_7_12 Pro</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4</string>
+	<string>${APP_VERSION}</string>
 	<key>CFBundleVersion</key>
-	<string>1.4</string>
+	<string>${APP_VERSION}</string>
+	<key>CFBundleSourceCommit</key>
+	<string>${BUILD_COMMIT}</string>
 	<key>LSUIElement</key>
 	<false/>
 	<key>NSHighResolutionCapable</key>
@@ -251,5 +256,7 @@ touch "$APP"
 echo "Installed: $APP"
 echo "Native macOS launcher: OK"
 echo "Branded one-clock icon: OK"
+echo "App version: $APP_VERSION"
+echo "Source commit: $BUILD_COMMIT"
 echo "BCS credential: stored in macOS Keychain"
 echo "Launch Trader_7_12 Pro from Finder or Dock."
