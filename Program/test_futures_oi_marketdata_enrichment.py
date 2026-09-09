@@ -2,15 +2,15 @@ from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataSc
 
 
 def test_session_turnover_uses_valtoday_only():
-    value, source = FuturesOIMarketDataScannerService._session_turnover({"valtoday": "123456789", "volume": 999999})
-    assert value == 123456789.0
-    assert source == "VALTODAY"
+    marketdata = {"valtoday": "123456789", "volume": 999999}
+    assert FuturesOIMarketDataScannerService._session_turnover(marketdata) == 123456789.0
+    assert FuturesOIMarketDataScannerService._session_turnover_source(marketdata) == "VALTODAY"
 
 
 def test_session_turnover_does_not_fallback_to_synthetic_or_ambiguous_value():
-    value, source = FuturesOIMarketDataScannerService._session_turnover({"value": 123456789, "volume": 1000})
-    assert value == 0.0
-    assert source == "UNAVAILABLE"
+    marketdata = {"value": 123456789, "volume": 1000}
+    assert FuturesOIMarketDataScannerService._session_turnover(marketdata) == 0.0
+    assert FuturesOIMarketDataScannerService._session_turnover_source(marketdata) == "UNAVAILABLE"
 
 
 def test_underlying_change_prefers_direct_bcs_percent():
