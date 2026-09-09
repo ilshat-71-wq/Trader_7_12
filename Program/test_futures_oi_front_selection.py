@@ -5,10 +5,12 @@ from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataSc
 
 
 def test_marketdata_family_and_expiry_parse_quarterly_contracts():
-    assert OpenInterestService._marketdata_family("ALU6") == "ALRS"
+    assert OpenInterestService._marketdata_family("ALU6") == "AL"
     assert OpenInterestService._marketdata_expiry("ALU6") == date(2026, 9, 1)
-    assert OpenInterestService._marketdata_family("ALZ6") == "ALRS"
+    assert OpenInterestService._marketdata_family("ALZ6") == "AL"
     assert OpenInterestService._marketdata_expiry("ALZ6") == date(2026, 12, 1)
+    assert OpenInterestService._marketdata_family("NAU6") == "NA"
+    assert OpenInterestService._marketdata_family("SiM7") == "SI"
 
 
 def test_front_contract_selection_uses_nearest_active_expiry_with_oi():
@@ -20,8 +22,8 @@ def test_front_contract_selection_uses_nearest_active_expiry_with_oi():
         {"secid": "CHZ6", "openposition": 0},
     ]
     selected = OpenInterestService._front_marketdata_rows(rows, as_of=date(2026, 9, 9))
-    assert selected["ALRS"]["secid"] == "ALU6"
-    assert selected["CHMF"]["secid"] == "CHU6"
+    assert selected["AL"]["secid"] == "ALU6"
+    assert selected["CH"]["secid"] == "CHU6"
 
 
 def test_front_selection_does_not_call_every_contract_individually():
@@ -32,7 +34,7 @@ def test_front_selection_does_not_call_every_contract_individually():
         }
     })
     selected = service.marketdata_front_contracts(as_of=date(2026, 9, 9))
-    assert selected["ALRS"]["secid"] == "ALU6"
+    assert selected["AL"]["secid"] == "ALU6"
 
 
 def test_family_to_underlying_uses_moex_prefix_mapping():
