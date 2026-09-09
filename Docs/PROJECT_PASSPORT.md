@@ -4,7 +4,8 @@
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
-**Версия pipeline:** 2.5.0
+**Версия pipeline:** 2.5.0  
+**Futures OI scanner:** 2.7.3
 
 ## 1. Назначение
 
@@ -332,6 +333,8 @@ PRICE × VOLUME
 
 Экономически близкие инструменты (`SI`/FX, `CR`/CNY, `GD`/`GL`, `MX`/`MM` и т.п.) не удаляются только по названию. Они считаются отдельными продуктами до тех пор, пока metadata/specification не подтверждает, что это дубликаты одного и того же контракта. В Liquidity TOP приоритет определяется фактическим `VALTODAY`, а не ручным «проталкиванием» ожидаемых тикеров.
 
+Для контроля без изменения ranking diagnostics сохраняет `liquidity_probe_roots` для BR, SI/USDRUBF, RI, MX/MM, GD/GL, NG/CL, EU и CR/CNY: для каждого реально найденного root фиксируются его место в полном liquidity ranking, front contract, `VALTODAY` и OI. Это позволяет проверить, почему конкретный инструмент оказался или не оказался в TOP20, не подмешивая его искусственно в выдачу.
+
 BR, RI, MX, SI, золото, нефть, газ и валютные продукты не обязаны присутствовать в TOP20 при каждом сканировании: их место определяется реальным текущим оборотом и OI. Полный universe при этом не теряется — TOP20 является только представлением ликвиднейших front-контрактов.
 
 ### Futures metadata policy
@@ -341,7 +344,7 @@ BR, RI, MX, SI, золото, нефть, газ и валютные проду�
 - Истечение контракта фильтруется только при наличии распознанной даты expiry.
 - Если источник metadata не предоставляет expiry, контракт не объявляется истёкшим искусственно; состояние должно оставаться видимым в diagnostics.
 - Выбирается front non-expired contract на каждый MOEX family; OI остаётся отдельным contract/family context.
-- Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records`, `expiry_available`, `base_change_available` и `base_change_missing`.
+- Diagnostics отдельно показывают `oi_root_mapping`, `oi_available`, `active_roots`, `quote_records`, `expiry_available`, `base_change_available`, `base_change_missing`, `liquidity_probe_roots` и `economic_overlap_groups`.
 
 ## 17. Read-only boundary
 
@@ -376,5 +379,7 @@ NO PORTFOLIO MANAGEMENT
 15. `SESSION ₽×V` подтверждён как exchange-supplied `VALTODAY`, без synthetic price×volume.
 16. `BASE Δ%` имеет проверяемый источник и не маскирует отсутствие данных.
 17. Front selection проверен на нескольких контрактных месяцах одной family.
-18. Full regression suite и macOS build должны быть зелёными.
-19. macOS build обязан проходить compile + regression tests до упаковки приложения.
+18. BR/RI/SI/MX/gold/oil/gas diagnostics показывают фактический full-ranking position, если root присутствует в universe.
+19. Economic-overlap groups диагностируются, но не удаляют продукты без подтверждения specification-level duplicate.
+20. Full regression suite и macOS build должны быть зелёными.
+21. macOS build обязан проходить compile + regression tests до упаковки приложения.
