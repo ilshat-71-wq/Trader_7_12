@@ -83,7 +83,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 skipped += 1
                 continue
             last = self._float(marketdata, "last", "lastPrice", "price", "currentPrice")
-            change = self._float(marketdata, "lastchangeprcnt", "lastChangePrcnt", "lastChangePercent")
+            change = self._float(marketdata, "lastchangeprcnt", "lastChangePrcnt", "lastChangePercent", "lasttoprevprice", "lastToPrevPrice")
             if change is None:
                 previous = self._float(marketdata, "prevsettleprice", "prevSettlePrice", "prevprice", "lastSettlPrice")
                 if last is not None and previous and previous > 0:
