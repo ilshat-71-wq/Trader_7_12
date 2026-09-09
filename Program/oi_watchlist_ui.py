@@ -1,11 +1,10 @@
 """Trader_7_12 Pro — single-window OI-enabled dashboard."""
 
-from html import escape
-
 from PySide6.QtCore import QObject, QThread, Signal
-from PySide6.QtWidgets import QTextEdit
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ui import TraderWindow
+from ui_table import MarketTableWidget, numeric
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.market_information_scanner_service import MarketInformationScannerService
 
@@ -40,22 +39,28 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.setMinimumSize(1120, 900)
         self.subtitle.setText("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • FUTURES OI LIQUIDITY TOP • READ-ONLY")
 
-        self.oi_box = QTextEdit()
-        self.oi_box.setReadOnly(True)
-        self.oi_box.setMinimumHeight(340)
-        self.oi_box.setMaximumHeight(420)
-        self.oi_box.setStyleSheet("font-size:13px")
-        self.layout().addWidget(self.oi_box)
+        self.oi_meta = QLabel()
+        self.oi_meta.setWordWrap(True)
+        self.oi_meta.setStyleSheet("background:#171b20;color:#b9c1c8;border:1px solid #394149;border-radius:8px;padding:10px 14px;font-size:12px")
+        self.oi_table = MarketTableWidget(
+            ["#", "Root", "Contract", "Base", "FUT Δ%", "BASE Δ%", "OI", "ΔOI%", "Session ₽", "Mode"],
+            [42, 68, 122, 76, 78, 82, 110, 78, 104, 190],
+        )
+        self.oi_panel = QWidget()
+        oi_layout = QVBoxLayout(self.oi_panel)
+        oi_layout.setContentsMargins(0, 0, 0, 0)
+        oi_layout.setSpacing(6)
+        oi_layout.addWidget(self.oi_meta)
+        oi_layout.addWidget(self.oi_table)
+        self.layout().addWidget(self.oi_panel)
 
         self.oi_thread = None
         self.oi_worker = None
-        self.oi_box.setText(
-            "FUTURES OI — LIQUIDITY TOP 20\n\n"
-            "После сканирования SPOT здесь автоматически появятся только\n"
-            "наиболее ликвидные front-контракты, где есть реальные деньги\n"
-            "в текущей торговой сессии: FUT Δ → BASE Δ → OI → ΔOI → Оборот ₽ → режим."
+        self.oi_meta.setText(
+            "FUTURES OI — LIQUIDITY TOP 20\n\nПосле сканирования SPOT здесь автоматически появятся только наиболее ликвидные front-контракты с реальным денежным оборотом текущей сессии."
             if scanner_enabled else "FUTURES OI\n\nBCS временно недоступен."
         )
+        self.oi_table.hide()
 
     def _scan_finished(self, results, diagnostics):
         super()._scan_finished(results, diagnostics)
@@ -65,7 +70,8 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_box.setText("FUTURES OI — LIQUIDITY TOP 20\n\nИдёт загрузка front-контрактов, MOEX OI и текущего оборота…")
+        self.oi_meta.setText("FUTURES OI — LIQUIDITY TOP 20\n\nИдёт загрузка front-контрактов, MOEX OI и текущего оборота…")
+        self.oi_table.hide()
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
         self.oi_worker.moveToThread(self.oi_thread)
@@ -106,54 +112,37 @@ class OIWatchlistTraderWindow(TraderWindow):
             return "—"
 
     def _oi_finished(self, results, diagnostics):
-        lines = [
-            "FUTURES OI — LIQUIDITY TOP 20",
-            "═" * 128,
-            f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • "
-            f"TOP: {diagnostics.get('liquidity_top_returned', len(results))} • "
-            f"OI AVAILABLE: {diagnostics.get('oi_available', 0)} • "
-            f"LIQUIDITY WITH MONEY: {diagnostics.get('liquidity_available', 0)} • "
-            f"ИСТОЧНИК OI: {escape(str(diagnostics.get('oi_source') or '—'))}",
-            f"FRONT FAMILIES: {diagnostics.get('contracts', 0)} • FULL OI ANALYSIS: {diagnostics.get('analyzed', 0)} • "
-            f"TURNOVER SOURCE: {escape(str(diagnostics.get('liquidity_metric') or '—'))}",
-            "",
-            "#  ROOT     CONTRACT           BASE         FUT Δ%    BASE Δ%        OI       ΔOI%    SESSION ₽×V       MODE",
-            "─" * 128,
-        ]
-        if not results:
-            lines.append("Нет ликвидных front-контрактов с текущим денежным оборотом.")
-        else:
-            for item in results:
-                oi = item.get("oi_analysis") or {}
-                rank = int(item.get("liquidity_rank") or 0)
-                root = str(item.get("oi_root") or item.get("futures_root") or "—")
-                contract = str(item.get("futures_ticker") or "—")
-                base = str(item.get("underlying_asset") or "—")
-                turnover = item.get("session_turnover_rub")
-                lines.append(
-                    f"{rank:>2}  {root:<8} {contract:<18} {base:<10} "
-                    f"{self._signed(item.get('change_percent'), 2):>8} "
-                    f"{self._signed(item.get('underlying_change_percent'), 2):>9} "
-                    f"{self._fmt(oi.get('oi'), 0):>11} "
-                    f"{self._signed(oi.get('oi_change_percent'), 2):>8} "
-                    f"{self._money(turnover):>15}  {oi.get('oi_regime', '—')}"
-                )
-                lines.append(
-                    f"    → liquidity #{rank} | money={self._money(turnover)} ₽ | "
-                    f"OI strength={oi.get('oi_strength', '—')} | alignment={item.get('direction_alignment', '—')} | FRONT"
-                )
-        lines += [
-            "",
-            "LIQUIDITY TOP = front-контракты с OI>0, отсортированные по реальному денежному обороту текущей сессии.",
-            "Синтетический PRICE × VOLUME для ранжирования не используется.",
-            "OI: ↑цена+↑OI = набор вверх | ↑цена+↓OI = short covering | ↓цена+↑OI = набор вниз | ↓цена+↓OI = long liquidation.",
-            "Остальной futures universe не потерян из источника: в основной таблице показывается только TOP ликвидности, чтобы убрать шум.",
-            "OI — подтверждающий/контекстный слой. BUY/SELL и исполнение отсутствуют.",
-        ]
-        self.oi_box.setPlainText("\n".join(lines))
+        self.oi_meta.setText(
+            f"FUTURES OI — LIQUIDITY TOP 20   •   СТАТУС: {diagnostics.get('status') or '—'}   •   "
+            f"TOP: {diagnostics.get('liquidity_top_returned', len(results))}   •   "
+            f"OI AVAILABLE: {diagnostics.get('oi_available', 0)}   •   "
+            f"LIQUIDITY WITH MONEY: {diagnostics.get('liquidity_available', 0)}\n"
+            f"FRONT FAMILIES: {diagnostics.get('contracts', 0)}   •   FULL OI ANALYSIS: {diagnostics.get('analyzed', 0)}   •   "
+            f"TURNOVER SOURCE: {diagnostics.get('liquidity_metric') or '—'}"
+        )
+        rows = []
+        for item in results or []:
+            oi = item.get("oi_analysis") or {}
+            rank = int(item.get("liquidity_rank") or 0)
+            rows.append([
+                numeric(rank), str(item.get("oi_root") or item.get("futures_root") or "—"),
+                str(item.get("futures_ticker") or "—"), str(item.get("underlying_asset") or "—"),
+                numeric(self._signed(item.get("change_percent"), 2)),
+                numeric(self._signed(item.get("underlying_change_percent"), 2)),
+                numeric(self._fmt(oi.get("oi"), 0)),
+                numeric(self._signed(oi.get("oi_change_percent"), 2)),
+                numeric(self._money(item.get("session_turnover_rub"))),
+                str(oi.get("oi_regime", "—")),
+            ])
+        self.oi_table.set_rows(rows)
+        self.oi_table.setToolTip("Порядок строк = реальный VALTODAY. UI не изменяет ranking или расчёты.")
+        self.oi_table.setVisible(bool(rows))
+        if not rows:
+            self.oi_meta.setText(self.oi_meta.text() + "\n\nНет ликвидных front-контрактов с текущим денежным оборотом.")
 
     def _oi_failed(self, error):
-        self.oi_box.setText(f"FUTURES OI\n\nОшибка OI-аналитики: {error}")
+        self.oi_table.hide()
+        self.oi_meta.setText(f"FUTURES OI\n\nОшибка OI-аналитики: {error}")
 
     def _oi_thread_finished(self):
         if self.oi_thread is not None:

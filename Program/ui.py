@@ -1,6 +1,5 @@
 """Trader_7_12 Pro — unified read-only market-information radar UI."""
 
-from html import escape
 import math
 
 from PySide6.QtCore import QPointF, QThread, QTimer, Qt, QObject, Signal
@@ -9,6 +8,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QTextEdit, QV
 
 from services.market_attention_scanner_service import MarketAttentionScannerService
 from services.market_session_service import MarketSessionService
+from ui_table import MarketTableWidget, numeric
 
 ROLE_LABELS = {
     "LONG_CANDIDATE": "ЛИДЕР",
@@ -135,7 +135,14 @@ class TraderWindow(QWidget):
         self.clock_label = QLabel(); self.clock_label.setAlignment(Qt.AlignCenter); self.clock_label.setStyleSheet("font-size:14px;color:#9fa8b1;padding-bottom:4px")
         self.scan_button = QPushButton("●  СКАНИРОВАТЬ РЫНОК"); self.scan_button.setMinimumHeight(54); self.scan_button.clicked.connect(self.run_market_scan); self._set_scan_button_style()
         self.result_box = QTextEdit(); self.result_box.setReadOnly(True); self.result_box.setStyleSheet("font-size:14px")
-        self.scan_visual = MeltingClocksWidget(); self.result_stack = QStackedWidget(); self.result_stack.addWidget(self.result_box); self.result_stack.addWidget(self.scan_visual); self.result_stack.setCurrentWidget(self.result_box)
+        self.result_table = MarketTableWidget(
+            ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "RS", "₽/min", "Session", "15m", "Accel", "Score"],
+            [42, 76, 118, 88, 68, 72, 82, 72, 92, 108, 92, 72, 68],
+        )
+        self.result_panel = QWidget(); result_layout = QVBoxLayout(self.result_panel); result_layout.setContentsMargins(0, 0, 0, 0); result_layout.setSpacing(6)
+        result_layout.addWidget(self.result_box); result_layout.addWidget(self.result_table)
+        self.result_table.hide()
+        self.scan_visual = MeltingClocksWidget(); self.result_stack = QStackedWidget(); self.result_stack.addWidget(self.result_panel); self.result_stack.addWidget(self.scan_visual); self.result_stack.setCurrentWidget(self.result_panel)
         self.result_box.setText("БКС ПОДКЛЮЧЁН\n\nНажмите «СКАНИРОВАТЬ РЫНОК».\nБудет проанализирован максимально полный доступный SPOT universe, а не только 2–3 инструмента.") if self.scanner_enabled else self.result_box.setText("РЕЖИМ ПРОСМОТРА\n\nБКС временно недоступен.")
         self.scan_button.setEnabled(self.scanner_enabled)
         layout = QVBoxLayout(); layout.setContentsMargins(18, 14, 18, 18); layout.setSpacing(6)
@@ -157,7 +164,7 @@ class TraderWindow(QWidget):
         self.scan_visual.start(); self.result_stack.setCurrentWidget(self.scan_visual); self.scan_animation_timer.start(260); self._animate_scan()
 
     def _stop_scan_animation(self):
-        self.scan_animation_timer.stop(); self.scan_visual.stop(); self.scan_button.setText("●  СКАНИРОВАТЬ РЫНОК"); self._set_scan_button_style(); self.result_stack.setCurrentWidget(self.result_box)
+        self.scan_animation_timer.stop(); self.scan_visual.stop(); self.scan_button.setText("●  СКАНИРОВАТЬ РЫНОК"); self._set_scan_button_style(); self.result_stack.setCurrentWidget(self.result_panel)
 
     def run_market_scan(self):
         if not self.scanner_enabled or (self.scan_thread is not None and self.scan_thread.isRunning()): return
@@ -168,44 +175,41 @@ class TraderWindow(QWidget):
 
     def _scan_finished(self, results, diagnostics):
         self.scan_button.setEnabled(True); self._stop_scan_animation(); info = self.session_service.get_session_info(); session_name = SESSION_LABELS.get(info.get("session", "CLOSED"), "РЫНОК")
-        benchmark = escape(str(diagnostics.get("benchmark") or "—"))
-        lines = ["<pre style='font-family:Menlo,Monaco,monospace;font-size:12px;color:#dfe3e7'>", "═" * 128,
-                 "TRADER_7_12 PRO — MARKET MAP + OPPORTUNITY RADAR", "═" * 128, "",
-                 f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
-                 f"СТАТУС: {escape(str(diagnostics.get('status') or '—'))} • BENCHMARK: {benchmark}",
-                 f"UNIVERSE: {diagnostics.get('universe_total', 0)} • АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} • ПОКРЫТИЕ: {_number(diagnostics.get('coverage_percent'), 1)}%",
-                 f"D1: {diagnostics.get('daily_benchmark_days', 0)} свечей • D1 QUALIFIED: {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY PASS: {diagnostics.get('liquidity_passed', 0)} • DIRECTIONAL QUALIFIED: {diagnostics.get('directional_qualified', 0)}",
-                 f"STRICT RADAR: {diagnostics.get('strict_selected', 0)} • WATCH-ONLY: {diagnostics.get('watch_selected', 0)}",
-                 "", "RADAR: TOP OBJECTIVE OPPORTUNITIES (не торговая рекомендация)",
-                 "─" * 128,
-                 "#  TICKER    ROLE             D1          D1-RS    IDX Δ%    PRICE Δ%   RS vs IDX    ₽/мин       SESSION ₽×V      15m ₽×V     ACCEL    SCORE",
-                 "─" * 128]
-        if not results:
-            lines += ["Нет квалифицированных результатов.", "", f"Причины пропуска: {escape(str(diagnostics.get('skip_reasons') or '—'))}"]
-        else:
-            for idx, item in enumerate(results, 1):
-                role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "WATCH")
-                if item.get("qualification_status") == "WATCH_ONLY":
-                    role = "WATCH-ONLY"
-                d1 = str(item.get("daily_structure") or "NEUTRAL")[:10]
-                lines.append(
-                    f"{idx:>2}  {str(item.get('spot_ticker') or '—'):<8} {role:<16} {d1:<10} "
-                    f"{_number(item.get('daily_relative_mean_pp'), 2):>7}  {_number(item.get('benchmark_change_percent'), 2):>8} "
-                    f"{_number(item.get('change_percent'), 2):>9}  {_number(item.get('relative_strength'), 2):>10} "
-                    f"{_money(item.get('money_per_minute')):>12}  {_money(item.get('session_money')):>15} "
-                    f"{_money(item.get('recent_money')):>13}  {_number(item.get('money_acceleration'), 1):>7}%  {_number(item.get('directional_score'), 1):>6}"
-                )
-        lines += ["", f"IDX Δ% = изменение {benchmark}; PRICE Δ% = изменение инструмента; RS vs IDX = PRICE Δ% − IDX Δ%.",
-                   "SESSION ₽×V = накопленный реальный оборот с начала текущей торговой сессии до момента сканирования.",
-                   "₽/мин = средняя скорость оборота за текущую сессию; 15m ₽×V = оборот последних 15 минут; ACCEL = ускорение потока.",
-                   "DETAIL: QUALIFIED = D1 + дневной RS + текущий RS + абсолютная ликвидность + flow.",
-                   "WATCH-ONLY = объективный текущий интерес при недостаточной полноте строгой квалификации; это не торговый сигнал.",
-                   f"SKIP REASONS: {escape(str(diagnostics.get('skip_reasons') or 'нет'))}",
-                   "READ-ONLY: программа показывает рыночные данные и классификации; BUY/SELL и исполнение отсутствуют.", "═" * 128, "</pre>"]
-        self.result_box.setHtml("\n".join(lines))
+        benchmark = str(diagnostics.get("benchmark") or "—")
+        meta = [
+            f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}",
+            f"СТАТУС: {diagnostics.get('status') or '—'} • BENCHMARK: {benchmark}",
+            f"UNIVERSE: {diagnostics.get('universe_total', 0)} • АНАЛИЗИРОВАНО: {diagnostics.get('analyzed', 0)} • ПОКРЫТИЕ: {_number(diagnostics.get('coverage_percent'), 1)}%",
+            f"D1: {diagnostics.get('daily_benchmark_days', 0)} свечей • D1 QUALIFIED: {diagnostics.get('daily_profiles_qualified', 0)} • LIQUIDITY PASS: {diagnostics.get('liquidity_passed', 0)} • DIRECTIONAL QUALIFIED: {diagnostics.get('directional_qualified', 0)}",
+            f"STRICT RADAR: {diagnostics.get('strict_selected', 0)} • WATCH-ONLY: {diagnostics.get('watch_selected', 0)}",
+            "RADAR: TOP OBJECTIVE OPPORTUNITIES (не торговая рекомендация)",
+        ]
+        self.result_box.setPlainText("\n".join(meta))
+        rows = []
+        for idx, item in enumerate(results or [], 1):
+            role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "WATCH")
+            if item.get("qualification_status") == "WATCH_ONLY": role = "WATCH-ONLY"
+            rows.append([
+                numeric(idx), str(item.get("spot_ticker") or "—"), role,
+                str(item.get("daily_structure") or "NEUTRAL")[:10],
+                numeric(_number(item.get("daily_relative_mean_pp"), 2)),
+                numeric(_number(item.get("benchmark_change_percent"), 2)),
+                numeric(_number(item.get("change_percent"), 2)),
+                numeric(_number(item.get("relative_strength"), 2)),
+                numeric(_money(item.get("money_per_minute"))),
+                numeric(_money(item.get("session_money"))),
+                numeric(_money(item.get("recent_money"))),
+                numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
+                numeric(_number(item.get("directional_score"), 1)),
+            ])
+        self.result_table.set_rows(rows)
+        self.result_table.setToolTip("Расчёты, ranking и порядок результатов не изменены. Таблица — только новый способ представления данных.")
+        self.result_table.setVisible(bool(rows))
+        if not rows:
+            self.result_box.setPlainText("\n".join(meta + ["", "Нет квалифицированных результатов.", f"Причины пропуска: {diagnostics.get('skip_reasons') or '—'}"]))
 
     def _scan_failed(self, error):
-        self.scan_button.setEnabled(True); self._stop_scan_animation(); self.result_box.setText(f"ОШИБКА СКАНИРОВАНИЯ\n\n{error}")
+        self.scan_button.setEnabled(True); self._stop_scan_animation(); self.result_table.hide(); self.result_box.setText(f"ОШИБКА СКАНИРОВАНИЯ\n\n{error}")
 
     def _scan_thread_finished(self):
         if self.scan_thread is not None: self.scan_thread.deleteLater()
