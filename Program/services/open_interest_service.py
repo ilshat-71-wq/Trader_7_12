@@ -13,7 +13,7 @@ class OpenInterestService:
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
     FUTURES_MARKETDATA_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities"
     FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"
-    VERSION = "1.4.0"
+    VERSION = "1.4.1"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
@@ -101,23 +101,21 @@ class OpenInterestService:
 
     @classmethod
     def _marketdata_family(cls, secid):
-        """Return the MOEX futures family/root from a real SECID.
-
-        Dated contracts can be written as PREFIX-U6 (or PREFIX-9.26 in some
-        feeds), while current RFUD SECIDs commonly use PREFIXU6.  The family
-        is therefore resolved from known MOEX prefixes before the expiry suffix.
-        """
+        """Return the RFUD family by removing a standard futures expiry suffix."""
         secid = str(secid or "").strip().upper()
         if not secid:
             return ""
         if "-" in secid:
             return secid.split("-", 1)[0]
+        # Standard MOEX quarterly code: FAMILY + month letter + year digit,
+        # e.g. ALU6, ALZ6, SiM7, MXU6, NAU6. This generic rule also covers
+        # families that are not in our static reverse map.
+        if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():
+            return secid[:-2]
         prefixes = {str(value).upper() for value in cls.MOEX_PREFIX_BY_ROOT.values()}
         for prefix in sorted(prefixes, key=len, reverse=True):
             if secid.startswith(prefix) and len(secid) > len(prefix):
-                tail = secid[len(prefix):]
-                if len(tail) == 2 and tail[0] in cls.MONTH_CODES and tail[1].isdigit():
-                    return prefix
+                return prefix
         return secid
 
     @classmethod
@@ -135,10 +133,8 @@ class OpenInterestService:
                         return date(2000 + int(year_s), int(month_s), 1)
                     except ValueError:
                         pass
-        family = cls._marketdata_family(secid)
-        tail = secid[len(family):]
-        if len(tail) == 2 and tail[0] in cls.MONTH_CODES and tail[1].isdigit():
-            return date(2000 + int(tail[1]), cls.MONTH_CODES[tail[0]], 1)
+        if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():
+            return date(2000 + int(secid[-1]), cls.MONTH_CODES[secid[-2]], 1)
         return date.max
 
     @classmethod
