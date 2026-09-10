@@ -224,16 +224,21 @@ class TraderWindow(QWidget):
 
     @staticmethod
     def _apply_relative_strength_tint(table, row_index, relative_strength):
-        """Professional soft row tint: stronger than index green, weaker red."""
+        """Tint by current intraday relative strength versus IMOEX2."""
         try:
             rs = float(relative_strength)
         except (TypeError, ValueError):
             return
-        if abs(rs) < 0.01:
+
+        if rs > 0.01:
+            background = QColor("#20382b")
+            foreground = QColor("#bfe8c8")
+        elif rs < -0.01:
+            background = QColor("#3a272b")
+            foreground = QColor("#f0b9bf")
+        else:
             return
-        # Soft, readable fills; text remains high-contrast and the values are unchanged.
-        background = QColor("#20382b") if rs > 0 else QColor("#3a272b")
-        foreground = QColor("#bfe8c8") if rs > 0 else QColor("#f0b9bf")
+
         for column in range(table.columnCount()):
             item = table.item(row_index, column)
             if item is not None:

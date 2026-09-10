@@ -92,13 +92,59 @@ class OpenInterestService:
         return row
 
     def _load_marketdata_all(self):
-        if self._marketdata_all_cache is None:
-            try:
-                payload = self._http_get(self.FUTURES_MARKETDATA_ALL_URL, timeout=self.TIMEOUT)
-                self._marketdata_all_cache = self._parse_block(payload, "marketdata")
-            except Exception:
-                self._marketdata_all_cache = []
-        return list(self._marketdata_all_cache)
+        if self._marketdata_all_cache is not None:
+            return list(self._marketdata_all_cache)
+
+        try:
+            payload = self._http_get(
+                self.FUTURES_MARKETDATA_ALL_URL,
+                timeout=self.TIMEOUT,
+            )
+            rows = self._parse_block(payload, "marketdata")
+            if rows:
+                self._marketdata_all_cache = rows
+                return list(rows)
+        except Exception:
+            pass
+
+        # Official MOEX FUTOI fallback.
+        try:
+            trading_date = date.today().isoformat()
+            url = f"{self.BASE_URL}.json?date={trading_date}&latest=1"
+            payload = self._http_get(url, timeout=self.TIMEOUT)
+            futoi_rows = self._parse_block(payload, "futoi")
+
+            grouped = {}
+            for row in futoi_rows:
+                ticker = str(row.get("ticker") or "").strip().upper()
+                if ticker:
+                    grouped.setdefault(ticker, []).append(row)
+
+            fallback_rows = []
+            for ticker, group in grouped.items():
+                aggregate = self._aggregate_rows(group)
+                if not aggregate or aggregate.get("oi", 0) <= 0:
+                    continue
+
+                fallback_rows.append({
+                    "secid": ticker,
+                    "openposition": aggregate["oi"],
+                    "oichange": 0,
+                    "_futoi_fallback": True,
+                })
+
+            self._marketdata_all_cache = fallback_rows
+            self._marketdata_all_error = (
+                None if fallback_rows else "MOEX_RFUD_AND_FUTOI_UNAVAILABLE"
+            )
+            return list(fallback_rows)
+
+        except Exception as exc:
+            self._marketdata_all_cache = []
+            self._marketdata_all_error = (
+                f"FUTOI_FALLBACK_{type(exc).__name__}"
+            )
+            return []
 
     @classmethod
     def _marketdata_family(cls, secid):

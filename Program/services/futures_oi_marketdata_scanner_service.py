@@ -208,7 +208,13 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 previous = self._float(marketdata, "prevsettleprice", "prevSettlePrice", "prevprice", "lastSettlPrice")
                 if last is not None and previous and previous > 0:
                     change = (last / previous - 1.0) * 100.0
-            if last is None or change is None:
+            oi_only_fallback = bool(marketdata.get("_futoi_fallback"))
+
+            if oi_only_fallback:
+                last = 0.0
+                change = None
+
+            if last is None:
                 skipped += 1
                 continue
             volume = self._float(marketdata, "voltoday", "volume", "volumeContracts", "totalVolume")
@@ -245,9 +251,15 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 "underlying_change_source": underlying_change_source,
                 "underlying_data_status": "AVAILABLE" if underlying_price is not None else "UNAVAILABLE",
                 "direction_alignment": (
-                    "ALIGNED_UP" if underlying_change is not None and change > 0 and underlying_change > 0
-                    else "ALIGNED_DOWN" if underlying_change is not None and change < 0 and underlying_change < 0
-                    else "DIVERGENCE" if underlying_change is not None and change * underlying_change < 0
+                    "ALIGNED_UP"
+                    if change is not None and underlying_change is not None
+                    and change > 0 and underlying_change > 0
+                    else "ALIGNED_DOWN"
+                    if change is not None and underlying_change is not None
+                    and change < 0 and underlying_change < 0
+                    else "DIVERGENCE"
+                    if change is not None and underlying_change is not None
+                    and change * underlying_change < 0
                     else "NEUTRAL"
                 ),
                 "data_status": "AVAILABLE",
