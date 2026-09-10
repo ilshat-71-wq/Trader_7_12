@@ -1,7 +1,7 @@
 """Trader_7_12 Pro — single-window OI-enabled dashboard."""
 
 from PySide6.QtCore import QObject, QThread, Signal
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
 from ui import TraderWindow
 from ui_table import MarketTableWidget, numeric
@@ -26,7 +26,7 @@ class FuturesOIWorker(QObject):
 
 
 class OIWatchlistTraderWindow(TraderWindow):
-    """The single Trader_7_12 Pro window: SPOT radar + Futures OI Liquidity TOP."""
+    """Single Trader_7_12 Pro window: SPOT market map + Futures OI context."""
 
     VERSION = "2.7.0"
 
@@ -37,7 +37,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.setWindowTitle("Trader_7_12 Pro — Market Information Radar")
         self.resize(1280, 980)
         self.setMinimumSize(1120, 900)
-        self.subtitle.setText("D1 • ЛИДЕРЫ / АУТСАЙДЕРЫ • MONEY FLOW • RS • FUTURES OI LIQUIDITY TOP • READ-ONLY")
+        self.subtitle.setText("D1 • MARKET MAP • MONEY FLOW • RS • FUTURES OI LIQUIDITY TOP • READ-ONLY")
 
         self.oi_meta = QLabel()
         self.oi_meta.setWordWrap(True)
@@ -51,8 +51,16 @@ class OIWatchlistTraderWindow(TraderWindow):
         oi_layout.setContentsMargins(0, 0, 0, 0)
         oi_layout.setSpacing(6)
         oi_layout.addWidget(self.oi_meta)
-        oi_layout.addWidget(self.oi_table)
-        self.layout().addWidget(self.oi_panel)
+        oi_layout.addWidget(self.oi_table, 1)
+
+        # Keep one application window, but separate SPOT and Futures context
+        # into clean in-window tabs.  This removes the previous stacked-panel
+        # geometry that produced large empty areas and a narrow third pane.
+        self.market_tabs = QTabWidget()
+        self.market_tabs.setDocumentMode(True)
+        self.market_tabs.addTab(self.result_stack, "SPOT • MARKET MAP")
+        self.market_tabs.addTab(self.oi_panel, "FUTURES OI • CONTEXT")
+        self.layout().addWidget(self.market_tabs, 1)
 
         self.oi_thread = None
         self.oi_worker = None
