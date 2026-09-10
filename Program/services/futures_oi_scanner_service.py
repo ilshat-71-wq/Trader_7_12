@@ -258,7 +258,9 @@ class FuturesOIScannerService:
             "raw_contracts": raw_count, "option_filtered": 0, "expired_filtered": 0,
             "active_contracts": 0, "active_roots": 0, "class_code_available": 0,
             "class_code_fallback": 0, "expiry_available": 0, "oi_root_mapping": 0,
-            "oi_root_fallback": 0, **metadata_diag,
+            "oi_root_fallback": 0,
+            "front_contract_source": "MOEX_RFUD",
+            **metadata_diag,
         }
         for raw in rows:
             source_ticker = self._text(raw, "ticker", "secCode", "securityCode")
@@ -269,13 +271,14 @@ class FuturesOIScannerService:
             if "OPTION" in kind or "OPT" in kind:
                 diagnostics["option_filtered"] += 1
                 continue
+            # Contract activity/front selection is authoritative in MOEX RFUD.
+            # BCS metadata may legitimately omit expiry, so absence of BCS expiry
+            # must never manufacture a fake far-future expiry for front selection.
             expiry_raw = self._metadata_expiry(raw)
             expiry = self._normalize_expiry(expiry_raw)
             if expiry_raw:
                 diagnostics["expiry_available"] += 1
-            if expiry < today:
-                diagnostics["expired_filtered"] += 1
-                continue
+
             futures_root = self._root(ticker)
             underlying_source = self._underlying_code(raw)
             oi_root = self._oi_root(raw, ticker, underlying_source)
