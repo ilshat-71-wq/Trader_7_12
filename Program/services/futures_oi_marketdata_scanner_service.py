@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.7"
+    VERSION = "2.7.8"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -30,6 +30,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if getattr(oi_cls, "MARKETDATA_RETRIES", 0) < 3:
             oi_cls.MARKETDATA_RETRIES = 3
         self._underlying_class_codes = {}
+        self._underlying_family_tickers = {}
         self._underlying_day_change_cache = {}
 
     @classmethod
@@ -86,31 +87,69 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         return min(candidates)[1] if candidates else ""
 
     def _underlying_quotes(self, contracts):
-        """Load underlying quotes and retain the actual exchange class code for candles."""
+        """Resolve every futures family to a real underlying ticker and BCS classCode."""
         requested = {}
+        family_tickers = {}
+        aliases = {"SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "NA": "QQQ", "SF": "SPYF", "MX": "MIX", "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI"}
+
         for item in contracts:
+            family = self._text(item, "oi_root", "futures_root").upper()
+            if not family:
+                continue
             ticker = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode")
             if not ticker:
-                continue
-            key = ticker.upper()
-            requested.setdefault(key, {"ticker": ticker, "classCode": self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")})
+                ticker = self._known_underlying_ticker(family, contracts)
+            ticker = ticker.upper()
+
+            # Some BCS futures metadata exposes the MOEX short root itself
+            # instead of the underlying security ticker. Convert only those
+            # unambiguous cases; preserve real underlying tickers such as SBER.
+            mapped = self._family_to_underlying(family)
+            canonical = aliases.get(mapped, mapped)
+            if ticker == family and canonical and canonical != family:
+                ticker = canonical
+
+            family_tickers[family] = ticker
+            item_class = self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")
+            entry = requested.setdefault(ticker, {"ticker": ticker, "classCode": ""})
+            if item_class and not entry["classCode"]:
+                entry["classCode"] = item_class
 
         unresolved = [key for key, item in requested.items() if not item.get("classCode")]
-        if unresolved:
+        lookup_batches = 0
+        lookup_records = 0
+        for start in range(0, len(unresolved), self.ENRICH_BATCH_SIZE):
+            batch = unresolved[start:start + self.ENRICH_BATCH_SIZE]
+            lookup_batches += 1
             try:
-                records = self.api.get_instruments_by_tickers(unresolved)
+                records = self.api.get_instruments_by_tickers(batch)
             except Exception as exc:
                 print("⚠️ Underlying metadata lookup failed:", type(exc).__name__)
-                records = []
-            for record in records if isinstance(records, list) else []:
+                continue
+            if not isinstance(records, list):
+                continue
+            lookup_records += len(records)
+            for record in records:
                 ticker = self._text(record, "ticker", "secCode", "securityCode").upper()
-                if not ticker or ticker not in requested:
+                if ticker not in requested:
                     continue
                 class_code = self._select_underlying_class_code(record)
                 if class_code and not requested[ticker].get("classCode"):
                     requested[ticker]["classCode"] = class_code
 
-        self._underlying_class_codes = {key: value.get("classCode") for key, value in requested.items() if value.get("classCode")}
+        self._underlying_class_codes = {
+            key: value["classCode"] for key, value in requested.items()
+            if value.get("classCode")
+        }
+        self._underlying_family_tickers = family_tickers
+        self._underlying_metadata_diagnostics = {
+            "underlying_requested": len(requested),
+            "underlying_class_codes": len(self._underlying_class_codes),
+            "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)),
+            "underlying_metadata_lookup_batches": lookup_batches,
+            "underlying_metadata_lookup_records": lookup_records,
+        }
+
         instruments = [item for item in requested.values() if item.get("classCode")]
         if not instruments:
             return {}
@@ -323,7 +362,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 continue
             oi_available += 1
             liquidity_available += int(turnover_rub > 0)
-            underlying_ticker = self._known_underlying_ticker(family, bcs_contracts)
+            underlying_ticker = self._underlying_family_tickers.get(family) or self._known_underlying_ticker(family, bcs_contracts)
             underlying_quote = underlying_quotes.get(underlying_ticker, {})
             underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
             underlying_change, underlying_change_source = self._underlying_day_change(underlying_ticker)
@@ -367,6 +406,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 economic_overlap.setdefault(group, []).append(item.get("futures_root"))
         economic_overlap = {key: sorted(set(values)) for key, values in economic_overlap.items() if len(set(values)) > 1}
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
+        diagnostics.update(getattr(self, "_underlying_metadata_diagnostics", {}))
         status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
         diagnostics.update({
             "status": status, "version": self.VERSION, "contracts": len(front_contracts), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available,
