@@ -11,6 +11,11 @@ class MarketSessionService:
     In 2026 most weekends have an additional stock-market session (ДСВД)
     from 09:50 to 19:00 MSK. Only dates explicitly declared non-trading
     by the current MOEX calendar are closed.
+
+    The market still has named exchange sessions for status display, but
+    the scanner's intraday market-data window is the whole trading day:
+    07:00 MSK through the moment of scanning. Session boundaries must not
+    reset cumulative intraday radar metrics.
     """
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
@@ -106,13 +111,16 @@ class MarketSessionService:
         return value.date() if value is not None else None
 
     def get_session_start(self, value=None):
-        """Return the actual start of the current market-data session."""
+        """Return the intraday radar data start: 07:00 MSK for the trading day.
+
+        Exchange session names remain available through ``get_session``.
+        This method is intentionally not allowed to reset cumulative radar
+        calculations at 10:00, 19:00 or any other exchange boundary.
+        """
         session = self.get_session(value)
-        if session == "WEEKEND_SESSION":
-            return self.WEEKEND_SESSION_START
-        if session in self.WINDOWS:
-            return self.WINDOWS[session][0]
-        return None
+        if session == "CLOSED":
+            return None
+        return self.MORNING_START
 
     def is_market_open(self, value=None):
         return self.get_session(value) in {"MORNING", "MAIN", "WEEKEND_SESSION", "EVENING"}
