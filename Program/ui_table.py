@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem
 
 
 TABLE_STYLE = """
@@ -80,23 +80,18 @@ class MarketTableWidget(QTableWidget):
         return sorted({index.row() for index in self.selectedIndexes()})
 
     def copy_selection(self):
-        """Copy selected rows as TSV so they paste cleanly into Numbers/Excel/Telegram."""
+        """Copy selected rows as TSV for Numbers, Excel, Telegram and text."""
         rows = self._selected_rows()
         if not rows:
             rows = list(range(self.rowCount()))
         if not rows:
             return False
-        lines = []
-        headers = [self.horizontalHeaderItem(i).text() for i in range(self.columnCount())]
-        lines.append("\t".join(headers))
+        lines = ["\t".join(self.horizontalHeaderItem(i).text() for i in range(self.columnCount()))]
         for row in rows:
-            values = []
-            for column in range(self.columnCount()):
-                item = self.item(row, column)
-                values.append(item.text() if item else "")
-            lines.append("\t".join(values))
-        self.window().windowHandle().screen() if False else None
-        from PySide6.QtWidgets import QApplication
+            lines.append("\t".join(
+                self.item(row, column).text() if self.item(row, column) else ""
+                for column in range(self.columnCount())
+            ))
         QApplication.clipboard().setText("\n".join(lines))
         return True
 
