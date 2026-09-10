@@ -67,7 +67,15 @@ class FuturesOIScannerService:
 
     @classmethod
     def _root(cls, ticker):
-        return str(ticker or "").upper().strip().split("-", 1)[0]
+        """Normalize futures ticker to its MOEX contract family root."""
+        import re
+
+        value = str(ticker or "").upper().strip().split("-", 1)[0]
+
+        # MOEX standard futures suffix: month code + year digit.
+        # Examples: SIU6 -> SI, CRU6 -> CR, GDU6 -> GD,
+        # MXU6 -> MX, RIU6 -> RI, BRZ6 -> BR.
+        return re.sub(r"[FGHJKMNQUVXZ]\d$", "", value)
 
     @classmethod
     def _underlying_code(cls, row):
