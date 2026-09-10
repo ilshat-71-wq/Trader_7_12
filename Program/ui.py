@@ -12,6 +12,7 @@ ROLE_LABELS = {
     "LONG_CANDIDATE": "ЛИДЕР",
     "SHORT_CANDIDATE": "АУТСАЙДЕР",
     "ATTENTION_WATCH": "НАБЛЮДЕНИЕ",
+    "MARKET_CONTEXT": "КОНТЕКСТ",
 }
 SESSION_LABELS = {
     "PRE_OPEN": "ПРЕ-ОТКРЫТИЕ", "MORNING": "УТРЕННЯЯ СЕССИЯ",
@@ -215,7 +216,7 @@ class TraderWindow(QWidget):
         regime = str(diagnostics.get("market_regime") or "").upper()
         coverage = diagnostics.get("coverage_percent")
         if regime == "NEUTRAL":
-            return "РЫНОК NEUTRAL — строгий Long/Short по контракту не формируется."
+            return "РЫНОК NEUTRAL — строгий Long/Short по контракту не формируется; ниже показан объективный контекст рынка."
         if coverage is not None and float(coverage) < 80.0:
             return "Недостаточное M5-покрытие для строгой directional-оценки."
         if diagnostics.get("daily_profiles_qualified", 0) == 0:
@@ -263,11 +264,12 @@ class TraderWindow(QWidget):
             f"LIQUIDITY {diagnostics.get('liquidity_passed', 0)} • "
             f"STRICT {diagnostics.get('strict_selected', 0)} • "
             f"WATCH {diagnostics.get('watch_selected', 0)} • "
+            f"CONTEXT {diagnostics.get('context_selected', 0)} • "
             f"REGIME {diagnostics.get('market_regime') or '—'}"
         )
         rows = []
         for idx, item in enumerate(results or [], 1):
-            role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "НАБЛЮДЕНИЕ")
+            role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "КОНТЕКСТ")
             if item.get("qualification_status") == "WATCH_ONLY":
                 role = "НАБЛЮДЕНИЕ"
             rows.append([
@@ -285,7 +287,8 @@ class TraderWindow(QWidget):
             ])
         self.result_table.set_rows(rows)
         self.result_table.setToolTip(
-            "Выделите одну или несколько строк и нажмите ⌘C. Таблица копируется в TSV для Numbers, Excel, Telegram и текста."
+            "Рынок — информационная карта. Выделите одну или несколько строк и нажмите ⌘C. "
+            "Копирование даёт TSV для Numbers, Excel, Telegram и текста."
         )
         self.result_table.setVisible(bool(rows))
         if rows:
