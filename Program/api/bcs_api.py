@@ -136,36 +136,75 @@ class BCSAPI:
     # ---------------------------------------------------------
 
     def get_instruments_by_tickers(self, tickers):
+        """Load all BCS instrument cards for the requested tickers.
+
+        The endpoint is paginated in current BCS documentation. Keep the
+        requested ticker list intact, page through the response, and stop on
+        an empty/repeated page so older servers that ignore pagination cannot
+        create an infinite loop.
+        """
         if not isinstance(tickers, (list, tuple)):
             return []
         requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
         if not requested:
             return []
+
         url = f"{self.info_url}/instruments/by-tickers"
-        payload = {"tickers": requested}
-        try:
-            r = RequestHelper.post(
-                url,
-                headers={**self.headers(), "Content-Type": "application/json"},
-                json=payload
+        all_records = []
+        seen_page_signatures = set()
+        page = 0
+        page_size = 100
+        max_pages = 20
+
+        while page < max_pages:
+            payload = {"tickers": requested, "page": page, "size": page_size}
+            try:
+                r = RequestHelper.post(
+                    url,
+                    headers={**self.headers(), "Content-Type": "application/json"},
+                    json=payload
+                )
+            except Exception as exc:
+                print("Instrument ticker lookup failed:", type(exc).__name__)
+                break
+
+            print(f"Instrument ticker lookup page {page}:", r.status_code)
+            if r.status_code != 200:
+                break
+
+            try:
+                data = r.json()
+            except ValueError:
+                break
+
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = data.get("instruments", data.get("records", []))
+            else:
+                records = []
+            if not isinstance(records, list) or not records:
+                break
+
+            signature = tuple(
+                (
+                    str(record.get("ticker") or record.get("secCode") or record.get("securityCode") or "").upper(),
+                    str(record.get("isin") or "").upper(),
+                    str(record.get("classCode") or ""),
+                    str(record.get("class_code") or ""),
+                )
+                for record in records if isinstance(record, dict)
             )
-        except Exception as exc:
-            print("Instrument ticker lookup failed:", type(exc).__name__)
-            return []
-        print("Instrument ticker lookup:", r.status_code)
-        if r.status_code != 200:
-            return []
-        try:
-            data = r.json()
-        except ValueError:
-            return []
-        if isinstance(data, list):
-            records = data
-        elif isinstance(data, dict):
-            records = data.get("instruments", data.get("records", []))
-        else:
-            records = []
-        return records if isinstance(records, list) else []
+            if signature in seen_page_signatures:
+                break
+            seen_page_signatures.add(signature)
+            all_records.extend(record for record in records if isinstance(record, dict))
+
+            if len(records) < page_size:
+                break
+            page += 1
+
+        return all_records
 
     # ---------------------------------------------------------
 
