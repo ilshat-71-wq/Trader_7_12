@@ -53,11 +53,10 @@ class OIWatchlistTraderWindow(TraderWindow):
         oi_layout.addWidget(self.oi_meta)
         oi_layout.addWidget(self.oi_table, 1)
 
-        # Keep one application window, but separate SPOT and Futures context
-        # into clean in-window tabs.  This removes the previous stacked-panel
-        # geometry that produced large empty areas and a narrow third pane.
+        # One application window, with two explicit in-window information views.
         self.market_tabs = QTabWidget()
         self.market_tabs.setDocumentMode(True)
+        self.layout().removeWidget(self.result_stack)
         self.market_tabs.addTab(self.result_stack, "SPOT • MARKET MAP")
         self.market_tabs.addTab(self.oi_panel, "FUTURES OI • CONTEXT")
         self.layout().addWidget(self.market_tabs, 1)
