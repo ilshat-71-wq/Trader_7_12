@@ -1,8 +1,8 @@
 """Trader_7_12 Pro — unified read-only market-information radar UI."""
 
 from PySide6.QtCore import QThread, QTimer, Qt, QObject, Signal
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtGui import QFont, QColor
+from PySide6.QtWidgets import QLabel, QPushButton, QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QTableWidgetItem
 
 from services.market_attention_scanner_service import MarketAttentionScannerService
 from services.market_session_service import MarketSessionService
@@ -108,7 +108,7 @@ class TraderWindow(QWidget):
         self.title.setAlignment(Qt.AlignCenter)
         self.title.setStyleSheet("font-size:29px;font-weight:800;letter-spacing:1px;padding:8px")
 
-        self.subtitle = QLabel("D1 • MARKET MAP • MONEY FLOW • RS • FUTURES OI • READ-ONLY")
+        self.subtitle = QLabel("D1 • MARKET MAP • DAY MONEY FLOW • RS • FUTURES OI • READ-ONLY")
         self.subtitle.setAlignment(Qt.AlignCenter)
         self.subtitle.setStyleSheet("font-size:13px;color:#89939d;padding:1px")
 
@@ -128,8 +128,8 @@ class TraderWindow(QWidget):
         self.result_box.setStyleSheet("font-size:13px;font-weight:600")
 
         self.result_table = MarketTableWidget(
-            ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "RS", "₽/min", "Session", "15m", "Accel", "Score"],
-            [42, 76, 118, 88, 68, 72, 82, 72, 92, 108, 92, 72, 68],
+            ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score"],
+            [42, 76, 118, 88, 68, 72, 82, 72, 92, 112, 92, 72, 68],
         )
 
         self.result_panel = QWidget()
@@ -203,11 +203,8 @@ class TraderWindow(QWidget):
         if not reasons:
             return "нет"
         labels = {
-            "INSUFFICIENT_M5": "M5",
-            "LOW_LIQUIDITY": "LOW LIQUIDITY",
-            "D1_UNAVAILABLE": "D1",
-            "WORKER_ERROR": "ERROR",
-            "INVALID_RESULT": "INVALID",
+            "INSUFFICIENT_M5": "M5", "LOW_LIQUIDITY": "LOW LIQUIDITY",
+            "D1_UNAVAILABLE": "D1", "WORKER_ERROR": "ERROR", "INVALID_RESULT": "INVALID",
         }
         return " • ".join(f"{labels.get(k, k)} {v}" for k, v in reasons.items())
 
@@ -224,6 +221,24 @@ class TraderWindow(QWidget):
         if diagnostics.get("liquidity_passed", 0) == 0:
             return "Нет инструментов, прошедших оба абсолютных liquidity-gate."
         return "Нет инструмента, одновременно прошедшего все strict-gates."
+
+    @staticmethod
+    def _apply_relative_strength_tint(table, row_index, relative_strength):
+        """Professional soft row tint: stronger than index green, weaker red."""
+        try:
+            rs = float(relative_strength)
+        except (TypeError, ValueError):
+            return
+        if abs(rs) < 0.01:
+            return
+        # Soft, readable fills; text remains high-contrast and the values are unchanged.
+        background = QColor("#20382b") if rs > 0 else QColor("#3a272b")
+        foreground = QColor("#bfe8c8") if rs > 0 else QColor("#f0b9bf")
+        for column in range(table.columnCount()):
+            item = table.item(row_index, column)
+            if item is not None:
+                item.setBackground(background)
+                item.setForeground(foreground)
 
     def run_market_scan(self):
         if not self.scanner_enabled or (self.scan_thread is not None and self.scan_thread.isRunning()):
@@ -251,44 +266,44 @@ class TraderWindow(QWidget):
         info = self.session_service.get_session_info()
         session_name = SESSION_LABELS.get(info.get("session", "CLOSED"), "РЫНОК")
         benchmark = str(diagnostics.get("benchmark") or "—")
-        line1 = f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')}"
+        line1 = f"{session_name} • {info.get('date','—')} • МСК {info.get('time','—')} • INTRADAY 07:00→NOW"
         line2 = (
-            f"{diagnostics.get('status') or '—'} • {benchmark} • "
-            f"UNIVERSE {diagnostics.get('universe_total', 0)} • "
-            f"ANALYZED {diagnostics.get('analyzed', 0)} • "
-            f"COVERAGE {_number(diagnostics.get('coverage_percent'), 1)}%"
+            f"{diagnostics.get('status') or '—'} • {benchmark} • UNIVERSE {diagnostics.get('universe_total', 0)} • "
+            f"ANALYZED {diagnostics.get('analyzed', 0)} • COVERAGE {_number(diagnostics.get('coverage_percent'), 1)}%"
         )
         line3 = (
-            f"D1 {_number(diagnostics.get('daily_benchmark_days'), 0)} • "
-            f"QUALIFIED {diagnostics.get('daily_profiles_qualified', 0)} • "
-            f"LIQUIDITY {diagnostics.get('liquidity_passed', 0)} • "
-            f"STRICT {diagnostics.get('strict_selected', 0)} • "
-            f"WATCH {diagnostics.get('watch_selected', 0)} • "
-            f"CONTEXT {diagnostics.get('context_selected', 0)} • "
-            f"REGIME {diagnostics.get('market_regime') or '—'}"
+            f"D1 {_number(diagnostics.get('daily_benchmark_days'), 0)} • QUALIFIED {diagnostics.get('daily_profiles_qualified', 0)} • "
+            f"LIQUIDITY {diagnostics.get('liquidity_passed', 0)} • STRICT {diagnostics.get('strict_selected', 0)} • "
+            f"WATCH {diagnostics.get('watch_selected', 0)} • CONTEXT {diagnostics.get('context_selected', 0)} • REGIME {diagnostics.get('market_regime') or '—'}"
         )
         rows = []
+        rs_values = []
         for idx, item in enumerate(results or [], 1):
             role = ROLE_LABELS.get(str(item.get("selection_role") or "").upper(), "КОНТЕКСТ")
             if item.get("qualification_status") == "WATCH_ONLY":
                 role = "НАБЛЮДЕНИЕ"
+            rs = item.get("relative_strength")
+            rs_values.append(rs)
             rows.append([
                 numeric(idx), str(item.get("spot_ticker") or "—"), role,
                 str(item.get("daily_structure") or "NEUTRAL")[:10],
                 numeric(_number(item.get("daily_relative_mean_pp"), 2)),
                 numeric(_number(item.get("benchmark_change_percent"), 2)),
                 numeric(_number(item.get("change_percent"), 2)),
-                numeric(_number(item.get("relative_strength"), 2)),
+                numeric(_number(rs, 2)),
                 numeric(_money(item.get("money_per_minute"))),
-                numeric(_money(item.get("session_money"))),
+                numeric(_money(item.get("day_money", item.get("session_money")))),
                 numeric(_money(item.get("recent_money"))),
                 numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
                 numeric(_number(item.get("directional_score"), 1)),
             ])
         self.result_table.set_rows(rows)
+        for row_index, rs in enumerate(rs_values):
+            self._apply_relative_strength_tint(self.result_table, row_index, rs)
         self.result_table.setToolTip(
-            "Рынок — информационная карта. Выделите одну или несколько строк и нажмите ⌘C. "
-            "Копирование даёт TSV для Numbers, Excel, Telegram и текста."
+            "Зелёный оттенок — инструмент сильнее IMOEX2; красный — слабее IMOEX2. "
+            "DAY ₽ — накопленный денежный оборот с 07:00 МСК до момента сканирования. "
+            "Выделите строки и нажмите ⌘C для TSV."
         )
         self.result_table.setVisible(bool(rows))
         if rows:
