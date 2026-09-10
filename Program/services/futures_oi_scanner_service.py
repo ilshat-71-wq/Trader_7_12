@@ -305,13 +305,36 @@ class FuturesOIScannerService:
             })
             grouped.setdefault(oi_root, []).append(item)
 
+        # MOEX RFUD is authoritative for the active/front futures contract.
+        # BCS metadata is retained for underlying/class-code context only.
+        rfud_fronts = {}
+        try:
+            for item in self.oi.marketdata_front_contracts():
+                ticker = str(item.get("secid") or item.get("SECID") or "").upper().strip()
+                if not ticker:
+                    continue
+                rfud_fronts[self._root(ticker)] = ticker
+        except Exception as exc:
+            print("Futures OI RFUD front selection fallback:", exc)
+
         result = []
         for root, items in grouped.items():
             ordered = sorted(items, key=self._contract_sort_key)
             for index, item in enumerate(ordered):
                 item["curve_rank"] = index + 1
                 item["curve_role"] = "FRONT" if index == 0 else "NEXT" if index == 1 else "DEFERRED"
-            result.append(ordered[0])
+
+            rfud_ticker = rfud_fronts.get(str(root).upper())
+            selected = None
+            if rfud_ticker:
+                selected = next(
+                    (item for item in ordered
+                     if str(item.get("futures_ticker") or "").upper() == rfud_ticker),
+                    None,
+                )
+
+            # Keep BCS contract only when RFUD has no matching family.
+            result.append(selected or ordered[0])
         diagnostics["active_contracts"] = len(result)
         diagnostics["active_roots"] = len(grouped)
         self._last_contract_diagnostics = diagnostics
