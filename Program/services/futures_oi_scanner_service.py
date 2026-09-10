@@ -309,7 +309,7 @@ class FuturesOIScannerService:
         # BCS metadata is retained for underlying/class-code context only.
         rfud_fronts = {}
         try:
-            for item in self.oi.marketdata_front_contracts():
+            for item in self.oi.marketdata_front_contracts().values():
                 ticker = str(item.get("secid") or item.get("SECID") or "").upper().strip()
                 if not ticker:
                     continue
