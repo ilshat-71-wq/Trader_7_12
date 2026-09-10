@@ -43,7 +43,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.oi_meta.setWordWrap(True)
         self.oi_meta.setStyleSheet("background:#171b20;color:#b9c1c8;border:1px solid #394149;border-radius:8px;padding:10px 14px;font-size:12px")
         self.oi_table = MarketTableWidget(
-            ["#", "Root", "Contract", "Base", "FUT Δ%", "BASE Δ%", "OI", "ΔOI%", "Session ₽", "Mode"],
+            ["#", "Root", "Contract", "Base", "FUT Δ%", "BASE Δ%", "OI", "ΔOI%", "DAY ₽", "Mode"],
             [42, 68, 122, 76, 78, 82, 110, 78, 104, 190],
         )
         self.oi_panel = QWidget()
@@ -53,7 +53,6 @@ class OIWatchlistTraderWindow(TraderWindow):
         oi_layout.addWidget(self.oi_meta)
         oi_layout.addWidget(self.oi_table, 1)
 
-        # One application window, with two explicit in-window information views.
         self.market_tabs = QTabWidget()
         self.market_tabs.setDocumentMode(True)
         self.layout().removeWidget(self.result_stack)
@@ -64,7 +63,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.oi_thread = None
         self.oi_worker = None
         self.oi_meta.setText(
-            "FUTURES OI — LIQUIDITY TOP 20\n\nПосле сканирования SPOT здесь автоматически появятся только наиболее ликвидные front-контракты с реальным денежным оборотом текущей сессии."
+            "FUTURES OI — LIQUIDITY TOP 20\n\nПосле сканирования SPOT здесь автоматически появятся наиболее ликвидные front-контракты с реальным денежным оборотом текущего торгового дня."
             if scanner_enabled else "FUTURES OI\n\nBCS временно недоступен."
         )
         self.oi_table.hide()
@@ -77,7 +76,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_meta.setText("FUTURES OI — LIQUIDITY TOP 20\n\nИдёт загрузка front-контрактов, MOEX OI и текущего оборота…")
+        self.oi_meta.setText("FUTURES OI — LIQUIDITY TOP 20\n\nИдёт загрузка front-контрактов, MOEX OI и оборота текущего торгового дня…")
         self.oi_table.hide()
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
@@ -125,7 +124,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"OI AVAILABLE: {diagnostics.get('oi_available', 0)}   •   "
             f"LIQUIDITY WITH MONEY: {diagnostics.get('liquidity_available', 0)}\n"
             f"FRONT FAMILIES: {diagnostics.get('contracts', 0)}   •   FULL OI ANALYSIS: {diagnostics.get('analyzed', 0)}   •   "
-            f"TURNOVER SOURCE: {diagnostics.get('liquidity_metric') or '—'}"
+            f"TURNOVER: {diagnostics.get('liquidity_metric') or '—'}   •   SOURCE: VALTODAY"
         )
         rows = []
         for item in results or []:
@@ -142,10 +141,10 @@ class OIWatchlistTraderWindow(TraderWindow):
                 str(oi.get("oi_regime", "—")),
             ])
         self.oi_table.set_rows(rows)
-        self.oi_table.setToolTip("Порядок строк = реальный VALTODAY. UI не изменяет ranking или расчёты.")
+        self.oi_table.setToolTip("DAY ₽ = реальный VALTODAY, накопленный с начала текущего торгового дня. Порядок строк = реальная ликвидность. UI не изменяет расчёты.")
         self.oi_table.setVisible(bool(rows))
         if not rows:
-            self.oi_meta.setText(self.oi_meta.text() + "\n\nНет ликвидных front-контрактов с текущим денежным оборотом.")
+            self.oi_meta.setText(self.oi_meta.text() + "\n\nНет доступных front-контрактов с ненулевым OI и реальным оборотом.")
 
     def _oi_failed(self, error):
         self.oi_table.hide()
