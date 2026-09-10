@@ -7,7 +7,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-session liquidity TOP."""
 
-    VERSION = "2.7.4"
+    VERSION = "2.7.5"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -17,6 +17,17 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         "GOLD": {"GD", "GL"},
         "MOEX_INDEX": {"MX", "MM"},
     }
+
+    def __init__(self, api=None, oi_service=None):
+        super().__init__(api=api, oi_service=oi_service)
+        # MOEX ISS can reset the large RFUD marketdata response. Give this
+        # read-only OI path a longer timeout/retry budget without changing
+        # BCS candle concurrency or the rest of the application.
+        oi_cls = type(self.oi)
+        if getattr(oi_cls, "TIMEOUT", 0) < 15:
+            oi_cls.TIMEOUT = 15
+        if getattr(oi_cls, "MARKETDATA_RETRIES", 0) < 3:
+            oi_cls.MARKETDATA_RETRIES = 3
 
     @classmethod
     def _economic_exposure_group(cls, family):
@@ -106,8 +117,10 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
         bcs_contracts = self._active_contracts()
         underlying_quotes = self._underlying_quotes(bcs_contracts)
+        marketdata_error = None
         if hasattr(self.oi, "marketdata_front_contracts"):
             front_contracts = self.oi.marketdata_front_contracts(as_of=as_of)
+            marketdata_error = getattr(self.oi, "_marketdata_all_error", None)
         else:
             front_contracts = {}
             for contract in bcs_contracts:
@@ -126,6 +139,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 if row and self._float(row, "openposition", "oi", "openInterest") not in (None, 0) and self._float(row, "openposition", "oi", "openInterest") > 0:
                     front_contracts.setdefault(family, dict(row))
                     front_contracts[family]["_moex_family"] = family
+            marketdata_error = getattr(self.oi, "_marketdata_all_error", None)
 
         candidates = []
         skipped = 0
@@ -220,15 +234,16 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         economic_overlap = {key: sorted(set(values)) for key, values in economic_overlap.items() if len(set(values)) > 1}
 
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
+        status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
         diagnostics.update({
-            "status": "OK", "version": self.VERSION, "contracts": len(front_contracts), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available,
+            "status": status, "version": self.VERSION, "contracts": len(front_contracts), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available,
             "skipped": skipped, "quote_instruments": len(underlying_quotes), "quote_records": len(underlying_quotes), "marketdata_oi_records": oi_available, "liquidity_available": liquidity_available,
             "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_SESSION_MONETARY_TURNOVER",
             "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "liquidity_probe_roots": liquidity_probe, "economic_overlap_groups": economic_overlap,
             "base_change_available": base_change_available, "base_change_missing": max(0, len(candidates) - base_change_available),
             "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "MOEX_RFUD_SECID_TO_FAMILY + BCS_UNDERLYING_CONTEXT",
             "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_SESSION_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
-            "marketdata_source": "MOEX_ISS_FUTURES_FORTS_RFUD",
+            "marketdata_source": "MOEX_ISS_FUTURES_FORTS_RFUD", "marketdata_error": marketdata_error,
         })
         print("Futures OI diagnostics:", diagnostics)
         return selected, diagnostics
