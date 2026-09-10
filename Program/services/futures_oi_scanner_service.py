@@ -6,7 +6,7 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.4.0"
+    VERSION = "2.4.1"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
@@ -102,13 +102,7 @@ class FuturesOIScannerService:
 
     @classmethod
     def _oi_root(cls, row, ticker, underlying):
-        """Return a canonical MOEX FUTOI root, never a full contract ticker.
-
-        BCS metadata can omit the underlying asset entirely and can also expose
-        contract identifiers in fields such as shortCode. Therefore mapping is
-        attempted in this order: explicit underlying -> ticker root -> trusted
-        canonical metadata root -> raw ticker root as a last resort.
-        """
+        """Return a canonical MOEX FUTOI root, never a full contract ticker."""
         underlying = str(underlying or "").upper().strip()
         underlying = cls.UNDERLYING_ALIASES.get(underlying, underlying)
 
@@ -252,7 +246,6 @@ class FuturesOIScannerService:
         rows = self.api.get_instruments("FUTURES")
         raw_count = len(rows) if isinstance(rows, list) else 0
         rows, metadata_diag = self._enrich_contract_metadata(rows)
-        today = date.today().isoformat()
         grouped = {}
         diagnostics = {
             "raw_contracts": raw_count, "option_filtered": 0, "expired_filtered": 0,
@@ -271,9 +264,6 @@ class FuturesOIScannerService:
             if "OPTION" in kind or "OPT" in kind:
                 diagnostics["option_filtered"] += 1
                 continue
-            # Contract activity/front selection is authoritative in MOEX RFUD.
-            # BCS metadata may legitimately omit expiry, so absence of BCS expiry
-            # must never manufacture a fake far-future expiry for front selection.
             expiry_raw = self._metadata_expiry(raw)
             expiry = self._normalize_expiry(expiry_raw)
             if expiry_raw:
@@ -305,15 +295,12 @@ class FuturesOIScannerService:
             })
             grouped.setdefault(oi_root, []).append(item)
 
-        # MOEX RFUD is authoritative for the active/front futures contract.
-        # BCS metadata is retained for underlying/class-code context only.
         rfud_fronts = {}
         try:
             for item in self.oi.marketdata_front_contracts().values():
                 ticker = str(item.get("secid") or item.get("SECID") or "").upper().strip()
-                if not ticker:
-                    continue
-                rfud_fronts[self._root(ticker)] = ticker
+                if ticker:
+                    rfud_fronts[self._root(ticker)] = ticker
         except Exception as exc:
             print("Futures OI RFUD front selection fallback:", exc)
 
@@ -323,17 +310,10 @@ class FuturesOIScannerService:
             for index, item in enumerate(ordered):
                 item["curve_rank"] = index + 1
                 item["curve_role"] = "FRONT" if index == 0 else "NEXT" if index == 1 else "DEFERRED"
-
             rfud_ticker = rfud_fronts.get(str(root).upper())
             selected = None
             if rfud_ticker:
-                selected = next(
-                    (item for item in ordered
-                     if str(item.get("futures_ticker") or "").upper() == rfud_ticker),
-                    None,
-                )
-
-            # Keep BCS contract only when RFUD has no matching family.
+                selected = next((item for item in ordered if str(item.get("futures_ticker") or "").upper() == rfud_ticker), None)
             result.append(selected or ordered[0])
         diagnostics["active_contracts"] = len(result)
         diagnostics["active_roots"] = len(grouped)
@@ -342,16 +322,42 @@ class FuturesOIScannerService:
         return result
 
     def _underlying_quotes(self, contracts):
-        instruments = []
+        """Load real BCS quotes for underlying assets, resolving missing class codes."""
+        requested = {}
         for item in contracts:
-            ticker = item.get("underlying_ticker")
-            class_code = item.get("underlying_class_code")
-            if ticker and class_code:
-                instruments.append({"ticker": ticker, "classCode": class_code})
+            ticker = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode")
+            if not ticker:
+                continue
+            key = ticker.upper()
+            requested.setdefault(key, {"ticker": ticker, "classCode": self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")})
+
+        unresolved = [key for key, item in requested.items() if not item.get("classCode")]
+        if unresolved:
+            try:
+                records = self.api.get_instruments_by_tickers(unresolved)
+            except Exception as exc:
+                print("⚠️ Underlying metadata lookup failed:", type(exc).__name__)
+                records = []
+            for record in records if isinstance(records, list) else []:
+                ticker = self._text(record, "ticker", "secCode", "securityCode").upper()
+                if not ticker or ticker not in requested:
+                    continue
+                class_code = self._metadata_class_code(record)
+                if class_code:
+                    requested[ticker]["classCode"] = class_code
+
+        instruments = [item for item in requested.values() if item.get("classCode")]
         if not instruments:
             return {}
-        quotes = self.api.get_quotes_batch(instruments)
-        return {self._text(q, "ticker", "secCode", "securityCode").upper(): q for q in quotes if isinstance(q, dict)}
+        try:
+            quotes = self.api.get_quotes_batch(instruments)
+        except Exception as exc:
+            print("⚠️ Underlying quotes lookup failed:", type(exc).__name__)
+            return {}
+        return {
+            self._text(q, "ticker", "secCode", "securityCode").upper(): q
+            for q in quotes if isinstance(q, dict)
+        }
 
     def scan(self, as_of=None):
         as_of = as_of or date.today()
