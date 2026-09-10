@@ -1,7 +1,8 @@
 """Reusable professional Qt tables for Trader_7_12 Pro."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTableWidgetItem
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem
 
 
 TABLE_STYLE = """
@@ -32,7 +33,7 @@ QTableCornerButton::section { background: #252c33; border: 0; }
 
 
 class MarketTableWidget(QTableWidget):
-    """Compact, non-wrapping table with stable numeric alignment."""
+    """Compact, non-wrapping table with stable numeric alignment and copy support."""
 
     def __init__(self, columns, widths=None, parent=None):
         super().__init__(0, len(columns), parent)
@@ -42,9 +43,11 @@ class MarketTableWidget(QTableWidget):
         self.setWordWrap(False)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
         self.setSortingEnabled(False)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(30)
@@ -72,6 +75,49 @@ class MarketTableWidget(QTableWidget):
                 self.setItem(row_index, column_index, item)
         self.setUpdatesEnabled(True)
         self.resizeRowsToContents()
+
+    def _selected_rows(self):
+        return sorted({index.row() for index in self.selectedIndexes()})
+
+    def copy_selection(self):
+        """Copy selected rows as TSV so they paste cleanly into Numbers/Excel/Telegram."""
+        rows = self._selected_rows()
+        if not rows:
+            rows = list(range(self.rowCount()))
+        if not rows:
+            return False
+        lines = []
+        headers = [self.horizontalHeaderItem(i).text() for i in range(self.columnCount())]
+        lines.append("\t".join(headers))
+        for row in rows:
+            values = []
+            for column in range(self.columnCount()):
+                item = self.item(row, column)
+                values.append(item.text() if item else "")
+            lines.append("\t".join(values))
+        self.window().windowHandle().screen() if False else None
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText("\n".join(lines))
+        return True
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.copy_selection()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_A and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.selectAll()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _show_context_menu(self, position):
+        menu = QMenu(self)
+        copy_action = menu.addAction("Копировать")
+        copy_action.triggered.connect(self.copy_selection)
+        select_all_action = menu.addAction("Выделить всё")
+        select_all_action.triggered.connect(self.selectAll)
+        menu.exec(self.viewport().mapToGlobal(position))
 
 
 class _NumericCell(str):
