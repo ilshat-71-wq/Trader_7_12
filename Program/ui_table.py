@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QHeaderView, QMenu, QTableWidget, QTableWidgetItem
 
 
 TABLE_STYLE = """
@@ -100,7 +100,7 @@ class MarketTableWidget(QTableWidget):
             self.copy_selection()
             event.accept()
             return
-        if event.key() == Qt.Key.Key_A and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        if event.matches(QKeySequence.StandardKey.SelectAll):
             self.selectAll()
             event.accept()
             return
