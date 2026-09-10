@@ -1,13 +1,14 @@
 from datetime import date
 from math import log1p
+from urllib.parse import urlencode
 
 from services.futures_oi_scanner_service import FuturesOIScannerService
 
 
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
-    """MOEX RFUD futures OI scanner with current-session liquidity TOP."""
+    """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.5"
+    VERSION = "2.7.6"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -17,12 +18,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         "GOLD": {"GD", "GL"},
         "MOEX_INDEX": {"MX", "MM"},
     }
+    MARKETDATA_PAGE_SIZE = 100
+    MARKETDATA_MAX_PAGES = 10
 
     def __init__(self, api=None, oi_service=None):
         super().__init__(api=api, oi_service=oi_service)
-        # MOEX ISS can reset the large RFUD marketdata response. Give this
-        # read-only OI path a longer timeout/retry budget without changing
-        # BCS candle concurrency or the rest of the application.
         oi_cls = type(self.oi)
         if getattr(oi_cls, "TIMEOUT", 0) < 15:
             oi_cls.TIMEOUT = 15
@@ -62,7 +62,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
     @staticmethod
     def _session_turnover(marketdata):
-        """Return exchange-supplied current-session monetary turnover in RUB."""
+        """Return exchange-supplied current-day monetary turnover in RUB."""
         for key in ("valtoday", "valtodayrub", "valtodayrur"):
             try:
                 value = float(marketdata.get(key))
@@ -74,7 +74,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
     @staticmethod
     def _session_turnover_source(marketdata):
-        """Identify which accepted MOEX turnover field supplied the value."""
         for key in ("valtoday", "valtodayrub", "valtodayrur"):
             try:
                 if float(marketdata.get(key)) > 0:
@@ -85,7 +84,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
     @staticmethod
     def _underlying_change_percent(quote):
-        """Resolve base change from BCS quote fields without requiring OPEN."""
         if not isinstance(quote, dict):
             return None, "UNAVAILABLE"
         direct_keys = ("changePercent", "change_percent", "lastChangePercent", "lastchangeprcnt", "changePrcnt", "changePct", "pctChange")
@@ -95,12 +93,10 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             except (TypeError, ValueError):
                 continue
             return round(value, 6), key
-
         last = FuturesOIMarketDataScannerService._float(quote, "lastPrice", "last", "price", "currentPrice", "close")
         opening = FuturesOIMarketDataScannerService._float(quote, "openPrice", "open", "dayOpen", "openingPrice")
         if last is not None and opening is not None and opening > 0:
             return round((last / opening - 1.0) * 100.0, 6), "LAST_VS_OPEN"
-
         previous = FuturesOIMarketDataScannerService._float(quote, "prevPrice", "previousPrice", "prevClose", "previousClose", "lastToPrevPrice", "lasttoprevprice")
         if last is not None and previous is not None and previous > 0:
             return round((last / previous - 1.0) * 100.0, 6), "LAST_VS_PREVIOUS"
@@ -110,6 +106,51 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     def _liquidity_score(turnover_rub, oi, volume):
         return round(log1p(max(0.0, float(turnover_rub or 0.0))) * 100.0 + log1p(max(0.0, float(oi or 0.0))) * 3.0 + log1p(max(0.0, float(volume or 0.0))), 3)
 
+    def _load_marketdata_all_resilient(self):
+        """Load RFUD marketdata in ISS pages when the monolithic response resets."""
+        oi = self.oi
+        cached = getattr(oi, "_marketdata_all_cache", None)
+        if cached:
+            return list(cached), None
+        http_get = getattr(oi, "_http_get", None)
+        base_url = getattr(oi, "FUTURES_MARKETDATA_URL", "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities")
+        parse_block = getattr(oi, "_parse_block", None)
+        if not http_get or not parse_block:
+            return [], "MOEX_MARKETDATA_CLIENT_UNAVAILABLE"
+
+        rows = []
+        page_errors = []
+        for page in range(self.MARKETDATA_MAX_PAGES):
+            start = page * self.MARKETDATA_PAGE_SIZE
+            params = {"iss.only": "marketdata", "start": start, "limit": self.MARKETDATA_PAGE_SIZE}
+            url = f"{base_url}.json?{urlencode(params)}"
+            try:
+                payload = http_get(url, timeout=getattr(oi, "TIMEOUT", 15))
+                page_rows = parse_block(payload, "marketdata")
+            except Exception as exc:
+                page_errors.append(f"page={page}: {type(exc).__name__}")
+                if page == 0:
+                    break
+                break
+            if not page_rows:
+                break
+            rows.extend(page_rows)
+            if len(page_rows) < self.MARKETDATA_PAGE_SIZE:
+                break
+
+        deduped = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            secid = str(row.get("secid") or row.get("ticker") or "").upper()
+            if secid:
+                deduped[secid] = row
+        result = list(deduped.values())
+        if result:
+            oi._marketdata_all_cache = list(result)
+            return result, None
+        return [], "; ".join(page_errors) if page_errors else "MOEX_MARKETDATA_EMPTY"
+
     def scan(self, as_of=None):
         as_of = as_of or date.today()
         if not self.api.access_token and not self.api.authorize():
@@ -118,9 +159,17 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         bcs_contracts = self._active_contracts()
         underlying_quotes = self._underlying_quotes(bcs_contracts)
         marketdata_error = None
+        front_contracts = {}
         if hasattr(self.oi, "marketdata_front_contracts"):
             front_contracts = self.oi.marketdata_front_contracts(as_of=as_of)
             marketdata_error = getattr(self.oi, "_marketdata_all_error", None)
+            if not front_contracts:
+                resilient_rows, resilient_error = self._load_marketdata_all_resilient()
+                if resilient_rows:
+                    front_contracts = self.oi._front_marketdata_rows(resilient_rows, as_of=as_of)
+                    marketdata_error = None
+                elif resilient_error:
+                    marketdata_error = resilient_error
         else:
             front_contracts = {}
             for contract in bcs_contracts:
@@ -162,12 +211,10 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             if last is None or change is None:
                 skipped += 1
                 continue
-
             volume = self._float(marketdata, "voltoday", "volume", "volumeContracts", "totalVolume")
             turnover_rub = self._session_turnover(marketdata)
             turnover_source = self._session_turnover_source(marketdata)
             turnover_source_counts[turnover_source] = turnover_source_counts.get(turnover_source, 0) + 1
-
             oi = self.oi._marketdata_analysis(secid, family, change, None)
             if not oi or oi.get("oi_status") not in {"AVAILABLE", "CURRENT_ONLY"}:
                 skipped += 1
@@ -175,14 +222,12 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             oi_available += 1
             if turnover_rub > 0:
                 liquidity_available += 1
-
             underlying_ticker = self._known_underlying_ticker(family, bcs_contracts)
             underlying_quote = underlying_quotes.get(underlying_ticker, {})
             underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
             underlying_change, underlying_change_source = self._underlying_change_percent(underlying_quote)
             if underlying_change is not None:
                 base_change_available += 1
-
             candidates.append({
                 "futures_root": family, "oi_root": family, "futures_ticker": secid,
                 "futures_ticker_normalized": secid, "futures_class_code": "RFUD",
@@ -210,13 +255,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
         candidates.sort(key=lambda x: (float(x.get("session_turnover_rub") or 0.0), float(x.get("liquidity_score") or 0.0), float((x.get("oi_analysis") or {}).get("oi") or 0.0)), reverse=True)
         liquidity_rows = [x for x in candidates if x.get("liquidity_available")]
-
         liquidity_probe = {}
         for rank, item in enumerate(liquidity_rows, 1):
             root = str(item.get("futures_root") or "").upper()
             if root in self.LIQUIDITY_PROBE_ROOTS:
                 liquidity_probe[root] = {"rank": rank, "contract": item.get("futures_ticker"), "turnover_rub": item.get("session_turnover_rub"), "oi": (item.get("oi_analysis") or {}).get("oi")}
-
         selected = liquidity_rows[: self.LIQUIDITY_TOP_LIMIT]
         if len(selected) < self.LIQUIDITY_TOP_LIMIT:
             selected_ids = {id(x) for x in selected}
@@ -225,24 +268,22 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         for rank, item in enumerate(selected, 1):
             item["liquidity_rank"] = rank
             item["liquidity_tier"] = "LIQUIDITY_TOP"
-
         economic_overlap = {}
         for item in candidates:
             group = str(item.get("economic_exposure_group") or "")
             if group:
                 economic_overlap.setdefault(group, []).append(item.get("futures_root"))
         economic_overlap = {key: sorted(set(values)) for key, values in economic_overlap.items() if len(set(values)) > 1}
-
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
         status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
         diagnostics.update({
             "status": status, "version": self.VERSION, "contracts": len(front_contracts), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available,
             "skipped": skipped, "quote_instruments": len(underlying_quotes), "quote_records": len(underlying_quotes), "marketdata_oi_records": oi_available, "liquidity_available": liquidity_available,
-            "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_SESSION_MONETARY_TURNOVER",
+            "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER",
             "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "liquidity_probe_roots": liquidity_probe, "economic_overlap_groups": economic_overlap,
             "base_change_available": base_change_available, "base_change_missing": max(0, len(candidates) - base_change_available),
             "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "MOEX_RFUD_SECID_TO_FAMILY + BCS_UNDERLYING_CONTEXT",
-            "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_SESSION_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
+            "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
             "marketdata_source": "MOEX_ISS_FUTURES_FORTS_RFUD", "marketdata_error": marketdata_error,
         })
         print("Futures OI diagnostics:", diagnostics)
