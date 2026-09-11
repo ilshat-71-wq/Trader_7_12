@@ -133,6 +133,44 @@ class BCSAPI:
                 return code
         return ""
 
+    @classmethod
+    def _record_aliases(cls, record):
+        """Return all real BCS metadata aliases that can identify an economic underlying."""
+        if not isinstance(record, dict):
+            return set()
+
+        fields = (
+            "ticker",
+            "secCode",
+            "securityCode",
+            "baseAssetTicker",
+            "base_asset_ticker",
+            "underlyingAsset",
+            "underlying_asset",
+            "underlying",
+            "underlyingTicker",
+            "underlying_ticker",
+            "underlyingSecCode",
+            "underlying_sec_code",
+            "assetCode",
+            "asset_code",
+            "baseAsset",
+            "base_asset",
+            "baseTicker",
+            "base_ticker",
+            "shortCode",
+            "short_code",
+        )
+
+        result = set()
+        for field in fields:
+            value = record.get(field)
+            if value:
+                key = cls._instrument_lookup_key(value)
+                if key:
+                    result.add(key)
+        return result
+
     def _underlying_metadata_fallback(self, requested, existing):
         """Resolve real non-futures underlyings from BCS by-type metadata."""
         unresolved = set()
@@ -143,10 +181,8 @@ class BCSAPI:
         for record in existing:
             if not isinstance(record, dict):
                 continue
-            ticker = record.get("ticker") or record.get("secCode") or record.get("securityCode")
-            key = self._instrument_lookup_key(ticker)
-            if key and self._record_class_code(record):
-                unresolved.discard(key)
+            if self._record_class_code(record):
+                unresolved.difference_update(self._record_aliases(record))
         if not unresolved:
             return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0, "fallback_unresolved": 0}
 
@@ -172,19 +208,42 @@ class BCSAPI:
             for record in records if isinstance(records, list) else []:
                 if not isinstance(record, dict):
                     continue
-                ticker = record.get("ticker") or record.get("secCode") or record.get("securityCode")
-                key = self._instrument_lookup_key(ticker)
-                if key not in unresolved:
+
+                aliases = self._record_aliases(record)
+                matched = sorted(aliases.intersection(unresolved))
+                if not matched:
                     continue
+
                 class_code = self._record_class_code(record)
                 if not class_code:
                     continue
-                dedupe_key = (key, class_code.upper())
+
+                actual_ticker = str(
+                    record.get("ticker")
+                    or record.get("secCode")
+                    or record.get("securityCode")
+                    or ""
+                ).strip().upper()
+
+                # Preserve the real BCS instrument identity. These fields are
+                # internal provenance only and never alter the source data.
+                enriched = dict(record)
+                enriched["_underlying_requested_aliases"] = matched
+                enriched["_underlying_bcs_ticker"] = actual_ticker
+                enriched["_underlying_bcs_class_code"] = class_code
+                enriched["_underlying_mapping_source"] = "BCS_BY_TYPE_METADATA"
+
+                dedupe_key = (
+                    actual_ticker or "|".join(matched),
+                    class_code.upper(),
+                )
                 if dedupe_key not in seen:
-                    result.append(record)
+                    result.append(enriched)
                     seen.add(dedupe_key)
                     fallback_matches += 1
-                unresolved.discard(key)
+
+                for key in matched:
+                    unresolved.discard(key)
             if not unresolved:
                 break
         return result, {
