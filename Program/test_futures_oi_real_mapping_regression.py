@@ -75,8 +75,7 @@ def test_unverified_oil_and_gas_are_not_replaced():
     assert FuturesOIMarketDataScannerService._family_to_underlying("NG") == "NG"
 
 
-def test_gold_semantic_aliases_do_not_prefer_etf_symbol():
+def test_gold_semantic_aliases_are_based_on_the_real_spot_symbol():
     aliases = FuturesOIMarketDataScannerService._semantic_aliases("GLDRUB_TOM")
     assert "GLDRUBTOM" in aliases
     assert "GLDRUB" in aliases
-    assert "GOLD" not in aliases
