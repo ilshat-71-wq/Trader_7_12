@@ -111,15 +111,12 @@ class MarketSessionService:
         return value.date() if value is not None else None
 
     def get_session_start(self, value=None):
-        """Return the intraday radar data start: 07:00 MSK for the trading day.
-
-        Exchange session names remain available through ``get_session``.
-        This method is intentionally not allowed to reset cumulative radar
-        calculations at 10:00, 19:00 or any other exchange boundary.
-        """
+        """Return the data start appropriate to the active trading session."""
         session = self.get_session(value)
         if session == "CLOSED":
             return None
+        if session == "WEEKEND_SESSION":
+            return self.WEEKEND_SESSION_START
         return self.MORNING_START
 
     def is_market_open(self, value=None):
