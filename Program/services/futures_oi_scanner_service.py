@@ -6,7 +6,7 @@ from services.open_interest_service import OpenInterestService
 class FuturesOIScannerService:
     """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.4.1"
+    VERSION = "2.4.2"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
@@ -71,15 +71,24 @@ class FuturesOIScannerService:
         import re
 
         value = str(ticker or "").upper().strip().split("-", 1)[0]
-
-        # MOEX standard futures suffix: month code + year digit.
-        # Examples: SIU6 -> SI, CRU6 -> CR, GDU6 -> GD,
-        # MXU6 -> MX, RIU6 -> RI, BRZ6 -> BR.
         return re.sub(r"[FGHJKMNQUVXZ]\d$", "", value)
 
     @classmethod
     def _underlying_code(cls, row):
-        value = cls._text(row, "underlyingAsset", "underlying", "underlyingTicker", "underlyingSecCode", "assetCode", "baseAsset", "baseTicker")
+        """Return the real economic base ticker exposed by BCS metadata.
+
+        BCS futures cards can expose the underlying through ``baseAssetTicker``
+        even when ``underlyingTicker``/``underlyingAsset`` is absent or contains
+        the MOEX futures root. Prefer the explicit base-asset field because the
+        downstream M5 calculation must use the real BCS spot/base instrument,
+        never a futures substitute.
+        """
+        value = cls._text(
+            row,
+            "baseAssetTicker", "base_asset_ticker",
+            "underlyingAsset", "underlying", "underlyingTicker",
+            "underlyingSecCode", "assetCode", "baseAsset", "baseTicker",
+        )
         return value.upper() if value else ""
 
     @classmethod
@@ -289,7 +298,12 @@ class FuturesOIScannerService:
                 "futures_ticker_normalized": ticker, "futures_class_code": class_code,
                 "underlying_asset_source": underlying_source,
                 "underlying_asset": self._normalize_underlying_display(underlying_source),
-                "underlying_ticker": self._text(raw, "underlyingTicker", "underlyingSecCode") or underlying_source,
+                "underlying_ticker": self._text(
+                    raw,
+                    "baseAssetTicker", "base_asset_ticker",
+                    "underlyingTicker", "underlyingSecCode",
+                    "underlyingAsset", "baseAsset", "baseTicker",
+                ) or underlying_source,
                 "underlying_class_code": self._text(raw, "underlyingClassCode", "underlying_class_code", "underlyingClass"),
                 "_expiry": expiry,
             })
