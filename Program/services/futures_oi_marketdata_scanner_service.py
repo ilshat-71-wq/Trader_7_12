@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.8"
+    VERSION = "2.7.9"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -50,9 +50,39 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         return family
 
     @staticmethod
+    def _normalize_mapping_text(value):
+        return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+    @classmethod
+    def _semantic_aliases(cls, value):
+        normalized = cls._normalize_mapping_text(value)
+        if not normalized:
+            return set()
+        aliases = {normalized}
+        replacements = {
+            "СБЕРБАНК": {"SBER", "SBERBANK", "SBRF"},
+            "ЛУКОЙЛ": {"LKOH", "LUKOIL"},
+            "ЗОЛОТОРАСЧЕТНЫЙ": {"GLDRUBTOM", "GLDRUB", "GOLD"},
+            "ЗОЛОТО": {"GLDRUBTOM", "GLDRUB", "GOLD"},
+            "USDРUB": {"USDRUB", "USDRUBTOM"},
+            "USDRUB": {"USDRUBTOM"},
+            "EURRUB": {"EURRUBTOM"},
+            "CNYRUB": {"CNYRUBTOM"},
+        }
+        for key, values in replacements.items():
+            if normalized == cls._normalize_mapping_text(key):
+                aliases.update(cls._normalize_mapping_text(x) for x in values)
+        return aliases
+
+    @staticmethod
     def _family_to_underlying(family):
         family = str(family or "").upper()
-        explicit = {"SBRF": "SBER", "SR": "SBER"}
+        explicit = {
+            "SBRF": "SBER", "SR": "SBER", "LK": "LKOH",
+            "GD": "GLDRUB_TOM", "GL": "GLDRUB_TOM",
+            "SI": "USDRUB", "USDRUBF": "USDRUB",
+            "EU": "EURRUB", "CR": "CNYRUB",
+        }
         if family in explicit:
             return explicit[family]
         reverse = {}
@@ -63,14 +93,15 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     @classmethod
     def _known_underlying_ticker(cls, family, contracts):
         family = str(family or "").upper()
+        mapped = cls._family_to_underlying(family)
+        aliases = {"SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "NA": "QQQ", "SF": "SPYF", "MX": "MIX", "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI"}
+        canonical = aliases.get(mapped, mapped)
         for contract in contracts:
             if str(contract.get("oi_root") or "").upper() == family:
                 ticker = str(contract.get("underlying_ticker") or "").upper()
-                if ticker:
+                if ticker and ticker != family and ticker not in {"СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
                     return ticker
-        mapped = cls._family_to_underlying(family)
-        aliases = {"SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "NA": "QQQ", "SF": "SPYF", "MX": "MIX", "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI"}
-        return aliases.get(mapped, mapped)
+        return canonical
 
     @staticmethod
     def _select_underlying_class_code(record):
@@ -95,37 +126,31 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         return min(candidates)[1] if candidates else ""
 
     def _underlying_quotes(self, contracts):
-        """Resolve every futures family to a real underlying ticker and BCS classCode."""
         requested = {}
         family_tickers = {}
-        aliases = {"SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "NA": "QQQ", "SF": "SPYF", "MX": "MIX", "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI"}
-
+        raw_semantics = {}
         for item in contracts:
             family = self._text(item, "oi_root", "futures_root").upper()
             if not family:
                 continue
-            ticker = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode")
-            if not ticker:
-                ticker = self._known_underlying_ticker(family, contracts)
-            ticker = ticker.upper()
-
-            # Some BCS futures metadata exposes the MOEX short root itself
-            # instead of the underlying security ticker. Convert only those
-            # unambiguous cases; preserve real underlying tickers such as SBER.
             mapped = self._family_to_underlying(family)
-            canonical = aliases.get(mapped, mapped)
-            if ticker == family and canonical and canonical != family:
-                ticker = canonical
-
-            family_tickers[family] = ticker
+            raw = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode").upper()
+            ticker = mapped
+            if raw and raw not in {family, "СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
+                ticker = raw
+            canonical = ticker.upper()
+            family_tickers[family] = canonical
+            raw_semantics[family] = raw
             item_class = self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")
-            entry = requested.setdefault(ticker, {"ticker": ticker, "classCode": ""})
+            entry = requested.setdefault(canonical, {"ticker": canonical, "classCode": "", "families": set()})
+            entry["families"].add(family)
             if item_class and not entry["classCode"]:
                 entry["classCode"] = item_class
 
         unresolved = [key for key, item in requested.items() if not item.get("classCode")]
         lookup_batches = 0
         lookup_records = 0
+        semantic_matches = 0
         for start in range(0, len(unresolved), self.ENRICH_BATCH_SIZE):
             batch = unresolved[start:start + self.ENRICH_BATCH_SIZE]
             lookup_batches += 1
@@ -140,99 +165,33 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             for record in records:
                 if not isinstance(record, dict):
                     continue
-
-                actual_ticker = self._text(
-                    record,
-                    "_underlying_bcs_ticker",
-                    "ticker",
-                    "secCode",
-                    "securityCode",
-                ).upper()
-
-                class_code = (
-                    self._text(
-                        record,
-                        "_underlying_bcs_class_code",
-                        "classCode",
-                        "class_code",
-                        "classcode",
-                    )
-                    or self._select_underlying_class_code(record)
-                )
-
-                aliases = set()
-
-                for key in (
-                    "_underlying_requested_aliases",
-                    "underlying_requested_aliases",
-                ):
-                    value = record.get(key)
-                    if isinstance(value, (list, tuple, set)):
-                        aliases.update(str(x).upper() for x in value if str(x).strip())
-
-                for key in (
-                    "ticker",
-                    "secCode",
-                    "securityCode",
-                    "baseAssetTicker",
-                    "base_asset_ticker",
-                    "underlyingAsset",
-                    "underlying_asset",
-                    "underlying",
-                    "underlyingTicker",
-                    "underlying_ticker",
-                    "underlyingSecCode",
-                    "underlying_sec_code",
-                    "assetCode",
-                    "asset_code",
-                    "baseAsset",
-                    "base_asset",
-                    "baseTicker",
-                    "base_ticker",
-                    "shortCode",
-                    "short_code",
-                ):
+                actual_ticker = self._text(record, "_underlying_bcs_ticker", "ticker", "secCode", "securityCode").upper()
+                class_code = self._text(record, "_underlying_bcs_class_code", "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
+                if not actual_ticker or not class_code:
+                    continue
+                record_values = []
+                for key in ("ticker", "secCode", "securityCode", "baseAssetTicker", "base_asset_ticker", "underlyingAsset", "underlying_asset", "underlying", "underlyingTicker", "underlying_ticker", "underlyingSecCode", "underlying_sec_code", "assetCode", "asset_code", "baseAsset", "base_asset", "baseTicker", "base_ticker", "shortCode", "short_code", "shortName", "name", "fullName"):
                     value = record.get(key)
                     if value:
-                        normalized = str(value).upper().replace("/", "").replace("-", "").replace("_", "")
-                        for suffix in ("TOM", "F"):
-                            if normalized.endswith(suffix) and len(normalized) > len(suffix):
-                                normalized = normalized[:-len(suffix)]
-                                break
-                        if normalized:
-                            aliases.add(normalized)
+                        record_values.append(value)
+                record_aliases = set()
+                for value in record_values:
+                    record_aliases.update(self._semantic_aliases(value))
+                for economic_ticker, entry in requested.items():
+                    wanted = set(self._semantic_aliases(economic_ticker))
+                    for family in entry["families"]:
+                        wanted.update(self._semantic_aliases(family))
+                        wanted.update(self._semantic_aliases(raw_semantics.get(family)))
+                    if not wanted.intersection(record_aliases):
+                        continue
+                    entry["classCode"] = class_code
+                    entry["bcsTicker"] = actual_ticker
+                    entry["mappingSource"] = "BCS_SEMANTIC_METADATA"
+                    semantic_matches += 1
 
-                matched_requested = sorted(
-                    key for key in requested
-                    if str(key).upper().replace("/", "").replace("-", "").replace("_", "") in aliases
-                )
-
-                if not matched_requested and actual_ticker in requested:
-                    matched_requested = [actual_ticker]
-
-                for economic_ticker in matched_requested:
-                    if class_code and not requested[economic_ticker].get("classCode"):
-                        requested[economic_ticker]["classCode"] = class_code
-                    if actual_ticker and not requested[economic_ticker].get("bcsTicker"):
-                        requested[economic_ticker]["bcsTicker"] = actual_ticker
-                    if actual_ticker:
-                        requested[economic_ticker]["mappingSource"] = str(
-                            record.get("_underlying_mapping_source")
-                            or "BCS_INSTRUMENT_METADATA"
-                        )
-
-        self._underlying_class_codes = {
-            key: value["classCode"] for key, value in requested.items()
-            if value.get("classCode")
-        }
-        self._underlying_bcs_tickers = {
-            key: value["bcsTicker"] for key, value in requested.items()
-            if value.get("bcsTicker")
-        }
-        self._underlying_mapping_source = {
-            key: value["mappingSource"] for key, value in requested.items()
-            if value.get("mappingSource")
-        }
+        self._underlying_class_codes = {key: value["classCode"] for key, value in requested.items() if value.get("classCode")}
+        self._underlying_bcs_tickers = {key: value["bcsTicker"] for key, value in requested.items() if value.get("bcsTicker")}
+        self._underlying_mapping_source = {key: value["mappingSource"] for key, value in requested.items() if value.get("mappingSource")}
         self._underlying_family_tickers = family_tickers
         self._underlying_metadata_diagnostics = {
             "underlying_requested": len(requested),
@@ -240,21 +199,16 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)),
             "underlying_metadata_lookup_batches": lookup_batches,
             "underlying_metadata_lookup_records": lookup_records,
+            "underlying_semantic_matches": semantic_matches,
         }
-
         instruments = []
         for economic_ticker, item in requested.items():
             class_code = item.get("classCode")
             bcs_ticker = item.get("bcsTicker") or economic_ticker
             if class_code and bcs_ticker:
-                instruments.append({
-                    "ticker": bcs_ticker,
-                    "classCode": class_code,
-                })
-
+                instruments.append({"ticker": bcs_ticker, "classCode": class_code})
         if not instruments:
             return {}
-
         try:
             quotes = self.api.get_quotes_batch(instruments)
         except Exception as exc:
@@ -298,13 +252,9 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         opening = FuturesOIMarketDataScannerService._float(quote, "openPrice", "open", "dayOpen", "openingPrice")
         if last is not None and opening is not None and opening > 0:
             return round((last / opening - 1.0) * 100.0, 6), "LAST_VS_OPEN"
-
-        previous_close = FuturesOIMarketDataScannerService._float(
-            quote, "prevClose", "previousClose", "previous_close", "prev_close"
-        )
+        previous_close = FuturesOIMarketDataScannerService._float(quote, "prevClose", "previousClose", "previous_close", "prev_close")
         if last is not None and previous_close is not None and previous_close > 0:
             return round((last / previous_close - 1.0) * 100.0, 6), "LAST_VS_PREVIOUS"
-
         return None, "UNAVAILABLE"
 
     @staticmethod
@@ -345,7 +295,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         ticker = str(ticker or "").upper()
         if ticker in self._underlying_day_change_cache:
             return self._underlying_day_change_cache[ticker]
-
         economic_ticker = ticker
         bcs_ticker = self._underlying_bcs_tickers.get(economic_ticker, economic_ticker)
         class_code = self._underlying_class_codes.get(economic_ticker)
@@ -360,13 +309,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             self._underlying_day_change_cache[ticker] = result
             return result
         try:
-            bars = self.api.get_candles(
-                bcs_ticker,
-                class_code,
-                interval=self.UNDERLYING_CANDLE_INTERVAL,
-                start_time=start.astimezone(timezone.utc),
-                end_time=now.astimezone(timezone.utc),
-            )
+            bars = self.api.get_candles(bcs_ticker, class_code, interval=self.UNDERLYING_CANDLE_INTERVAL, start_time=start.astimezone(timezone.utc), end_time=now.astimezone(timezone.utc))
         except Exception as exc:
             result = (None, f"CANDLE_ERROR:{type(exc).__name__}")
             self._underlying_day_change_cache[ticker] = result
@@ -383,9 +326,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             result = (None, "NO_07:00_NOW_CANDLES")
         else:
             valid.sort(key=lambda item: item[0])
-            first_open = valid[0][1]
-            last_close = valid[-1][2]
-            result = (round((last_close / first_open - 1.0) * 100.0, 6), "BCS_M5_07:00_NOW")
+            result = (round((valid[-1][2] / valid[0][1] - 1.0) * 100.0, 6), "BCS_M5_07:00_NOW")
         self._underlying_day_change_cache[ticker] = result
         return result
 
@@ -439,23 +380,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         bcs_contracts = self._active_contracts()
         underlying_quotes = self._underlying_quotes(bcs_contracts)
         marketdata_error = None
-        front_contracts = (
-            self.oi.marketdata_front_contracts(as_of=as_of)
-            if hasattr(self.oi, "marketdata_front_contracts")
-            else {}
-        )
+        front_contracts = self.oi.marketdata_front_contracts(as_of=as_of) if hasattr(self.oi, "marketdata_front_contracts") else {}
         marketdata_error = getattr(self.oi, "_marketdata_all_error", None)
-
-        # Primary fallback: use the existing MOEX family request path.
-        # This remains REAL MOEX RFUD marketdata and never substitutes
-        # BCS futures quotes or synthetic price/volume data.
         if not front_contracts and hasattr(self.oi, "_request_marketdata_family"):
             family_rows = {}
-            families = sorted({
-                str(item.get("oi_root") or item.get("futures_root") or "").upper()
-                for item in bcs_contracts
-                if str(item.get("oi_root") or item.get("futures_root") or "").strip()
-            })
+            families = sorted({str(item.get("oi_root") or item.get("futures_root") or "").upper() for item in bcs_contracts if str(item.get("oi_root") or item.get("futures_root") or "").strip()})
             for family in families:
                 try:
                     row = self.oi._request_marketdata_family(family)
@@ -467,17 +396,13 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             if family_rows:
                 front_contracts = family_rows
                 marketdata_error = None
-
         if not front_contracts:
             resilient_rows, resilient_error = self._load_marketdata_all_resilient()
             if resilient_rows and hasattr(self.oi, "_front_marketdata_rows"):
-                front_contracts = self.oi._front_marketdata_rows(
-                    resilient_rows, as_of=as_of
-                )
+                front_contracts = self.oi._front_marketdata_rows(resilient_rows, as_of=as_of)
                 marketdata_error = None
             elif resilient_error:
                 marketdata_error = resilient_error
-
         candidates, skipped, oi_available = [], 0, 0
         liquidity_available = 0
         base_change_available = 0
@@ -486,87 +411,46 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         for family, marketdata in sorted(front_contracts.items()):
             secid = self._text(marketdata, "secid", "ticker", "securityCode").upper()
             if not secid:
-                skipped += 1
-                continue
+                skipped += 1; continue
             last = self._float(marketdata, "last", "lastPrice", "price", "currentPrice")
             change = self._float(marketdata, "lastchangeprcnt", "lastChangePrcnt", "lastChangePercent", "lasttoprevprice", "lastToPrevPrice")
             if change is None:
                 previous = self._float(marketdata, "prevsettleprice", "prevSettlePrice", "prevprice", "lastSettlPrice")
-                if last is not None and previous and previous > 0:
-                    change = (last / previous - 1.0) * 100.0
-            if bool(marketdata.get("_futoi_fallback")):
-                last, change = 0.0, None
-            if last is None:
-                skipped += 1
-                continue
+                if last is not None and previous and previous > 0: change = (last / previous - 1.0) * 100.0
+            if bool(marketdata.get("_futoi_fallback")): last, change = 0.0, None
+            if last is None: skipped += 1; continue
             volume = self._float(marketdata, "voltoday", "volume", "volumeContracts", "totalVolume")
             turnover_rub = self._session_turnover(marketdata)
             turnover_source = self._session_turnover_source(marketdata)
             turnover_source_counts[turnover_source] = turnover_source_counts.get(turnover_source, 0) + 1
             oi = self.oi._marketdata_analysis(secid, family, change, None)
-            if not oi or oi.get("oi_status") not in {"AVAILABLE", "CURRENT_ONLY"}:
-                skipped += 1
-                continue
+            if not oi or oi.get("oi_status") not in {"AVAILABLE", "CURRENT_ONLY"}: skipped += 1; continue
             oi_available += 1
             liquidity_available += int(turnover_rub > 0)
             underlying_ticker = self._underlying_family_tickers.get(family) or self._known_underlying_ticker(family, bcs_contracts)
-            underlying_quote = underlying_quotes.get(underlying_ticker, {})
+            underlying_quote = underlying_quotes.get(self._underlying_bcs_tickers.get(underlying_ticker, underlying_ticker), {})
             underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
             underlying_change, underlying_change_source = self._underlying_day_change(underlying_ticker)
             base_change_source_counts[underlying_change_source] = base_change_source_counts.get(underlying_change_source, 0) + 1
-            if underlying_change is not None:
-                base_change_available += 1
-            candidates.append({
-                "futures_root": family, "oi_root": family, "futures_ticker": secid,
-                "futures_ticker_normalized": secid, "futures_class_code": "RFUD", "curve_rank": 1, "curve_role": "FRONT",
-                "_expiry": marketdata.get("_moex_expiry") or "9999-99-99", "underlying_ticker": underlying_ticker, "underlying_asset": underlying_ticker,
-                "economic_exposure_group": self._economic_exposure_group(family), "price": last, "change_percent": round(change, 4), "volume": volume,
-                "session_turnover_rub": round(turnover_rub, 2) if turnover_rub else 0.0, "turnover_source": turnover_source,
-                "liquidity_available": bool(turnover_rub > 0), "liquidity_score": self._liquidity_score(turnover_rub, oi.get("oi"), volume),
-                "oi_analysis": oi, "underlying_price": underlying_price,
-                "underlying_change_percent": None if underlying_change is None else round(underlying_change, 4),
-                "underlying_change_source": underlying_change_source,
-                "underlying_data_status": "AVAILABLE" if underlying_price is not None else "UNAVAILABLE",
-                "direction_alignment": ("ALIGNED_UP" if change is not None and underlying_change is not None and change > 0 and underlying_change > 0 else "ALIGNED_DOWN" if change is not None and underlying_change is not None and change < 0 and underlying_change < 0 else "DIVERGENCE" if change is not None and underlying_change is not None and change * underlying_change < 0 else "NEUTRAL"),
-                "data_status": "AVAILABLE",
-            })
-
-        candidates.sort(key=lambda x: (float(x.get("session_turnover_rub") or 0.0), float(x.get("liquidity_score") or 0.0), float((x.get("oi_analysis") or {}).get("oi") or 0.0)), reverse=True)
-        liquidity_rows = [x for x in candidates if x.get("liquidity_available")]
-        liquidity_probe = {}
-        for rank, item in enumerate(liquidity_rows, 1):
-            root = str(item.get("futures_root") or "").upper()
-            if root in self.LIQUIDITY_PROBE_ROOTS:
-                liquidity_probe[root] = {"rank": rank, "contract": item.get("futures_ticker"), "turnover_rub": item.get("session_turnover_rub"), "oi": (item.get("oi_analysis") or {}).get("oi")}
-        selected = liquidity_rows[: self.LIQUIDITY_TOP_LIMIT]
-        if len(selected) < self.LIQUIDITY_TOP_LIMIT:
-            selected_ids = {id(x) for x in selected}
-            selected.extend(x for x in candidates if id(x) not in selected_ids)
-            selected = selected[: self.LIQUIDITY_TOP_LIMIT]
-        for rank, item in enumerate(selected, 1):
-            item["liquidity_rank"] = rank
-            item["liquidity_tier"] = "LIQUIDITY_TOP"
-        economic_overlap = {}
-        for item in candidates:
-            group = str(item.get("economic_exposure_group") or "")
-            if group:
-                economic_overlap.setdefault(group, []).append(item.get("futures_root"))
-        economic_overlap = {key: sorted(set(values)) for key, values in economic_overlap.items() if len(set(values)) > 1}
+            if underlying_change is not None: base_change_available += 1
+            candidates.append({"futures_root": family, "oi_root": family, "futures_ticker": secid, "last": last, "change_pct": change, "volume": volume, "turnover_rub": turnover_rub, "turnover_source": turnover_source, "oi": oi, "underlying_ticker": underlying_ticker, "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker), "underlying_class_code": self._underlying_class_codes.get(underlying_ticker), "underlying_price": underlying_price, "underlying_change_pct": underlying_change, "underlying_change_source": underlying_change_source})
+        candidates.sort(key=lambda row: float(row.get("turnover_rub") or 0.0), reverse=True)
+        selected = candidates[:self.LIQUIDITY_TOP_LIMIT]
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
         diagnostics.update(getattr(self, "_underlying_metadata_diagnostics", {}))
-        status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
-        diagnostics.update({
-            "status": status, "version": self.VERSION, "contracts": len(front_contracts), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available,
-            "skipped": skipped, "quote_instruments": len(underlying_quotes), "quote_records": len(underlying_quotes), "marketdata_oi_records": oi_available,
-            "liquidity_available": liquidity_available, "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected),
-            "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER", "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts,
-            "liquidity_probe_roots": liquidity_probe, "economic_overlap_groups": economic_overlap,
-            "base_change_available": base_change_available, "base_change_missing": max(0, len(candidates) - base_change_available),
-            "base_change_policy": "BCS_INTRADAY_07:00_NOW", "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL,
-            "base_change_source_counts": base_change_source_counts,
-            "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "MOEX_RFUD_SECID_TO_FAMILY + BCS_UNDERLYING_CONTEXT",
-            "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
-            "marketdata_source": "MOEX_ISS_FUTURES_FORTS_RFUD", "marketdata_error": marketdata_error,
-        })
-        print("Futures OI diagnostics:", diagnostics)
+        process_status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
+        underlying_requested = len(self._underlying_family_tickers)
+        underlying_class_codes = len(self._underlying_class_codes)
+        underlying_class_code_missing = max(0, underlying_requested - underlying_class_codes)
+        base_change_total = len(candidates)
+        base_change_missing = max(0, base_change_total - base_change_available)
+        base_change_coverage = round(base_change_available / base_change_total * 100.0, 2) if base_change_total else 0.0
+        underlying_mapping_coverage = round(underlying_class_codes / underlying_requested * 100.0, 2) if underlying_requested else 0.0
+        data_quality_issues = []
+        if underlying_class_code_missing: data_quality_issues.append("INCOMPLETE_UNDERLYING_MAPPING")
+        if base_change_missing: data_quality_issues.append("INCOMPLETE_BASE_CHANGE")
+        if marketdata_error: data_quality_issues.append("MARKETDATA_ERROR")
+        data_quality_status = "COMPLETE" if not data_quality_issues else "INCOMPLETE"
+        diagnostics.update({"status": process_status, "process_status": process_status, "data_quality_status": data_quality_status, "data_quality_issues": data_quality_issues, "underlying_mapping_coverage_percent": underlying_mapping_coverage, "base_change_coverage_percent": base_change_coverage, "version": self.VERSION, "contracts": len(candidates), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available, "skipped": skipped, "liquidity_available": liquidity_available, "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER", "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "base_change_available": base_change_available, "base_change_missing": base_change_missing, "base_change_policy": "BCS_INTRADAY_07:00_NOW", "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL, "base_change_source_counts": base_change_source_counts, "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "MOEX_RFUD_SECID_TO_FAMILY + BCS_UNDERLYING_CONTEXT", "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME", "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA", "marketdata_error": marketdata_error})
+        self._last_diagnostics = diagnostics
         return selected, diagnostics
