@@ -28,22 +28,17 @@ from api.request_helper import RequestHelper
 
 class BCSAPI:
 
-    # BCS documents 10 RPS for market-data HTTP. Keep a small concurrent
-    # worker pool so the scanner can use the available throughput without
-    # hammering the endpoint.
     CANDLE_CACHE_TTL = 30.0
     CANDLE_TIMEOUT = 8.0
     CANDLE_RETRIES = 1
     CANDLE_MAX_CONCURRENCY = 4
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
-    TICKER_LOOKUP_BATCH_SIZE = 20
 
     _shared_instance = None
     _initialized = False
 
     def __new__(cls):
-        """Return one process-wide read-only market-data client."""
         if cls._shared_instance is None:
             cls._shared_instance = super().__new__(cls)
         return cls._shared_instance
@@ -51,42 +46,22 @@ class BCSAPI:
     def __init__(self):
         if self.__class__._initialized:
             return
-
         self.access_token = None
-        self.info_url = (
-            "https://be.broker.ru/"
-            "trade-api-information-service/api/v1"
-        )
-        self.market_url = (
-            "https://be.broker.ru/"
-            "trade-api-market-data-connector/api/v1"
-        )
+        self.info_url = "https://be.broker.ru/trade-api-information-service/api/v1"
+        self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         self._candle_cache = {}
         self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
 
-    # ---------------------------------------------------------
-
     def authorize(self):
         if self.access_token:
             return True
-
         refresh_token = get_refresh_token()
         if not refresh_token:
             print("❌ BCS refresh token is not configured")
             return False
-
-        url = (
-            "https://be.broker.ru/"
-            "trade-api-keycloak/"
-            "realms/tradeapi/"
-            "protocol/openid-connect/token"
-        )
-        payload = {
-            "client_id": "trade-api-read",
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        }
+        url = "https://be.broker.ru/trade-api-keycloak/realms/tradeapi/protocol/openid-connect/token"
+        payload = {"client_id": "trade-api-read", "grant_type": "refresh_token", "refresh_token": refresh_token}
         r = RequestHelper.post(url, data=payload)
         if r.status_code == 200:
             data = r.json()
@@ -99,12 +74,8 @@ class BCSAPI:
         print(r.text)
         return False
 
-    # ---------------------------------------------------------
-
     def headers(self):
         return {"Authorization": f"Bearer {self.access_token}"}
-
-    # ---------------------------------------------------------
 
     def get_instruments(self, instrument_type="FUTURES"):
         """Load instrument metadata with a bounded, metadata-specific retry policy."""
@@ -113,13 +84,7 @@ class BCSAPI:
         page = 0
         while True:
             params = {"type": instrument_type, "page": page, "size": 100}
-            r = RequestHelper.get(
-                url,
-                headers=self.headers(),
-                params=params,
-                timeout=self.METADATA_TIMEOUT,
-                max_retries=self.METADATA_RETRIES,
-            )
+            r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.METADATA_TIMEOUT, max_retries=self.METADATA_RETRIES)
             print(f"Instruments page {page}:", r.status_code)
             if r.status_code != 200:
                 break
@@ -134,120 +99,59 @@ class BCSAPI:
         print("Всего загружено:", len(result))
         return result
 
-    # ---------------------------------------------------------
-
     def get_instruments_by_tickers(self, tickers):
-        """Load all BCS instrument cards for the requested tickers.
-
-        BCS documents pagination for this endpoint. In practice the server
-        may also apply a request-side limit to the ticker filter, so a large
-        caller batch must not be treated as one atomic lookup. Split the
-        request into small deterministic batches, then paginate each response.
-        """
+        """Load all BCS instrument cards for the requested tickers."""
         if not isinstance(tickers, (list, tuple)):
             return []
-        requested = []
-        seen_requested = set()
-        for value in tickers:
-            ticker = str(value).strip().upper()
-            if ticker and ticker not in seen_requested:
-                seen_requested.add(ticker)
-                requested.append(ticker)
+        requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
         if not requested:
             return []
-
         url = f"{self.info_url}/instruments/by-tickers"
         all_records = []
-        seen_records = set()
-        batch_size = self.TICKER_LOOKUP_BATCH_SIZE
-
-        for batch_start in range(0, len(requested), batch_size):
-            batch = requested[batch_start:batch_start + batch_size]
-            seen_page_signatures = set()
-            page = 0
-            page_size = 100
-            max_pages = 20
-
-            while page < max_pages:
-                payload = {"tickers": batch, "page": page, "size": page_size}
-                try:
-                    r = RequestHelper.post(
-                        url,
-                        headers={**self.headers(), "Content-Type": "application/json"},
-                        json=payload
-                    )
-                except Exception as exc:
-                    print("Instrument ticker lookup failed:", type(exc).__name__)
-                    break
-
-                print(
-                    f"Instrument ticker lookup batch {batch_start // batch_size + 1} "
-                    f"({len(batch)}) page {page}: {r.status_code}"
-                )
-                if r.status_code != 200:
-                    break
-
-                try:
-                    data = r.json()
-                except ValueError:
-                    break
-
-                if isinstance(data, list):
-                    records = data
-                elif isinstance(data, dict):
-                    records = data.get("instruments", data.get("records", []))
-                else:
-                    records = []
-                if not isinstance(records, list) or not records:
-                    break
-
-                signature = tuple(
-                    (
-                        str(record.get("ticker") or record.get("secCode") or record.get("securityCode") or "").upper(),
-                        str(record.get("isin") or "").upper(),
-                        str(record.get("classCode") or ""),
-                        str(record.get("class_code") or ""),
-                    )
-                    for record in records if isinstance(record, dict)
-                )
-                if signature in seen_page_signatures:
-                    break
-                seen_page_signatures.add(signature)
-
-                for record in records:
-                    if not isinstance(record, dict):
-                        continue
-                    key = (
-                        str(record.get("ticker") or record.get("secCode") or record.get("securityCode") or "").upper(),
-                        str(record.get("isin") or "").upper(),
-                        str(record.get("classCode") or record.get("class_code") or ""),
-                    )
-                    if key not in seen_records:
-                        seen_records.add(key)
-                        all_records.append(record)
-
-                if len(records) < page_size:
-                    break
-                page += 1
-
+        seen_page_signatures = set()
+        page = 0
+        page_size = 100
+        max_pages = 20
+        while page < max_pages:
+            payload = {"tickers": requested, "page": page, "size": page_size}
+            try:
+                r = RequestHelper.post(url, headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
+            except Exception as exc:
+                print("Instrument ticker lookup failed:", type(exc).__name__)
+                break
+            print(f"Instrument ticker lookup page {page}:", r.status_code)
+            if r.status_code != 200:
+                break
+            try:
+                data = r.json()
+            except ValueError:
+                break
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = data.get("instruments", data.get("records", []))
+            else:
+                records = []
+            if not isinstance(records, list) or not records:
+                break
+            signature = tuple((str(record.get("ticker") or record.get("secCode") or record.get("securityCode") or "").upper(), str(record.get("isin") or "").upper(), str(record.get("classCode") or ""), str(record.get("class_code") or "")) for record in records if isinstance(record, dict))
+            if signature in seen_page_signatures:
+                break
+            seen_page_signatures.add(signature)
+            all_records.extend(record for record in records if isinstance(record, dict))
+            if len(records) < page_size:
+                break
+            page += 1
         return all_records
-
-    # ---------------------------------------------------------
 
     def get_quotes(self, instruments):
         url = f"{self.market_url}/quotes"
         payload = {"instruments": instruments}
-        r = RequestHelper.post(
-            url,
-            headers={**self.headers(), "Content-Type": "application/json"},
-            json=payload
-        )
+        r = RequestHelper.post(url, headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
         print("Quotes:", r.status_code)
         if r.status_code == 200:
             return r.json()
         return {}
-
-    # ---------------------------------------------------------
 
     def get_quotes_batch(self, instruments):
         result = []
@@ -259,8 +163,132 @@ class BCSAPI:
             result.extend(data.get("records", []))
         return result
 
-    # ---------------------------------------------------------
-
     def get_last_trades(self, ticker, class_code):
         url = f"{self.market_url}/last-trades"
         now = datetime.now(timezone.utc)
+        start_time = now - timedelta(minutes=30)
+        payload = {"ticker": ticker, "classCode": class_code, "startDateTime": start_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "endDateTime": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+        try:
+            r = RequestHelper.post(url, headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
+        except Exception as exc:
+            print("⚠️ Trades request failed:", ticker, class_code, type(exc).__name__, str(exc))
+            return {"records": []}
+        if r.status_code != 200:
+            print("⚠️ Trades HTTP:", ticker, class_code, r.status_code, r.text[:300])
+            return {"records": []}
+        try:
+            data = r.json()
+        except ValueError:
+            print("⚠️ Trades JSON parse failed:", ticker, class_code)
+            return {"records": []}
+        records = data.get("records", [])
+        if not isinstance(records, list):
+            records = []
+        records.sort(key=lambda x: x.get("dateTime", x.get("time", "")))
+        print("TRADES COLLECTED:", ticker, class_code, len(records))
+        if records:
+            print("FIRST TRADE:", records[0].get("dateTime", records[0].get("time")), records[0].get("price"))
+            print("LAST TRADE:", records[-1].get("dateTime", records[-1].get("time")), records[-1].get("price"))
+        return {"records": records}
+
+    def get_order_book(self, ticker, class_code):
+        """Load the current Level-2 book through BCS's documented GET endpoint."""
+        url = f"{self.market_url}/order-book"
+        params = {"ticker": ticker, "classCode": class_code, "depth": 10}
+        try:
+            r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.METADATA_TIMEOUT, max_retries=self.METADATA_RETRIES)
+        except Exception as exc:
+            print("⚠️ Order-book request failed:", ticker, class_code, type(exc).__name__)
+            return {}
+        if r.status_code == 200:
+            try:
+                return r.json()
+            except ValueError:
+                print("⚠️ Order-book JSON parse failed:", ticker, class_code)
+                return {}
+        print("⚠️ Order-book HTTP:", ticker, class_code, r.status_code)
+        return {}
+
+    @staticmethod
+    def _candle_cache_key(ticker, class_code, interval, start_dt, end_dt):
+        start_key = start_dt.replace(second=0, microsecond=0).isoformat()
+        end_key = end_dt.replace(second=0, microsecond=0).isoformat()
+        return (str(ticker).upper(), str(class_code), str(interval).upper(), start_key, end_key)
+
+    def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
+        """Load BCS candles with bounded retry, cache and safe concurrency."""
+        url = f"{self.market_url}/candles-chart"
+        def normalize_time(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                dt = value
+            else:
+                text = str(value).strip()
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        now = datetime.now(timezone.utc)
+        try:
+            end_dt = normalize_time(end_time) if end_time is not None else now
+            if start_time is not None:
+                start_dt = normalize_time(start_time)
+            elif interval == "D":
+                start_dt = end_dt - timedelta(days=30)
+            else:
+                start_dt = end_dt - timedelta(hours=4)
+        except (TypeError, ValueError) as exc:
+            print("❌ Invalid candle time:", exc)
+            return {}
+        if start_dt is None or end_dt is None or start_dt >= end_dt:
+            print("❌ Invalid candle period")
+            return {}
+        cache_key = self._candle_cache_key(ticker, class_code, interval, start_dt, end_dt)
+        cached = self._candle_cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_data = cached
+            if (now - cached_at).total_seconds() < self.CANDLE_CACHE_TTL:
+                return cached_data
+            self._candle_cache.pop(cache_key, None)
+        params = {"ticker": ticker, "classCode": class_code, "startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "timeFrame": interval}
+        try:
+            with self._candle_semaphore:
+                r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.CANDLE_TIMEOUT, max_retries=self.CANDLE_RETRIES)
+        except Exception as exc:
+            print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
+            return {}
+        if r.status_code != 200:
+            print("⚠️ Candle HTTP:", ticker, interval, r.status_code)
+            return {}
+        try:
+            data = r.json()
+        except ValueError:
+            print("❌ Candles JSON error:", ticker, interval)
+            return {}
+        self._candle_cache[cache_key] = (now, data)
+        return data
+
+    def get_trades_period(self, ticker, class_code, start_time, end_time):
+        start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        records = []
+        current = start
+        while current < end:
+            chunk_end = min(current + timedelta(hours=1), end)
+            payload = {"ticker": ticker, "classCode": class_code, "startDateTime": current.isoformat(), "endDateTime": chunk_end.isoformat()}
+            print("\nPERIOD TRADES PAYLOAD:")
+            print(payload)
+            r = RequestHelper.post(f"{self.market_url}/last-trades", headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
+            print("Period trades status:", r.status_code)
+            if r.status_code == 200:
+                data = r.json()
+                chunk_records = data.get("records", [])
+                records.extend(chunk_records)
+                print("Chunk records:", len(chunk_records))
+            else:
+                print("Period trades raw:", r.text[:500])
+            current = chunk_end
+        return {"records": records}
