@@ -35,12 +35,7 @@ class BCSAPI:
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
     UNDERLYING_LOOKUP_TYPES = (
-        "CURRENCY",
-        "STOCK",
-        "FOREIGN_STOCK",
-        "ETF",
-        "GOODS",
-        "INDICES",
+        "CURRENCY", "STOCK", "FOREIGN_STOCK", "ETF", "GOODS", "INDICES",
     )
 
     _shared_instance = None
@@ -120,33 +115,46 @@ class BCSAPI:
                 break
         return value
 
-    def _underlying_metadata_fallback(self, requested, existing):
-        """Resolve real non-futures underlyings from BCS by-type metadata.
+    @staticmethod
+    def _record_class_code(record):
+        if not isinstance(record, dict):
+            return ""
+        direct = str(record.get("classCode") or record.get("class_code") or record.get("classcode") or "").strip()
+        if direct:
+            return direct
+        boards = record.get("boards")
+        if isinstance(boards, dict):
+            boards = [boards]
+        for board in boards or []:
+            if not isinstance(board, dict):
+                continue
+            code = str(board.get("classCode") or board.get("class_code") or board.get("classcode") or "").strip()
+            if code:
+                return code
+        return ""
 
-        The BCS by-tickers endpoint may return only a partial set for a mixed
-        futures-underlying universe. The passport requires a real spot/base
-        instrument, so we fall back only to documented non-futures instrument
-        types and match real metadata by normalized ticker. No futures record
-        is used as a substitute.
-        """
-        unresolved = {
-            self._instrument_lookup_key(ticker)
-            for ticker in requested
-            if self._instrument_lookup_key(ticker)
-        }
+    def _underlying_metadata_fallback(self, requested, existing):
+        """Resolve real non-futures underlyings from BCS by-type metadata."""
+        unresolved = set()
+        for ticker in requested:
+            key = self._instrument_lookup_key(ticker)
+            if key:
+                unresolved.add(key)
         for record in existing:
             if not isinstance(record, dict):
                 continue
             ticker = record.get("ticker") or record.get("secCode") or record.get("securityCode")
-            unresolved.discard(self._instrument_lookup_key(ticker))
+            key = self._instrument_lookup_key(ticker)
+            if key and self._record_class_code(record):
+                unresolved.discard(key)
         if not unresolved:
-            return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0}
+            return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0, "fallback_unresolved": 0}
 
         result = list(existing)
         seen = {
             (
                 self._instrument_lookup_key(record.get("ticker") or record.get("secCode") or record.get("securityCode")),
-                str(record.get("classCode") or record.get("class_code") or "").upper(),
+                self._record_class_code(record).upper(),
             )
             for record in result if isinstance(record, dict)
         }
@@ -168,17 +176,9 @@ class BCSAPI:
                 key = self._instrument_lookup_key(ticker)
                 if key not in unresolved:
                     continue
-                class_code = str(record.get("classCode") or record.get("class_code") or "").strip()
+                class_code = self._record_class_code(record)
                 if not class_code:
-                    boards = record.get("boards")
-                    if isinstance(boards, dict):
-                        boards = [boards]
-                    for board in boards or []:
-                        if not isinstance(board, dict):
-                            continue
-                        class_code = str(board.get("classCode") or board.get("class_code") or "").strip()
-                        if class_code:
-                            break
+                    continue
                 dedupe_key = (key, class_code.upper())
                 if dedupe_key not in seen:
                     result.append(record)
@@ -195,7 +195,7 @@ class BCSAPI:
         }
 
     def get_instruments_by_tickers(self, tickers):
-        """Load all BCS instrument cards for the requested tickers."""
+        """Load BCS instrument cards and fill missing classCode from real spot/base metadata."""
         if not isinstance(tickers, (list, tuple)):
             return []
         requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
