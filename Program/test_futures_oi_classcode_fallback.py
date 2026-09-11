@@ -13,7 +13,8 @@ class FakeAPI:
             {
                 "ticker": "SBER-12.26",
                 "type": "FUTURES",
-                "underlyingTicker": "SBER",
+                "underlyingTicker": "SR",
+                "baseAssetTicker": "SBER",
             }
         ]
 
@@ -39,3 +40,13 @@ def test_futures_classcode_fallback_keeps_contract_quoteable():
     assert contracts[0]["futures_class_code"] == "SPBFUT"
     assert service._last_contract_diagnostics["class_code_available"] == 0
     assert service._last_contract_diagnostics["class_code_fallback"] == 1
+
+
+def test_base_asset_ticker_is_preferred_for_real_underlying_mapping():
+    service = FuturesOIScannerService(api=FakeAPI(), oi_service=object())
+
+    contracts = service._active_contracts()
+
+    assert len(contracts) == 1
+    assert contracts[0]["underlying_asset_source"] == "SBER"
+    assert contracts[0]["underlying_ticker"] == "SBER"
