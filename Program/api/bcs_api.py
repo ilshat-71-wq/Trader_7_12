@@ -34,6 +34,14 @@ class BCSAPI:
     CANDLE_MAX_CONCURRENCY = 4
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
+    UNDERLYING_LOOKUP_TYPES = (
+        "CURRENCY",
+        "STOCK",
+        "FOREIGN_STOCK",
+        "ETF",
+        "GOODS",
+        "INDICES",
+    )
 
     _shared_instance = None
     _initialized = False
@@ -99,6 +107,93 @@ class BCSAPI:
         print("Всего загружено:", len(result))
         return result
 
+    @staticmethod
+    def _instrument_lookup_key(value):
+        """Normalize only unambiguous ticker spelling variants for metadata lookup."""
+        value = str(value or "").strip().upper()
+        if not value:
+            return ""
+        value = value.replace("/", "").replace("-", "").replace("_", "")
+        for suffix in ("TOM", "F"):
+            if value.endswith(suffix) and len(value) > len(suffix):
+                value = value[:-len(suffix)]
+                break
+        return value
+
+    def _underlying_metadata_fallback(self, requested, existing):
+        """Resolve real non-futures underlyings from BCS by-type metadata.
+
+        The BCS by-tickers endpoint may return only a partial set for a mixed
+        futures-underlying universe. The passport requires a real spot/base
+        instrument, so we fall back only to documented non-futures instrument
+        types and match real metadata by normalized ticker. No futures record
+        is used as a substitute.
+        """
+        unresolved = {
+            self._instrument_lookup_key(ticker)
+            for ticker in requested
+            if self._instrument_lookup_key(ticker)
+        }
+        for record in existing:
+            if not isinstance(record, dict):
+                continue
+            ticker = record.get("ticker") or record.get("secCode") or record.get("securityCode")
+            unresolved.discard(self._instrument_lookup_key(ticker))
+        if not unresolved:
+            return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0}
+
+        result = list(existing)
+        seen = {
+            (
+                self._instrument_lookup_key(record.get("ticker") or record.get("secCode") or record.get("securityCode")),
+                str(record.get("classCode") or record.get("class_code") or "").upper(),
+            )
+            for record in result if isinstance(record, dict)
+        }
+        fallback_types = []
+        fallback_records = 0
+        fallback_matches = 0
+        for instrument_type in self.UNDERLYING_LOOKUP_TYPES:
+            try:
+                records = self.get_instruments(instrument_type)
+            except Exception as exc:
+                print("⚠️ Underlying by-type lookup failed:", instrument_type, type(exc).__name__)
+                continue
+            fallback_types.append(instrument_type)
+            fallback_records += len(records) if isinstance(records, list) else 0
+            for record in records if isinstance(records, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                ticker = record.get("ticker") or record.get("secCode") or record.get("securityCode")
+                key = self._instrument_lookup_key(ticker)
+                if key not in unresolved:
+                    continue
+                class_code = str(record.get("classCode") or record.get("class_code") or "").strip()
+                if not class_code:
+                    boards = record.get("boards")
+                    if isinstance(boards, dict):
+                        boards = [boards]
+                    for board in boards or []:
+                        if not isinstance(board, dict):
+                            continue
+                        class_code = str(board.get("classCode") or board.get("class_code") or "").strip()
+                        if class_code:
+                            break
+                dedupe_key = (key, class_code.upper())
+                if dedupe_key not in seen:
+                    result.append(record)
+                    seen.add(dedupe_key)
+                    fallback_matches += 1
+                unresolved.discard(key)
+            if not unresolved:
+                break
+        return result, {
+            "fallback_types": fallback_types,
+            "fallback_records": fallback_records,
+            "fallback_matches": fallback_matches,
+            "fallback_unresolved": len(unresolved),
+        }
+
     def get_instruments_by_tickers(self, tickers):
         """Load all BCS instrument cards for the requested tickers."""
         if not isinstance(tickers, (list, tuple)):
@@ -142,6 +237,9 @@ class BCSAPI:
             if len(records) < page_size:
                 break
             page += 1
+        all_records, fallback_diag = self._underlying_metadata_fallback(requested, all_records)
+        if fallback_diag.get("fallback_matches"):
+            print("Underlying metadata fallback:", fallback_diag)
         return all_records
 
     def get_quotes(self, instruments):
