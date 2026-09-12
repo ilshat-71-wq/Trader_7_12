@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.12"
+    VERSION = "2.7.13"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -115,12 +115,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM",
         }
         canonical = canonical_aliases.get(normalized_canonical, canonical)
-        derivative_aliases = {"MIX", "MXI", "IMOEXF", "SPYF", "SP500F"}
-        for contract in contracts:
-            if str(contract.get("oi_root") or "").upper() == family:
-                ticker = str(contract.get("underlying_ticker") or "").upper()
-                if ticker and ticker != family and ticker not in derivative_aliases and ticker not in {"СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
-                    return ticker
         return canonical
 
     @staticmethod
@@ -157,25 +151,30 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         return not instrument_type or instrument_type in allowed_types
 
     def _underlying_quotes(self, contracts):
+        """Resolve futures -> real underlying using canonical BCS/MOEX family mapping.
+
+        The futures family's canonical underlying is authoritative.  Raw MOEX display
+        text such as ``ГАЗПРОМ`` or ``ИНДЕКС РТС`` is descriptive metadata and must not
+        replace the canonical ticker.  BCS is then used to resolve the real non-derivative
+        instrument/class and its quote.
+        """
         requested = {}
         family_tickers = {}
-        raw_semantics = {}
         derivative_aliases = {"MIX", "MXI", "IMOEXF", "SPYF", "SP500F"}
         for item in contracts:
             family = self._text(item, "oi_root", "futures_root").upper()
             if not family:
                 continue
-            mapped = self._family_to_underlying(family)
-            raw = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode").upper()
-            ticker = mapped
-            if raw and raw not in {family, "СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"} and raw not in derivative_aliases:
-                ticker = raw
-            canonical = ticker.upper()
+            canonical = self._family_to_underlying(family).upper()
             normalized_ticker = self._normalize_mapping_text(canonical)
-            ticker_aliases = {"USDRUB": "USDRUB", "USDRUBTOM": "USDRUB", "EURRUB": "EURRUB", "EURRUBTOM": "EURRUB", "CNYRUB": "CNYRUB", "CNYRUBTOM": "CNYRUB", "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM"}
+            ticker_aliases = {
+                "USDRUB": "USDRUB", "USDRUBTOM": "USDRUB",
+                "EURRUB": "EURRUB", "EURRUBTOM": "EURRUB",
+                "CNYRUB": "CNYRUB", "CNYRUBTOM": "CNYRUB",
+                "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM",
+            }
             canonical = ticker_aliases.get(normalized_ticker, canonical)
             family_tickers[family] = canonical
-            raw_semantics[family] = raw
             item_class = self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")
             entry = requested.setdefault(canonical, {"ticker": canonical, "classCode": "", "families": set()})
             entry["families"].add(family)
@@ -216,19 +215,25 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                     wanted = set(self._semantic_aliases(economic_ticker))
                     for family in entry["families"]:
                         wanted.update(self._semantic_aliases(family))
-                        wanted.update(self._semantic_aliases(raw_semantics.get(family)))
                     if not wanted.intersection(record_aliases):
                         continue
                     entry["classCode"] = class_code
                     entry["bcsTicker"] = actual_ticker
-                    entry["mappingSource"] = "BCS_SEMANTIC_METADATA"
+                    entry["mappingSource"] = "BCS_CANONICAL_UNDERLYING"
                     semantic_matches += 1
 
         self._underlying_class_codes = {key: value["classCode"] for key, value in requested.items() if value.get("classCode")}
         self._underlying_bcs_tickers = {key: value["bcsTicker"] for key, value in requested.items() if value.get("bcsTicker")}
         self._underlying_mapping_source = {key: value["mappingSource"] for key, value in requested.items() if value.get("mappingSource")}
         self._underlying_family_tickers = family_tickers
-        self._underlying_metadata_diagnostics = {"underlying_requested": len(requested), "underlying_class_codes": len(self._underlying_class_codes), "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)), "underlying_metadata_lookup_batches": lookup_batches, "underlying_metadata_lookup_records": lookup_records, "underlying_semantic_matches": semantic_matches}
+        self._underlying_metadata_diagnostics = {
+            "underlying_requested": len(requested),
+            "underlying_class_codes": len(self._underlying_class_codes),
+            "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)),
+            "underlying_metadata_lookup_batches": lookup_batches,
+            "underlying_metadata_lookup_records": lookup_records,
+            "underlying_semantic_matches": semantic_matches,
+        }
         instruments = []
         for economic_ticker, item in requested.items():
             class_code = item.get("classCode")
@@ -479,6 +484,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if base_change_missing: data_quality_issues.append("INCOMPLETE_BASE_CHANGE")
         if marketdata_error: data_quality_issues.append("MARKETDATA_ERROR")
         data_quality_status = "COMPLETE" if not data_quality_issues else "INCOMPLETE"
-        diagnostics.update({"status": process_status, "process_status": process_status, "data_quality_status": data_quality_status, "data_quality_issues": data_quality_issues, "underlying_mapping_coverage_percent": underlying_mapping_coverage, "base_change_coverage_percent": base_change_coverage, "version": self.VERSION, "contracts": len(candidates), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available, "skipped": skipped, "liquidity_available": liquidity_available, "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER", "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "base_change_available": base_change_available, "base_change_missing": base_change_missing, "base_change_policy": "BCS_INTRADAY_07:00_NOW", "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL, "base_change_source_counts": base_change_source_counts, "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "MOEX_RFUD_SECID_TO_FAMILY + BCS_UNDERLYING_CONTEXT", "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME", "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA", "marketdata_error": marketdata_error})
+        diagnostics.update({"status": process_status, "process_status": process_status, "data_quality_status": data_quality_status, "data_quality_issues": data_quality_issues, "underlying_mapping_coverage_percent": underlying_mapping_coverage, "base_change_coverage_percent": base_change_coverage, "version": self.VERSION, "contracts": len(candidates), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available, "skipped": skipped, "liquidity_available": liquidity_available, "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER", "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "base_change_available": base_change_available, "base_change_missing": base_change_missing, "base_change_policy": "BCS_INTRADAY_07:00_NOW", "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL, "base_change_source_counts": base_change_source_counts, "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "BCS_CANONICAL_UNDERLYING + MOEX_RFUD_SECID_TO_FAMILY", "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME", "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA", "marketdata_error": marketdata_error})
         self._last_diagnostics = diagnostics
         return selected, diagnostics
