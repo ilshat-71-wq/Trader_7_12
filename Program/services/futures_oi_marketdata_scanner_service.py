@@ -228,6 +228,29 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                     continue
                 actual_ticker = self._text(record, "_underlying_bcs_ticker", "ticker", "secCode", "securityCode").upper()
                 class_code = self._text(record, "_underlying_bcs_class_code", "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
+
+                instrument_type = self._text(
+                    record,
+                    "instrumentType",
+                    "instrument_type",
+                    "type",
+                ).upper()
+
+                if instrument_type in {"FUTURES", "OPTIONS"}:
+                    continue
+
+                allowed_types = {
+                    "CURRENCY",
+                    "STOCK",
+                    "FOREIGN_STOCK",
+                    "ETF",
+                    "GOODS",
+                    "INDICES",
+                }
+
+                if instrument_type and instrument_type not in allowed_types:
+                    continue
+
                 if not actual_ticker or not class_code:
                     continue
                 record_values = []
