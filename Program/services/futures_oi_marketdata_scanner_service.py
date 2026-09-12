@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.9"
+    VERSION = "2.7.10"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -117,8 +117,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
         canonical = aliases.get(mapped, mapped)
 
-        # Normalize economic-underlying notation returned by MOEX/BCS.
-        # USD/RUB -> USDRUB, EUR/RUB -> EURRUB, CNY/RUB -> CNYRUB.
         normalized_canonical = cls._normalize_mapping_text(canonical)
         canonical_aliases = {
             "USDRUB": "USDRUB",
@@ -159,6 +157,22 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             priority = 0 if exchange == "MOEX" else 1 if exchange == "SPB" else 2
             candidates.append((priority, code))
         return min(candidates)[1] if candidates else ""
+
+    @staticmethod
+    def _is_real_underlying_record(record):
+        """Allow only real spot/base instrument types for underlying analysis."""
+        if not isinstance(record, dict):
+            return False
+        instrument_type = str(
+            record.get("instrumentType")
+            or record.get("instrument_type")
+            or record.get("type")
+            or ""
+        ).strip().upper()
+        if instrument_type in {"FUTURES", "OPTIONS"}:
+            return False
+        allowed_types = {"CURRENCY", "STOCK", "FOREIGN_STOCK", "ETF", "GOODS", "INDICES"}
+        return not instrument_type or instrument_type in allowed_types
 
     def _underlying_quotes(self, contracts):
         requested = {}
@@ -210,7 +224,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 continue
             lookup_records += len(records)
             for record in records:
-                if not isinstance(record, dict):
+                if not self._is_real_underlying_record(record):
                     continue
                 actual_ticker = self._text(record, "_underlying_bcs_ticker", "ticker", "secCode", "securityCode").upper()
                 class_code = self._text(record, "_underlying_bcs_class_code", "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
