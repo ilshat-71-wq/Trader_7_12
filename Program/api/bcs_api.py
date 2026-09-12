@@ -140,26 +140,11 @@ class BCSAPI:
             return set()
 
         fields = (
-            "ticker",
-            "secCode",
-            "securityCode",
-            "baseAssetTicker",
-            "base_asset_ticker",
-            "underlyingAsset",
-            "underlying_asset",
-            "underlying",
-            "underlyingTicker",
-            "underlying_ticker",
-            "underlyingSecCode",
-            "underlying_sec_code",
-            "assetCode",
-            "asset_code",
-            "baseAsset",
-            "base_asset",
-            "baseTicker",
-            "base_ticker",
-            "shortCode",
-            "short_code",
+            "ticker", "secCode", "securityCode", "baseAssetTicker", "base_asset_ticker",
+            "underlyingAsset", "underlying_asset", "underlying", "underlyingTicker",
+            "underlying_ticker", "underlyingSecCode", "underlying_sec_code", "assetCode",
+            "asset_code", "baseAsset", "base_asset", "baseTicker", "base_ticker",
+            "shortCode", "short_code",
         )
 
         result = set()
@@ -169,6 +154,18 @@ class BCSAPI:
                 key = cls._instrument_lookup_key(value)
                 if key:
                     result.add(key)
+
+        # BCS exposes MIX, MXI and IMOEXF as separate FUTURES instruments,
+        # while their common economic base asset is the real IMOEX index.
+        # When the fallback is scanning real INDICES metadata, map those
+        # futures aliases to the actual IMOEX record instead of accepting a
+        # derivative as the underlying.
+        if "IMOEX" in result:
+            result.update({"MIX", "MXI", "IMOEXF", "MX", "MM"})
+        if "RTS" in result:
+            result.update({"RTSM", "RI", "RM"})
+        if "RVI" in result:
+            result.add("VI")
         return result
 
     def _underlying_metadata_fallback(self, requested, existing):
@@ -219,24 +216,16 @@ class BCSAPI:
                     continue
 
                 actual_ticker = str(
-                    record.get("ticker")
-                    or record.get("secCode")
-                    or record.get("securityCode")
-                    or ""
+                    record.get("ticker") or record.get("secCode") or record.get("securityCode") or ""
                 ).strip().upper()
 
-                # Preserve the real BCS instrument identity. These fields are
-                # internal provenance only and never alter the source data.
                 enriched = dict(record)
                 enriched["_underlying_requested_aliases"] = matched
                 enriched["_underlying_bcs_ticker"] = actual_ticker
                 enriched["_underlying_bcs_class_code"] = class_code
                 enriched["_underlying_mapping_source"] = "BCS_BY_TYPE_METADATA"
 
-                dedupe_key = (
-                    actual_ticker or "|".join(matched),
-                    class_code.upper(),
-                )
+                dedupe_key = (actual_ticker or "|".join(matched), class_code.upper())
                 if dedupe_key not in seen:
                     result.append(enriched)
                     seen.add(dedupe_key)
