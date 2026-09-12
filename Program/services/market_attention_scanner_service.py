@@ -461,39 +461,6 @@ class MarketAttentionScannerService:
                 selected_tickers.add(row["spot_ticker"])
                 watch_selected_count += 1
 
-        # The table is a market-information map, not a blank screen when no
-        # strict candidate exists.  This fallback does not alter any gate,
-        # candidate count, ranking, or trading qualification.  It simply exposes
-        # the best analyzed rows so a neutral market (or a temporarily strict
-        # empty result) still shows real price/RS/flow facts.
-        context_selected_count = 0
-        if len(selected) < int(limit or 0):
-            selected_tickers = {x["spot_ticker"] for x in selected}
-            context_pool = sorted(
-                results,
-                key=lambda x: (
-                    x["attention_score"],
-                    abs(x["relative_strength"]),
-                    x["recent_money_per_minute"],
-                    x["session_money"],
-                ),
-                reverse=True,
-            )
-            for row in context_pool:
-                if len(selected) >= int(limit or 0):
-                    break
-                if row["spot_ticker"] in selected_tickers:
-                    continue
-                context = dict(row)
-                context["selection_role"] = "MARKET_CONTEXT"
-                context["qualification_status"] = "CONTEXT_ONLY"
-                context["watch_reason"] = "MARKET_CONTEXT_ONLY"
-                context["watch_direction"] = row.get("intraday_direction", "NEUTRAL")
-                context["rank"] = len(selected) + 1
-                selected.append(context)
-                selected_tickers.add(row["spot_ticker"])
-                context_selected_count += 1
-
         for i, row in enumerate(selected, 1):
             row["rank"] = i
             row["pipeline_version"] = self.VERSION
@@ -531,7 +498,6 @@ class MarketAttentionScannerService:
             "directional_qualified": len(valid),
             "strict_selected": strict_selected_count,
             "watch_selected": watch_selected_count,
-            "context_selected": context_selected_count,
             "selected": len(selected),
             "radar_capacity": int(limit or 0),
             "long_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"],
@@ -543,6 +509,5 @@ class MarketAttentionScannerService:
             "direction_policy": "MARKET_REGIME_PLUS_CURRENT_RELATIVE_STRENGTH_PLUS_D1_QUALITY_PLUS_ABSOLUTE_LIQUIDITY",
             "market_direction_rule": "UP_MARKET_PLUS_STRONGER_THAN_MARKET_TO_LONG; DOWN_MARKET_PLUS_WEAKER_THAN_MARKET_TO_SHORT; NEUTRAL_MARKET_NO_STRICT_DIRECTION",
             "watch_policy": "READ_ONLY_FALLBACK_WITH_SAME_MARKET_REGIME_AND_RS_DIRECTION",
-            "context_policy": "DISPLAY_ANALYZED_MARKET_FACTS_WITHOUT_RELAXING_STRICT_GATES",
         }
         return selected

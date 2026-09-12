@@ -32,7 +32,7 @@ def test_pre_open_is_distinct_from_closed():
     service = MarketSessionService()
     value = msk("2026-09-14T06:55:00")
     assert service.get_session(value) == "PRE_OPEN"
-    assert service.get_session_start(value) is None
+    assert service.get_session_start(value).isoformat() == "07:00:00"
     assert service.is_market_open(value) is False
 
 

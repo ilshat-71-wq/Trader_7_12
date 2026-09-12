@@ -41,4 +41,4 @@ def test_front_selection_does_not_call_every_contract_individually():
 def test_family_to_underlying_uses_moex_prefix_mapping():
     assert FuturesOIMarketDataScannerService._family_to_underlying("ALRS") == "ALRS"
     assert FuturesOIMarketDataScannerService._family_to_underlying("SBRF") == "SBER"
-    assert FuturesOIMarketDataScannerService._family_to_underlying("Si") == "SI"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("Si") == "USDRUB"

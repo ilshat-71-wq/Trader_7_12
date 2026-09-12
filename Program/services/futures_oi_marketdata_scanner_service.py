@@ -59,6 +59,13 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if not normalized:
             return set()
         aliases = {normalized}
+
+        # Canonical BCS/MOEX semantic aliases.
+        # GLDRUB_TOM and GLDRUB represent the same economic gold
+        # underlying for the purpose of metadata matching.
+        if normalized == "GLDRUBTOM":
+            aliases.add("GLDRUB")
+
         replacements = {
             "СБЕРБАНК": {"SBER", "SBERBANK", "SBRF"},
             "ЛУКОЙЛ": {"LKOH", "LUKOIL"},
@@ -94,8 +101,36 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     def _known_underlying_ticker(cls, family, contracts):
         family = str(family or "").upper()
         mapped = cls._family_to_underlying(family)
-        aliases = {"SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "NA": "QQQ", "SF": "SPYF", "MX": "MIX", "MM": "MXI", "RI": "RTS", "RM": "RTSM", "VI": "RVI"}
+
+        aliases = {
+            "SI": "USDRUB",
+            "EU": "EURRUB",
+            "CR": "CNYRUB",
+            "NA": "QQQ",
+            "SF": "SPYF",
+            "MX": "MIX",
+            "MM": "MXI",
+            "RI": "RTS",
+            "RM": "RTSM",
+            "VI": "RVI",
+        }
+
         canonical = aliases.get(mapped, mapped)
+
+        # Normalize economic-underlying notation returned by MOEX/BCS.
+        # USD/RUB -> USDRUB, EUR/RUB -> EURRUB, CNY/RUB -> CNYRUB.
+        normalized_canonical = cls._normalize_mapping_text(canonical)
+        canonical_aliases = {
+            "USDRUB": "USDRUB",
+            "USDRUBTOM": "USDRUB",
+            "EURRUB": "EURRUB",
+            "EURRUBTOM": "EURRUB",
+            "CNYRUB": "CNYRUB",
+            "CNYRUBTOM": "CNYRUB",
+            "GLDRUB": "GLDRUB_TOM",
+            "GLDRUBTOM": "GLDRUB_TOM",
+        }
+        canonical = canonical_aliases.get(normalized_canonical, canonical)
         for contract in contracts:
             if str(contract.get("oi_root") or "").upper() == family:
                 ticker = str(contract.get("underlying_ticker") or "").upper()
@@ -139,6 +174,18 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             if raw and raw not in {family, "СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
                 ticker = raw
             canonical = ticker.upper()
+            normalized_ticker = self._normalize_mapping_text(canonical)
+            ticker_aliases = {
+                "USDRUB": "USDRUB",
+                "USDRUBTOM": "USDRUB",
+                "EURRUB": "EURRUB",
+                "EURRUBTOM": "EURRUB",
+                "CNYRUB": "CNYRUB",
+                "CNYRUBTOM": "CNYRUB",
+                "GLDRUB": "GLDRUB_TOM",
+                "GLDRUBTOM": "GLDRUB_TOM",
+            }
+            canonical = ticker_aliases.get(normalized_ticker, canonical)
             family_tickers[family] = canonical
             raw_semantics[family] = raw
             item_class = self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")
@@ -433,7 +480,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             underlying_change, underlying_change_source = self._underlying_day_change(underlying_ticker)
             base_change_source_counts[underlying_change_source] = base_change_source_counts.get(underlying_change_source, 0) + 1
             if underlying_change is not None: base_change_available += 1
-            candidates.append({"futures_root": family, "oi_root": family, "futures_ticker": secid, "last": last, "change_pct": change, "volume": volume, "turnover_rub": turnover_rub, "turnover_source": turnover_source, "oi": oi, "underlying_ticker": underlying_ticker, "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker), "underlying_class_code": self._underlying_class_codes.get(underlying_ticker), "underlying_price": underlying_price, "underlying_change_pct": underlying_change, "underlying_change_source": underlying_change_source})
+            candidates.append({"futures_root": family, "oi_root": family, "futures_ticker": secid, "last": last, "change_pct": change, "change_percent": change, "volume": volume, "turnover_rub": turnover_rub, "turnover_source": turnover_source, "oi": oi, "oi_analysis": oi, "underlying_ticker": underlying_ticker, "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker), "underlying_class_code": self._underlying_class_codes.get(underlying_ticker), "underlying_price": underlying_price, "underlying_change_pct": underlying_change, "underlying_change_source": underlying_change_source})
         candidates.sort(key=lambda row: float(row.get("turnover_rub") or 0.0), reverse=True)
         selected = candidates[:self.LIQUIDITY_TOP_LIMIT]
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
