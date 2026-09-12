@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.11"
+    VERSION = "2.7.12"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -84,9 +84,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "GD": "GLDRUB_TOM", "GL": "GLDRUB_TOM",
             "SI": "USDRUB", "USDRUBF": "USDRUB",
             "EU": "EURRUB", "CR": "CNYRUB",
-            # MIX and MXI are different futures contracts with the same
-            # economic base asset: the IMOEX index. IMOEXF is another
-            # futures contract on that same index, not the base itself.
             "MX": "IMOEX", "MM": "IMOEX", "IMOEXF": "IMOEX",
             "RI": "RTS", "RM": "RTS", "VI": "RVI",
             "NA": "QQQ", "SF": "SPY", "SP500F": "SP500",
@@ -118,10 +115,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM",
         }
         canonical = canonical_aliases.get(normalized_canonical, canonical)
+        derivative_aliases = {"MIX", "MXI", "IMOEXF", "SPYF", "SP500F"}
         for contract in contracts:
             if str(contract.get("oi_root") or "").upper() == family:
                 ticker = str(contract.get("underlying_ticker") or "").upper()
-                if ticker and ticker != family and ticker not in {"СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
+                if ticker and ticker != family and ticker not in derivative_aliases and ticker not in {"СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
                     return ticker
         return canonical
 
@@ -162,6 +160,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         requested = {}
         family_tickers = {}
         raw_semantics = {}
+        derivative_aliases = {"MIX", "MXI", "IMOEXF", "SPYF", "SP500F"}
         for item in contracts:
             family = self._text(item, "oi_root", "futures_root").upper()
             if not family:
@@ -169,7 +168,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             mapped = self._family_to_underlying(family)
             raw = self._text(item, "underlying_ticker", "underlyingTicker", "underlyingSecCode").upper()
             ticker = mapped
-            if raw and raw not in {family, "СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"}:
+            if raw and raw not in {family, "СБЕРБАНК", "ЛУКОЙЛ", "ЗОЛОТО РАСЧЕТНЫЙ", "НЕФТЬ BRENT", "ПРИРОДНЫЙ ГАЗ", "ИНДЕКС МОСБИРЖИ", "ИНДЕКС IMOEX МИНИ"} and raw not in derivative_aliases:
                 ticker = raw
             canonical = ticker.upper()
             normalized_ticker = self._normalize_mapping_text(canonical)
