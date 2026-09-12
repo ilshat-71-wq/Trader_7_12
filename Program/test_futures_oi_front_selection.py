@@ -38,10 +38,15 @@ def test_front_selection_does_not_call_every_contract_individually():
     assert selected["AL"]["secid"] == "ALU6"
 
 
-def test_family_to_underlying_uses_moex_prefix_mapping():
+def test_family_to_underlying_uses_real_economic_base_asset():
     assert FuturesOIMarketDataScannerService._family_to_underlying("ALRS") == "ALRS"
     assert FuturesOIMarketDataScannerService._family_to_underlying("SBRF") == "SBER"
     assert FuturesOIMarketDataScannerService._family_to_underlying("Si") == "USDRUB"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("MX") == "IMOEX"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("MM") == "IMOEX"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("IMOEXF") == "IMOEX"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("RI") == "RTS"
+    assert FuturesOIMarketDataScannerService._family_to_underlying("RM") == "RTS"
 
 
 def test_underlying_policy_rejects_derivatives_and_allows_real_base_types():
@@ -50,3 +55,9 @@ def test_underlying_policy_rejects_derivatives_and_allows_real_base_types():
     assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "CURRENCY"})
     assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "STOCK"})
     assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "INDICES"})
+
+
+def test_bcs_index_aliases_keep_mixed_futures_on_real_imoex_base():
+    aliases = FuturesOIMarketDataScannerService._semantic_aliases("IMOEX")
+    assert "IMOEX" in aliases
+    assert "MIX" not in aliases
