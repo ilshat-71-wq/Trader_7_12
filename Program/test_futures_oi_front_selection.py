@@ -42,3 +42,11 @@ def test_family_to_underlying_uses_moex_prefix_mapping():
     assert FuturesOIMarketDataScannerService._family_to_underlying("ALRS") == "ALRS"
     assert FuturesOIMarketDataScannerService._family_to_underlying("SBRF") == "SBER"
     assert FuturesOIMarketDataScannerService._family_to_underlying("Si") == "USDRUB"
+
+
+def test_underlying_policy_rejects_derivatives_and_allows_real_base_types():
+    assert not FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "FUTURES"})
+    assert not FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "OPTIONS"})
+    assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "CURRENCY"})
+    assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "STOCK"})
+    assert FuturesOIMarketDataScannerService._is_real_underlying_record({"instrumentType": "INDICES"})
