@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.13"
+    VERSION = "2.7.14"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -83,7 +83,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "SBRF": "SBER", "SR": "SBER", "LK": "LKOH",
             "GD": "GLDRUB_TOM", "GL": "GLDRUB_TOM",
             "SI": "USDRUB", "USDRUBF": "USDRUB",
-            "EU": "EURRUB", "CR": "CNYRUB",
+            "EU": "EURRUB", "CR": "CNYRUB", "CNY": "CNYRUB",
             "MX": "IMOEX", "MM": "IMOEX", "IMOEXF": "IMOEX",
             "RI": "RTS", "RM": "RTS", "VI": "RVI",
             "NA": "QQQ", "SF": "SPY", "SP500F": "SP500",
@@ -101,7 +101,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         family = str(family or "").upper()
         mapped = cls._family_to_underlying(family)
         aliases = {
-            "SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB",
+            "SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB", "CNY": "CNYRUB",
             "NA": "QQQ", "SF": "SPY", "SP500F": "SP500",
             "MX": "IMOEX", "MM": "IMOEX", "RI": "RTS", "RM": "RTS",
             "VI": "RVI", "IMOEXF": "IMOEX",
@@ -150,17 +150,22 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         allowed_types = {"CURRENCY", "STOCK", "FOREIGN_STOCK", "ETF", "GOODS", "INDICES"}
         return not instrument_type or instrument_type in allowed_types
 
-    def _underlying_quotes(self, contracts):
-        """Resolve futures -> real underlying using canonical BCS/MOEX family mapping.
+    @staticmethod
+    def _underlying_lookup_aliases(ticker):
+        """Return real BCS ticker spellings for a canonical economic underlying."""
+        normalized = "".join(ch for ch in str(ticker or "").upper() if ch.isalnum())
+        aliases = {
+            "USDRUB": ("USDRUB", "USDRUB_TOM"),
+            "EURRUB": ("EURRUB", "EURRUB_TOM"),
+            "CNYRUB": ("CNYRUB", "CNYRUB_TOM"),
+            "GLDRUBTOM": ("GLDRUB_TOM", "GLDRUB", "GOLD"),
+        }
+        return aliases.get(normalized, (str(ticker).upper(),))
 
-        The futures family's canonical underlying is authoritative.  Raw MOEX display
-        text such as ``ГАЗПРОМ`` or ``ИНДЕКС РТС`` is descriptive metadata and must not
-        replace the canonical ticker.  BCS is then used to resolve the real non-derivative
-        instrument/class and its quote.
-        """
+    def _underlying_quotes(self, contracts):
+        """Resolve futures -> real underlying using canonical BCS/MOEX family mapping."""
         requested = {}
         family_tickers = {}
-        derivative_aliases = {"MIX", "MXI", "IMOEXF", "SPYF", "SP500F"}
         for item in contracts:
             family = self._text(item, "oi_root", "futures_root").upper()
             if not family:
@@ -186,7 +191,12 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         lookup_records = 0
         semantic_matches = 0
         for start in range(0, len(unresolved), self.ENRICH_BATCH_SIZE):
-            batch = unresolved[start:start + self.ENRICH_BATCH_SIZE]
+            batch_keys = unresolved[start:start + self.ENRICH_BATCH_SIZE]
+            batch = []
+            for key in batch_keys:
+                for alias in self._underlying_lookup_aliases(key):
+                    if alias not in batch:
+                        batch.append(alias)
             lookup_batches += 1
             try:
                 records = self.api.get_instruments_by_tickers(batch)
