@@ -9,7 +9,7 @@ from services.futures_oi_scanner_service import FuturesOIScannerService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.10"
+    VERSION = "2.7.11"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -59,13 +59,8 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if not normalized:
             return set()
         aliases = {normalized}
-
-        # Canonical BCS/MOEX semantic aliases.
-        # GLDRUB_TOM and GLDRUB represent the same economic gold
-        # underlying for the purpose of metadata matching.
         if normalized == "GLDRUBTOM":
             aliases.add("GLDRUB")
-
         replacements = {
             "СБЕРБАНК": {"SBER", "SBERBANK", "SBRF"},
             "ЛУКОЙЛ": {"LKOH", "LUKOIL"},
@@ -89,6 +84,13 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "GD": "GLDRUB_TOM", "GL": "GLDRUB_TOM",
             "SI": "USDRUB", "USDRUBF": "USDRUB",
             "EU": "EURRUB", "CR": "CNYRUB",
+            # MIX and MXI are different futures contracts with the same
+            # economic base asset: the IMOEX index. IMOEXF is another
+            # futures contract on that same index, not the base itself.
+            "MX": "IMOEX", "MM": "IMOEX", "IMOEXF": "IMOEX",
+            "RI": "RTS", "RM": "RTS", "VI": "RVI",
+            "NA": "QQQ", "SF": "SPY", "SP500F": "SP500",
+            "BR": "BR", "CL": "CL", "NG": "NG",
         }
         if family in explicit:
             return explicit[family]
@@ -101,32 +103,19 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     def _known_underlying_ticker(cls, family, contracts):
         family = str(family or "").upper()
         mapped = cls._family_to_underlying(family)
-
         aliases = {
-            "SI": "USDRUB",
-            "EU": "EURRUB",
-            "CR": "CNYRUB",
-            "NA": "QQQ",
-            "SF": "SPYF",
-            "MX": "MIX",
-            "MM": "MXI",
-            "RI": "RTS",
-            "RM": "RTSM",
-            "VI": "RVI",
+            "SI": "USDRUB", "EU": "EURRUB", "CR": "CNYRUB",
+            "NA": "QQQ", "SF": "SPY", "SP500F": "SP500",
+            "MX": "IMOEX", "MM": "IMOEX", "RI": "RTS", "RM": "RTS",
+            "VI": "RVI", "IMOEXF": "IMOEX",
         }
-
         canonical = aliases.get(mapped, mapped)
-
         normalized_canonical = cls._normalize_mapping_text(canonical)
         canonical_aliases = {
-            "USDRUB": "USDRUB",
-            "USDRUBTOM": "USDRUB",
-            "EURRUB": "EURRUB",
-            "EURRUBTOM": "EURRUB",
-            "CNYRUB": "CNYRUB",
-            "CNYRUBTOM": "CNYRUB",
-            "GLDRUB": "GLDRUB_TOM",
-            "GLDRUBTOM": "GLDRUB_TOM",
+            "USDRUB": "USDRUB", "USDRUBTOM": "USDRUB",
+            "EURRUB": "EURRUB", "EURRUBTOM": "EURRUB",
+            "CNYRUB": "CNYRUB", "CNYRUBTOM": "CNYRUB",
+            "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM",
         }
         canonical = canonical_aliases.get(normalized_canonical, canonical)
         for contract in contracts:
@@ -163,12 +152,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         """Allow only real spot/base instrument types for underlying analysis."""
         if not isinstance(record, dict):
             return False
-        instrument_type = str(
-            record.get("instrumentType")
-            or record.get("instrument_type")
-            or record.get("type")
-            or ""
-        ).strip().upper()
+        instrument_type = str(record.get("instrumentType") or record.get("instrument_type") or record.get("type") or "").strip().upper()
         if instrument_type in {"FUTURES", "OPTIONS"}:
             return False
         allowed_types = {"CURRENCY", "STOCK", "FOREIGN_STOCK", "ETF", "GOODS", "INDICES"}
@@ -189,16 +173,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 ticker = raw
             canonical = ticker.upper()
             normalized_ticker = self._normalize_mapping_text(canonical)
-            ticker_aliases = {
-                "USDRUB": "USDRUB",
-                "USDRUBTOM": "USDRUB",
-                "EURRUB": "EURRUB",
-                "EURRUBTOM": "EURRUB",
-                "CNYRUB": "CNYRUB",
-                "CNYRUBTOM": "CNYRUB",
-                "GLDRUB": "GLDRUB_TOM",
-                "GLDRUBTOM": "GLDRUB_TOM",
-            }
+            ticker_aliases = {"USDRUB": "USDRUB", "USDRUBTOM": "USDRUB", "EURRUB": "EURRUB", "EURRUBTOM": "EURRUB", "CNYRUB": "CNYRUB", "CNYRUBTOM": "CNYRUB", "GLDRUB": "GLDRUB_TOM", "GLDRUBTOM": "GLDRUB_TOM"}
             canonical = ticker_aliases.get(normalized_ticker, canonical)
             family_tickers[family] = canonical
             raw_semantics[family] = raw
@@ -228,29 +203,6 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                     continue
                 actual_ticker = self._text(record, "_underlying_bcs_ticker", "ticker", "secCode", "securityCode").upper()
                 class_code = self._text(record, "_underlying_bcs_class_code", "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
-
-                instrument_type = self._text(
-                    record,
-                    "instrumentType",
-                    "instrument_type",
-                    "type",
-                ).upper()
-
-                if instrument_type in {"FUTURES", "OPTIONS"}:
-                    continue
-
-                allowed_types = {
-                    "CURRENCY",
-                    "STOCK",
-                    "FOREIGN_STOCK",
-                    "ETF",
-                    "GOODS",
-                    "INDICES",
-                }
-
-                if instrument_type and instrument_type not in allowed_types:
-                    continue
-
                 if not actual_ticker or not class_code:
                     continue
                 record_values = []
@@ -277,14 +229,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         self._underlying_bcs_tickers = {key: value["bcsTicker"] for key, value in requested.items() if value.get("bcsTicker")}
         self._underlying_mapping_source = {key: value["mappingSource"] for key, value in requested.items() if value.get("mappingSource")}
         self._underlying_family_tickers = family_tickers
-        self._underlying_metadata_diagnostics = {
-            "underlying_requested": len(requested),
-            "underlying_class_codes": len(self._underlying_class_codes),
-            "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)),
-            "underlying_metadata_lookup_batches": lookup_batches,
-            "underlying_metadata_lookup_records": lookup_records,
-            "underlying_semantic_matches": semantic_matches,
-        }
+        self._underlying_metadata_diagnostics = {"underlying_requested": len(requested), "underlying_class_codes": len(self._underlying_class_codes), "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)), "underlying_metadata_lookup_batches": lookup_batches, "underlying_metadata_lookup_records": lookup_records, "underlying_semantic_matches": semantic_matches}
         instruments = []
         for economic_ticker, item in requested.items():
             class_code = item.get("classCode")
