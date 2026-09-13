@@ -227,7 +227,16 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 if not self._is_real_underlying_record(record):
                     continue
                 actual_ticker = self._text(record, "ticker", "secCode", "securityCode").strip().upper()
-                class_code = self._text(record, "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
+                class_code = (
+                    self._text(
+                        record,
+                        "classCode",
+                        "class_code",
+                        "classcode",
+                        "_underlying_bcs_class_code",
+                    )
+                    or self._select_underlying_class_code(record)
+                )
                 if actual_ticker and class_code:
                     records_by_ticker.setdefault(self._normalize_mapping_text(actual_ticker), []).append((actual_ticker, record, class_code))
 
