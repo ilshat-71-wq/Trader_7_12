@@ -5,10 +5,10 @@ It is safe to use for production or historical SPOT-first screening before
 any futures universe, expiry or liquidity lookup is performed.
 """
 
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from api.bcs_api import BCSAPI
+from services.bcs_metadata_cache_service import BCSMetadataCacheService
 
 
 class SpotUniverseService:
@@ -22,28 +22,32 @@ class SpotUniverseService:
         "COMMODITIES",
         "METALS",
     )
-    # Metadata is not quote data. Keep a short-lived process cache so every
-    # scan does not download the same multi-thousand-row BCS catalogs again.
-    CACHE_SECONDS = 300
+    CACHE_SECONDS = BCSMetadataCacheService.CACHE_SECONDS
     MAX_WORKERS = 6
-    _PROCESS_CACHE = {}
-    _PROCESS_CACHE_AT = {}
 
     def __init__(self, api=None):
         self.api = api or BCSAPI()
-        # Instance aliases are retained for compatibility with existing tests.
-        self._cache = self._PROCESS_CACHE
-        self._cache_at = self._PROCESS_CACHE_AT
 
-    def _cached(self, instrument_type):
-        records = self._cache.get(instrument_type)
-        if records is not None and time.monotonic() - self._cache_at.get(instrument_type, 0.0) < self.CACHE_SECONDS:
-            return list(records)
-        return None
+    def _load_one(self, instrument_type):
+        try:
+            records, _ = BCSMetadataCacheService.get_instruments(self.api, instrument_type)
+            return instrument_type, records
+        except Exception as exc:
+            print(f"SPOT metadata unavailable: {instrument_type}: {type(exc).__name__}")
+            return instrument_type, []
 
-    def _store(self, instrument_type, records):
-        self._cache[instrument_type] = list(records)
-        self._cache_at[instrument_type] = time.monotonic()
+    def _load_sequential_fallback(self, instrument_types):
+        """Retry failed metadata kinds sequentially."""
+        recovered = {}
+        for instrument_type in instrument_types:
+            try:
+                kind, records = self._load_one(instrument_type)
+            except Exception as exc:
+                print(f"SPOT sequential fallback failed: {instrument_type}: {type(exc).__name__}")
+                continue
+            if records:
+                recovered[kind] = records
+        return recovered
 
     @staticmethod
     def _class_code(item):
@@ -100,48 +104,8 @@ class SpotUniverseService:
                 return False
         return None
 
-    def _load_one(self, instrument_type):
-        cached = self._cached(instrument_type)
-        if cached is not None:
-            return instrument_type, cached
-        try:
-            records = self.api.get_instruments(instrument_type)
-        except Exception as exc:
-            print(f"SPOT metadata unavailable: {instrument_type}: {type(exc).__name__}")
-            return instrument_type, []
-        if not isinstance(records, list):
-            records = []
-        self._store(instrument_type, records)
-        return instrument_type, records
-
-    def _load_sequential_fallback(self, instrument_types):
-        """Retry failed metadata kinds sequentially.
-
-        Frozen GUI builds must remain robust when the first concurrent metadata
-        burst is rejected or interrupted. The fallback is deliberately limited
-        to kinds that produced no records and uses the same BCS client, cache,
-        and request throttling as the normal path.
-        """
-        recovered = {}
-        for instrument_type in instrument_types:
-            try:
-                kind, records = self._load_one(instrument_type)
-            except Exception as exc:
-                print(f"SPOT sequential fallback failed: {instrument_type}: {type(exc).__name__}")
-                continue
-            if records:
-                recovered[kind] = records
-        return recovered
-
     def load(self, weekend_session=None):
-        """Return normalized SPOT instruments without consulting futures data.
-
-        On MOEX DSWD, only securities explicitly admitted to the additional
-        weekend session are included. The exchange publishes this as
-        SECURITIES.WEEKENDSESSION. If an older BCS metadata response does not
-        expose the flag, the record is retained rather than silently discarded;
-        the scanner can then rely on actual M5 availability.
-        """
+        """Return normalized SPOT instruments without consulting futures data."""
         if weekend_session is None:
             try:
                 from services.market_session_service import MarketSessionService
@@ -153,7 +117,6 @@ class SpotUniverseService:
             if not self.api.authorize():
                 return []
 
-        records = []
         loaded_by_kind = {}
         with ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)), thread_name_prefix="spot-universe") as executor:
             pending = [executor.submit(self._load_one, kind) for kind in self.INSTRUMENT_TYPES]
@@ -167,9 +130,9 @@ class SpotUniverseService:
 
         failed_kinds = [kind for kind in self.INSTRUMENT_TYPES if not loaded_by_kind.get(kind)]
         if failed_kinds:
-            recovered = self._load_sequential_fallback(failed_kinds)
-            loaded_by_kind.update(recovered)
+            loaded_by_kind.update(self._load_sequential_fallback(failed_kinds))
 
+        records = []
         for kind, items in loaded_by_kind.items():
             for item in items:
                 if not isinstance(item, dict):
