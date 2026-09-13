@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, time
+from time import perf_counter
 
 from services.spot_universe_service import SpotUniverseService
 from services.history_candle_service import HistoryCandleService
@@ -12,9 +13,10 @@ from services.daily_trend_profile_service import DailyTrendProfileService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.5.0"
+    VERSION = "2.5.1"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
+    D1_MAX_WORKERS = 6
     MIN_DIRECTIONAL_COVERAGE = 0.80
     MIN_MEANINGFUL_RS_PP = 0.10
     MIN_MARKET_MOVE_PP = 0.10
@@ -302,7 +304,21 @@ class MarketAttentionScannerService:
             return "DOWN"
         return "NEUTRAL"
 
+    @staticmethod
+    def _empty_daily_profile(reason):
+        return {
+            "direction": "NEUTRAL",
+            "qualified": False,
+            "structure_direction": "NEUTRAL",
+            "structure_state": reason,
+            "relative_direction": "UNAVAILABLE",
+            "days": 0,
+        }
+
     def scan(self, limit=3):
+        scan_started = perf_counter()
+        phase_started = scan_started
+        timings = {}
         if not self.api.access_token and not self.api.authorize():
             self._last_scan_diagnostics = {"status": "BCS_AUTH_FAILED"}
             return []
@@ -325,7 +341,11 @@ class MarketAttentionScannerService:
         preferred = self.PREFERRED_START <= now.time() < self.PREFERRED_END
         scan_window = f"{session_start.strftime('%H:%M')}-до закрытия MSK"
         universe = self.build_universe()
+        timings["universe"] = round(perf_counter() - phase_started, 3)
+
+        phase_started = perf_counter()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
+        timings["benchmark"] = round(perf_counter() - phase_started, 3)
         if benchmark_change is None:
             self._last_scan_diagnostics = {
                 "status": "BENCHMARK_UNAVAILABLE", "session": session_name, "trading_date": str(trading_date),
@@ -334,13 +354,18 @@ class MarketAttentionScannerService:
                 "analyzed": 0, "benchmark": None, "benchmark_class_code": benchmark_code,
                 "group_status": {g: ("AVAILABLE" if any(x.get("market_group") == g for x in universe) else "UNAVAILABLE") for g in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
                 "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
+                "timings_seconds": {**timings, "total": round(perf_counter() - scan_started, 3)},
             }
             return []
 
+        phase_started = perf_counter()
         benchmark_daily = self._benchmark_daily(benchmark_ticker, benchmark_code, trading_date)
         daily_benchmark_available = len(benchmark_daily) >= DailyTrendProfileService.MIN_DAYS
+        timings["benchmark_d1"] = round(perf_counter() - phase_started, 3)
+
         results = []
         skipped = {"INSUFFICIENT_M5": [], "INVALID_RESULT": [], "WORKER_ERROR": [], "D1_UNAVAILABLE": [], "LOW_LIQUIDITY": []}
+        phase_started = perf_counter()
         with ThreadPoolExecutor(max_workers=self.MAX_WORKERS, thread_name_prefix="attention") as pool:
             future_items = {pool.submit(self._analyze_one, item, trading_date, session_start, now): item for item in universe}
             for future in as_completed(future_items):
@@ -355,6 +380,7 @@ class MarketAttentionScannerService:
                     results.append(row)
                 else:
                     skipped["INSUFFICIENT_M5"].append(ticker)
+        timings["m5"] = round(perf_counter() - phase_started, 3)
 
         recent_values = [self._f(x["recent_money_per_minute"]) for x in results]
         session_values = [self._f(x["session_money"]) for x in results]
@@ -375,26 +401,35 @@ class MarketAttentionScannerService:
             if not row["liquidity_gate"]:
                 skipped["LOW_LIQUIDITY"].append(row["spot_ticker"])
 
-        for row in results:
-            if daily_benchmark_available:
-                try:
-                    profile = self._daily_profile(row, trading_date, benchmark_daily)
-                except Exception:
-                    profile = {"direction": "NEUTRAL", "qualified": False, "structure_direction": "NEUTRAL", "structure_state": "ERROR", "relative_direction": "UNAVAILABLE", "days": 0}
-                row["daily_profile"] = profile
-                row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
-                row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
-                row["daily_relative_direction"] = profile.get("relative_direction", "UNAVAILABLE")
-                row["daily_relative_mean_pp"] = profile.get("relative_mean_pp", 0.0)
-                row["daily_qualified"] = bool(profile.get("qualified"))
-            else:
-                row["daily_profile"] = {"direction": "NEUTRAL", "qualified": False, "structure_direction": "NEUTRAL", "structure_state": "D1_BENCHMARK_UNAVAILABLE", "relative_direction": "UNAVAILABLE", "days": 0}
+        phase_started = perf_counter()
+        if daily_benchmark_available and results:
+            with ThreadPoolExecutor(max_workers=self.D1_MAX_WORKERS, thread_name_prefix="attention-d1") as pool:
+                future_items = {
+                    pool.submit(self._daily_profile, row, trading_date, benchmark_daily): row
+                    for row in results
+                }
+                for future in as_completed(future_items):
+                    row = future_items[future]
+                    try:
+                        profile = future.result()
+                    except Exception:
+                        profile = self._empty_daily_profile("ERROR")
+                    row["daily_profile"] = profile
+                    row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
+                    row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
+                    row["daily_relative_direction"] = profile.get("relative_direction", "UNAVAILABLE")
+                    row["daily_relative_mean_pp"] = profile.get("relative_mean_pp", 0.0)
+                    row["daily_qualified"] = bool(profile.get("qualified"))
+        else:
+            for row in results:
+                row["daily_profile"] = self._empty_daily_profile("D1_BENCHMARK_UNAVAILABLE")
                 row["daily_structure"] = "NEUTRAL"
                 row["daily_structure_state"] = "D1_BENCHMARK_UNAVAILABLE"
                 row["daily_relative_direction"] = "UNAVAILABLE"
                 row["daily_relative_mean_pp"] = 0.0
                 row["daily_qualified"] = False
                 skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
+        timings["d1"] = round(perf_counter() - phase_started, 3)
 
         rs_magnitudes = [abs(self._f(x.get("relative_strength"))) for x in results]
         market_regime = self._market_regime(benchmark_change)
@@ -467,6 +502,9 @@ class MarketAttentionScannerService:
             row["preferred_window_active"] = preferred
             row.setdefault("qualification_status", "QUALIFIED")
 
+        timings["calculation"] = round(perf_counter() - phase_started, 3)
+        total_seconds = round(perf_counter() - scan_started, 3)
+        timings["total"] = total_seconds
         self._last_scan_diagnostics = {
             "status": "OK" if coverage_ok else "INSUFFICIENT_COVERAGE",
             "session": session_name,
@@ -509,5 +547,6 @@ class MarketAttentionScannerService:
             "direction_policy": "MARKET_REGIME_PLUS_CURRENT_RELATIVE_STRENGTH_PLUS_D1_QUALITY_PLUS_ABSOLUTE_LIQUIDITY",
             "market_direction_rule": "UP_MARKET_PLUS_STRONGER_THAN_MARKET_TO_LONG; DOWN_MARKET_PLUS_WEAKER_THAN_MARKET_TO_SHORT; NEUTRAL_MARKET_NO_STRICT_DIRECTION",
             "watch_policy": "READ_ONLY_FALLBACK_WITH_SAME_MARKET_REGIME_AND_RS_DIRECTION",
+            "timings_seconds": timings,
         }
         return selected
