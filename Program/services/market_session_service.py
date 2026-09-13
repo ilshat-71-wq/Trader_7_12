@@ -12,16 +12,18 @@ class MarketSessionService:
     from 09:50 to 19:00 MSK. Only dates explicitly declared non-trading
     by the current MOEX calendar are closed.
 
-    The market still has named exchange sessions for status display, but
-    the scanner's intraday market-data window is the whole trading day:
-    07:00 MSK through the moment of scanning. Session boundaries must not
-    reset cumulative intraday radar metrics.
+    From 14 September 2026 the stock and futures morning session is
+    06:50–09:00 MSK and the main session is 09:00–19:00 MSK.
+
+    The scanner's intraday market-data window is the whole current trading
+    session from the official session start through the moment of scanning.
+    Session boundaries must not reset cumulative intraday radar metrics.
     """
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
-    PRE_OPEN_START = time(6, 50)
-    MORNING_START = time(7, 0)
-    MAIN_START = time(10, 0)
+    PRE_OPEN_START = time(6, 40)
+    MORNING_START = time(6, 50)
+    MAIN_START = time(9, 0)
     WEEKEND_SESSION_START = time(9, 50)
     EVENING_START = time(19, 0)
     MARKET_CLOSE = time(23, 50)
