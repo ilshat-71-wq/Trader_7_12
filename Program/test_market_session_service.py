@@ -8,15 +8,25 @@ SERVICE = MarketSessionService()
 MSK = ZoneInfo("Europe/Moscow")
 
 
-def test_session_boundaries():
-    assert SERVICE.get_session(datetime(2026, 8, 17, 6, 59, tzinfo=MSK)) == "PRE_OPEN"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 7, 0, tzinfo=MSK)) == "MORNING"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 9, 59, 59, tzinfo=MSK)) == "MORNING"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 10, 0, tzinfo=MSK)) == "MAIN"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 18, 59, 59, tzinfo=MSK)) == "MAIN"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 19, 0, tzinfo=MSK)) == "EVENING"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 23, 49, 59, tzinfo=MSK)) == "EVENING"
-    assert SERVICE.get_session(datetime(2026, 8, 17, 23, 50, tzinfo=MSK)) == "CLOSED"
+def test_session_boundaries_after_2026_schedule_change():
+    assert SERVICE.get_session(datetime(2026, 9, 14, 6, 49, 59, tzinfo=MSK)) == "CLOSED"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 6, 50, tzinfo=MSK)) == "PRE_OPEN"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 6, 59, 59, tzinfo=MSK)) == "PRE_OPEN"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 7, 0, tzinfo=MSK)) == "MORNING"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 8, 59, 59, tzinfo=MSK)) == "MORNING"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 9, 0, tzinfo=MSK)) == "MAIN"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 18, 59, 59, tzinfo=MSK)) == "MAIN"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 19, 0, tzinfo=MSK)) == "EVENING"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 23, 49, 59, tzinfo=MSK)) == "EVENING"
+    assert SERVICE.get_session(datetime(2026, 9, 14, 23, 50, tzinfo=MSK)) == "CLOSED"
+
+
+def test_official_intraday_start_is_0650_after_schedule_change():
+    value = datetime(2026, 9, 14, 8, 30, tzinfo=MSK)
+    assert SERVICE.get_session_start(value).strftime("%H:%M") == "06:50"
+    info = SERVICE.get_session_info(value)
+    assert info["session_start"] == "06:50"
+    assert info["market_open"] is True
 
 
 def test_weekend_additional_session_is_open():
@@ -55,23 +65,25 @@ def test_calendar_update_november_weekend_is_closed():
 
 
 def test_session_info_contains_live_clock_fields():
-    value = datetime(2026, 8, 17, 19, 15, 30, tzinfo=MSK)
+    value = datetime(2026, 9, 14, 19, 15, 30, tzinfo=MSK)
     info = SERVICE.get_session_info(value)
     assert info["session"] == "EVENING"
     assert info["label"] == "ВЕЧЕРНЯЯ СЕССИЯ"
-    assert info["date"] == "2026-08-17"
+    assert info["date"] == "2026-09-14"
     assert info["time"] == "19:15:30"
     assert info["market_open"] is True
+    assert info["session_start"] == "06:50"
 
 
 def test_utc_datetime_is_converted_to_moscow():
-    value = datetime(2026, 8, 17, 16, 15, tzinfo=ZoneInfo("UTC"))
+    value = datetime(2026, 9, 14, 16, 15, tzinfo=ZoneInfo("UTC"))
     assert SERVICE.get_session(value) == "EVENING"
 
 
 if __name__ == "__main__":
     for test in (
-        test_session_boundaries,
+        test_session_boundaries_after_2026_schedule_change,
+        test_official_intraday_start_is_0650_after_schedule_change,
         test_weekend_additional_session_is_open,
         test_weekend_session_boundaries,
         test_non_trading_weekend_is_closed,
