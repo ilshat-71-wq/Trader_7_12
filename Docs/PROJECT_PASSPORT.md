@@ -6,27 +6,32 @@
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.14  
-**Последний подтверждённый commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`
+**Последний функциональный commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`  
+**Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`
 
 ## 1. Назначение
 
-Trader_7_12 Pro — единое read-only приложение для объективного мониторинга текущего рынка. Оно анализирует реальные BASE/SPOT-инструменты, D1/M5, относительную силу к рынку, ликвидность, денежный поток, acceleration и отдельно показывает Futures OI-контекст.
+Trader_7_12 Pro — единое macOS read-only приложение для объективного мониторинга текущего рынка. Оно анализирует реальные BASE/SPOT-инструменты, D1/M5, относительную силу к рынку, ликвидность, денежный поток, acceleration и отдельно показывает Futures OI-контекст.
 
 Программа не выставляет заявки, не управляет позициями, не рассчитывает размер позиции, SL/TP и не исполняет сделки.
 
 ## 2. Главный принцип
 
-Ключевая идея — **Relative Strength vs Market**, а не угадывание абсолютного направления цены.
+**Relative Strength vs Market**, а не угадывание абсолютного направления цены.
 
 ```text
 РЫНОК РАСТЁТ → ищем сильные относительно рынка → LONG candidates
 РЫНОК ПАДАЕТ → ищем слабые относительно рынка → SHORT candidates
-NEUTRAL → не создаём искусственный Long/Short
+NEUTRAL → строгий directional candidate не создаём
 ```
 
-Красная цена сама по себе не означает Short, зелёная цена сама по себе не означает Long.
+```text
+RS = PRICE Δ% − IDX Δ%
+```
 
-## 3. Канонический BASE universe
+Benchmark: `IMOEX2`; `IRUS2` — fallback только если IMOEX2 unavailable/unfit. Meaningful RS threshold: `0.10 pp`.
+
+## 3. BASE universe
 
 ```text
 ALL MOEX TQBR STOCKS
@@ -36,12 +41,15 @@ GAS
 USDRUB
 ```
 
-Правила:
-- GOLD → реальный BCS SPOT/base `GLDRUB_TOM`, если доступен.
-- USDRUB → реальный BCS SPOT.
-- OIL/GAS → только реальный BASE/SPOT source; futures нельзя использовать как замену.
-- Отсутствие реального источника → `UNAVAILABLE`/diagnostic, никогда synthetic value.
-- Futures metadata/mapping/OI — downstream context и не заменяют BASE/SPOT.
+Только реальные BCS BASE/SPOT.
+
+Нельзя:
+- заменять SPOT фьючерсом;
+- создавать synthetic quote/value/classCode/ticker;
+- ставить 0 при отсутствии данных;
+- считать отсутствие данных отсутствием движения.
+
+GOLD → `GLDRUB_TOM` при наличии real BCS SPOT. USDRUB → real SPOT. OIL/GAS → только real BASE/SPOT; иначе `UNAVAILABLE`/diagnostic.
 
 ## 4. Radar pipeline
 
@@ -62,39 +70,19 @@ BASE/SPOT
 → attention ranking
 ```
 
-Benchmark: `IMOEX2`, fallback `IRUS2` только если IMOEX2 unavailable/unfit.
-
-Current RS:
-
-```text
-RS = PRICE Δ% − IDX Δ%
-```
-
-Meaningful threshold: `0.10 pp`.
-
-Market regime:
-
-```text
-benchmark >= +0.10 pp → UP
-benchmark <= -0.10 pp → DOWN
-otherwise → NEUTRAL
-```
-
 ## 5. D1 quality
 
-`DailyTrendProfileService` детерминированный и без сети.
+`DailyTrendProfileService` deterministic and without network.
 
 STRONG:
-- все выбранные D1 свечи зелёные;
+- выбранные D1 свечи зелёные;
 - High строго растёт;
 - Low строго растёт;
 - актив сильнее IMOEX2 в каждом сопоставленном дне.
 
-WEAK — зеркально.
+WEAK — зеркально. Смешанная структура не получает STRONG/WEAK.
 
-Смешанная структура не получает STRONG/WEAK.
-
-D1 — quality/context gate; он не должен подменять current relative-strength logic.
+D1 — quality/context gate; он не подменяет current relative-strength logic.
 
 ## 6. Liquidity / flow
 
@@ -126,17 +114,13 @@ Attention score:
 
 ## 7. Coverage / missing data
 
-Production M5 coverage minimum: **80%**.
+Production M5 coverage minimum: **80%**. Ниже 80% → `INSUFFICIENT_COVERAGE`.
 
-Ниже 80% → `INSUFFICIENT_COVERAGE`.
-
-Missing real data всегда остаётся missing/UNAVAILABLE/diagnostic. Нельзя превращать отсутствие данных в «нет движения», нули или synthetic values.
+Missing real data всегда остаётся missing/UNAVAILABLE/diagnostic. Отсутствие данных нельзя превращать в нули или synthetic values.
 
 ## 8. UI
 
-Единое macOS-приложение `Trader_7_12 Pro.app`.
-
-Вкладки:
+Единое приложение `Trader_7_12 Pro.app`.
 
 ```text
 RADAR
@@ -145,13 +129,13 @@ DIAGNOSTICS
 SETTINGS
 ```
 
-Основная Radar-таблица:
+Основная Radar table:
 
 ```text
 # | Ticker | Role | D1 | D1-RS | IDX Δ% | Price Δ% | RS | ₽/min | DAY ₽ | 15m | Accel | Score
 ```
 
-Это реальная Qt table. UI не изменяет расчёты, qualification, ranking или порядок результатов.
+UI не изменяет расчёты, qualification, ranking или порядок результатов.
 
 ## 9. Futures OI
 
@@ -161,9 +145,7 @@ SETTINGS
 MOEX RFUD marketdata / securities
 ```
 
-Основной OI — реальный MOEX RFUD marketdata по реальному SECID. FUTOI — supplemental.
-
-Family строится из SECID: например `ALU6 → AL`, `SiM7 → SI`.
+Primary OI — реальный MOEX RFUD marketdata по реальному SECID. FUTOI — supplemental.
 
 Front policy:
 
@@ -180,13 +162,11 @@ Regimes:
 ↓ price + ↓ OI → LONG_LIQUIDATION
 ```
 
-Futures liquidity — только `VALTODAY` из RFUD. Никаких `PRICE × VOLUME`, synthetic VALUE или ручного проталкивания тикеров в TOP20.
+Futures liquidity — только `VALTODAY`. Никаких `PRICE × VOLUME`, synthetic VALUE или ручного проталкивания тикеров в TOP20.
 
 ## 10. Futures BASE mapping
 
-Экономическое underlying и конкретный futures contract — разные сущности.
-
-Ключевые canonical mappings:
+Canonical mappings:
 
 ```text
 GZ      → GAZP
@@ -200,7 +180,7 @@ MX/MM   → IMOEX
 IMOEXF  → IMOEX
 ```
 
-Примеры:
+Examples:
 
 ```text
 SIU6     → USDRUB
@@ -220,20 +200,20 @@ EDU6     → ED/SPBXM
 RBZ6     → RGBI/INDX
 ```
 
-MIX и IMOEXF не объединяются в один futures product: они могут иметь один economic underlying `IMOEX`, но остаются разными контрактами.
+MIX и IMOEXF не объединяются в один futures product: общий economic underlying не означает одинаковый контракт.
 
-BCS mapping policy:
+BCS policy:
 1. canonicalize futures family;
 2. determine economic underlying;
 3. preferred catalog lookup;
 4. real BCS `get_instruments_by_tickers()`;
-5. accept only real BCS instrument records;
+5. accept only real BCS records;
 6. use real ticker + real classCode;
-7. normalize ticker aliases such as `EUR_RUB__TOM` ↔ `EURRUB_TOM` only for matching real records;
+7. normalize aliases only when matching an actual returned record;
 8. quote only accepted real ticker/classCode;
-9. no synthetic instrument/quote/class/price.
+9. no synthetic fallback.
 
-Preferred catalog pairs include:
+Preferred catalog pairs:
 
 ```text
 USDRUB      → USDRUB_TOM / CETS
@@ -249,65 +229,57 @@ QQQ         → QQQ / SPBXM
 SPY         → SPY / QMEBLCK
 ```
 
-Catalog — preferred lookup only; real BCS metadata remains source of truth.
+Catalog is lookup preference only; live BCS metadata is source of truth.
 
-## 11. Mapping status / known problem
+## 11. Mapping status — CURRENT P0
 
-Mapping has already been materially improved, but **mapping and speed are not yet declared professional-complete**.
+Mapping has materially improved but is **not yet production-complete**.
 
-Known diagnostics seen during development:
+Historical diagnostics included:
 
 ```text
-earlier:
-  fallback_matches = 17
-  underlying_semantic_matches = 128
-  underlying_class_codes = 82
-  mapping coverage ≈ 41.21%
-
-later diagnostic:
-  underlying_requested = 195
-  underlying_class_codes = 48
-  underlying_class_code_missing = 147
-  underlying_metadata_lookup_batches = 2
-  underlying_metadata_lookup_records = 148
-  underlying_exact_matches = 48
-  underlying_semantic_matches = 0
-  mapping coverage ≈ 24.12%
+underlying_requested = 195
+underlying_class_codes = 48
+underlying_class_code_missing = 147
+underlying_metadata_lookup_batches = 2
+underlying_metadata_lookup_records = 148
+underlying_exact_matches = 48
+underlying_semantic_matches = 0
 ```
 
-**Do not interpret the 147 missing entries as 147 broken BASE mappings.** Их нужно разделить на:
+The 147 missing entries must be classified, not blindly treated as broken BASE mappings:
 
-1. futures outside the canonical BASE universe;
-2. supported BASE instruments requiring BASE Δ%;
-3. genuinely unresolved BCS mappings.
+```text
+A. supported BASE instruments requiring BASE Δ%
+B. futures-only instruments outside BASE
+C. genuinely unresolved BCS mappings
+```
 
-Следующий mapping milestone — получить честную классификацию всех unresolved entries и довести supported BASE mapping coverage до production-quality без synthetic fallback.
+Next mapping milestone: honest classification of all unresolved entries and production-quality supported BASE mapping with real BCS metadata only.
 
 ## 12. BCS/API architecture
 
 - process-wide singleton read-only `BCSAPI`;
-- candle cache TTL около 30s;
-- candle timeout/retry bounded;
-- global candle concurrency bounded (`4` in current BCSAPI);
-- shared process-wide metadata cache уже добавлен;
-- SPOT universe уже использует shared metadata cache;
-- futures underlying/index mapping частично использует shared metadata reuse/cache.
+- bounded candle timeout/retry/concurrency;
+- candle cache TTL about 30s;
+- global candle concurrency currently 4;
+- shared process-wide metadata cache;
+- SPOT universe uses shared metadata cache;
+- futures/index mapping partially reuses shared metadata.
 
-Основная оставшаяся архитектурная задача по performance — убрать дублирование metadata lookups между BCSAPI, SPOT, Market Attention и Futures OI и сделать единую cache/in-flight deduplication точку, не увеличивая без измерений сетевую конкуренцию.
+Remaining performance architecture task: eliminate duplicated metadata requests through one cache/in-flight deduplication point without blindly increasing network concurrency.
 
-## 13. Current performance state
+## 13. Performance
 
-Последняя оптимизация:
+Radar version: `2.5.1`.
+
+D1 profiles use bounded parallelism:
 
 ```text
-6ab8d45 — Radar D1 stage parallelized + timings
+D1_MAX_WORKERS = 6
 ```
 
-`MarketAttentionScannerService.VERSION = 2.5.1`.
-
-D1 profiles теперь получают bounded parallelism `D1_MAX_WORKERS = 6`.
-
-Добавлены timings:
+Diagnostics include:
 
 ```text
 universe
@@ -319,31 +291,27 @@ calculation
 total
 ```
 
-Они сохраняются в `_last_scan_diagnostics` как `timings_seconds`.
+stored as `timings_seconds`.
 
-**Важно:** глобальная BCS candle concurrency сейчас ограничена 4, поэтому дальнейшее простое увеличение worker count без измерений не является решением.
-
-Следующий performance workflow:
+Workflow:
 
 ```text
-1. получить реальный timings_seconds одного полного scan;
-2. определить dominant phase;
-3. если universe/metadata → централизовать cache + in-flight dedupe;
-4. если M5 → history/session candle cache + request dedupe;
-5. если D1 → проверить actual latency после parallelization;
-6. не менять trading criteria ради скорости;
-7. после каждой оптимизации regression + measured scan time.
+1. obtain real timings_seconds from one complete scan;
+2. identify dominant phase;
+3. fix measured bottleneck only;
+4. regression test;
+5. measure again.
 ```
 
-Цель — профессионально предсказуемое время полного сканирования без потери real-data integrity.
+Do not weaken market criteria for speed.
 
-## 14. HTTP/resilience
+## 14. HTTP / resilience
 
-- HTTP/SSL failure не равен отсутствию торгов;
+- HTTP/SSL failure is not equal to no trading;
 - bounded retry;
-- coverage/diagnostics отражают деградацию;
-- Futures OI использует общий `RequestHelper` с TLS/retry;
-- не создавать ad-hoc urllib client для OI.
+- coverage/diagnostics reflect degradation;
+- Futures OI uses common `RequestHelper` with TLS/retry;
+- no ad-hoc urllib client for OI.
 
 ## 15. Calendar
 
@@ -354,28 +322,26 @@ EVENING  19:00–23:50 MSK
 DSWD     09:50–19:00 MSK
 ```
 
-Weekend не должен автоматически подменяться пятничными данными.
-
-На Sunday 13.09.2026 состояние `MARKET_CLOSED`, current BASE Δ% = unavailable без текущего session window — корректно. Futures нельзя использовать для заполнения SPOT.
+Weekend does not automatically substitute Friday data. On Sunday 13.09.2026 state is `MARKET_CLOSED`; current BASE Δ% is unavailable without a current session window. Futures cannot fill SPOT.
 
 ## 16. Sound / scan workflow
 
-Sound settings находятся в SETTINGS.
+Sound settings are in SETTINGS.
 
-Проверено пользователем 13.09.2026:
+User-tested status on 13.09.2026:
+- final completion melody **WORKS**;
+- it plays after the complete RADAR + Futures OI workflow;
+- start melody is **NOT CONFIRMED / NOT HEARD**.
 
-- во время сканирования/процесса мелодия ожидаемо работает;
-- **финальная мелодия теперь играет после полного RADAR + FUTURES OI workflow**;
-- пользователь подтвердил: финальная мелодия сыграла;
-- **стартовая мелодия пока не подтверждена: пользователь сообщил, что в начале она не играет.** Это отдельная UI/audio проблема и не относится к market calculations.
-
-Последний sound commit:
+Latest sound commit:
 
 ```text
 89d63cd — Fix completion sound to fire after full scan
 ```
 
-## 17. Build / tests
+This is a UI/audio issue, not a market-data calculation issue.
+
+## 17. macOS build / signing — UPDATED 13.09.2026
 
 Build script:
 
@@ -389,21 +355,73 @@ Application:
 dist/Trader_7_12 Pro.app
 ```
 
-Последний подтверждённый regression result перед последними UI sound changes:
+PyInstaller: onedir + macOS `.app` BUNDLE. Local production signing is ad-hoc.
+
+### Signing incident and root cause
+
+A PyInstaller build completed packaging but BUNDLE signing failed with:
 
 ```text
-111 passed
+resource fork, Finder information, or similar detritus not allowed
 ```
 
-Перед каждым новым build обязательно:
+Diagnostics proved:
+
+```text
+source Python.framework → no relevant xattr output
+source PySide6 → no relevant xattr output
+build/ → clean
+
+dist/ → contaminated
+```
+
+The generated `dist` tree contained `com.apple.FinderInfo` and `com.apple.fileprovider.fpfs#P` on nested Python/PySide6 frameworks. No `._*` AppleDouble files and no `com.apple.ResourceFork` were found.
+
+Conclusion: metadata is introduced in the generated distribution tree during/around PyInstaller BUNDLE construction under the project filesystem. Cleaning the finished `.app` after PyInstaller is too late because PyInstaller itself attempts BUNDLE signing before post-build cleanup.
+
+### Build fix
+
+Commit:
+
+```text
+f2e0aff5bf5034aa483cb81b3834640735feb382
+```
+
+The build script was changed to stage PyInstaller output outside the affected project/File Provider metadata tree, perform controlled final signing/verification, and only then place the production `.app` in `dist`.
+
+Required final verification:
+
+```text
+=== APP BUILD OK ===
+Code signing: ad-hoc verified
+```
+
+**Important:** the new build has NOT yet been confirmed successful by a real local build as of this passport update. Do not claim build green until the user runs the updated script and receives `=== APP BUILD OK ===`.
+
+## 18. Tests
+
+Latest confirmed local regression before the build-fix validation:
+
+```text
+121 passed in 1.21s
+```
+
+The build script also ran:
+
+```text
+121 passed in 1.34s
+```
+
+Standard verification:
 
 ```bash
-python3 -m compileall -q Program
-pytest -q
+cd ~/Documents/Trader_7_12 && \
+git pull --ff-only origin main && \
+python3 -m pytest -q Program && \
 ./scripts/build_mac_app.sh
 ```
 
-## 18. Read-only boundary
+## 19. Read-only boundary
 
 ```text
 NO ORDER EXECUTION
@@ -413,37 +431,65 @@ NO SL/TP EXECUTION
 NO PORTFOLIO MANAGEMENT
 ```
 
-## 19. Current priorities — STRICT ORDER
+## 20. Current priorities — STRICT ORDER
 
 ### P0 — Mapping correctness
-- fully classify unresolved underlying mappings;
-- distinguish BASE-required mappings from futures-only mappings;
-- verify real BCS ticker/classCode pairs against live metadata;
-- improve supported BASE mapping coverage;
+- classify all unresolved underlying mappings;
+- distinguish BASE-required from futures-only;
+- verify real BCS ticker/classCode pairs;
+- improve supported BASE coverage;
 - preserve `UNAVAILABLE` when real source is absent;
-- add/expand regression tests for every repaired mapping family.
+- add regression tests for repaired mapping families.
 
 ### P1 — Scan speed
 - use `timings_seconds` to identify bottleneck;
-- centralize BCS metadata cache and in-flight request deduplication;
-- avoid repeated full instrument metadata downloads;
-- add history candle/session cache where safe;
-- keep bounded concurrency and BCS rate/network safety;
-- measure before/after each optimization.
+- centralize metadata cache + in-flight dedupe;
+- eliminate repeated full instrument metadata downloads;
+- add safe history/session candle cache where justified;
+- keep bounded concurrency and BCS network safety;
+- measure every optimization before/after.
 
 ### P2 — Diagnostics / acceptance
-- make mapping coverage diagnostics explicit and honest;
-- expose timing phases clearly in DIAGNOSTICS;
-- verify `BASE Δ%`, quote records, class codes and missing reasons;
-- ensure low coverage does not hide the market.
+- make mapping coverage honest and explicit;
+- expose timing phases clearly;
+- preserve truthful missing-data states;
+- keep Futures OI and money-flow sources explicit.
 
-### P3 — Audio polish
-- fix reliable scan-start cue;
-- keep completion cue after full workflow;
-- do not touch market logic for audio/UI work.
+### P3 — UI / audio polish
+- confirm/fix start scan melody;
+- keep visualization light, clear and fast;
+- preserve one coherent single-window application.
 
-## 20. Architectural rule for the next chat
+## 21. Definition of professional completion
 
-**Do not restart the project. Do not create multiple applications. Do not create mini-scanners or redundant architectural layers.**
+Before calling the project production-ready:
 
-Continue from the current `main` state. First inspect GitHub/local status and current diagnostics, then fix the highest-priority real bottleneck. Every change must preserve REAL DATA ONLY and the existing trading logic contract.
+- supported BASE mapping materially complete and verified against real BCS metadata;
+- unresolved mappings honestly classified;
+- no synthetic fallback;
+- full scan speed measured and predictable;
+- repeated metadata requests deduplicated;
+- M5/D1 access cached safely;
+- coverage/diagnostics truthful;
+- Futures OI uses real RFUD/OI/VALTODAY;
+- Radar uses true relative strength vs market;
+- regression suite green;
+- macOS build green and ad-hoc signature verified;
+- UI remains one coherent professional application.
+
+## 22. Non-negotiable rules
+
+```text
+REAL DATA ONLY
+NO SYNTHETIC VALUES
+NO FUTURES AS SPOT SUBSTITUTE
+NO FAKE CLASS CODES
+NO FAKE TICKERS
+NO FAKE LIQUIDITY
+NO ORDER EXECUTION
+NO PORTFOLIO MANAGEMENT
+
+NEVER RESTART THE PROJECT
+NEVER SPLIT INTO MINI-SCANNERS
+NEVER CREATE EXTRA APPLICATIONS OR UNNECESSARY ARCHITECTURE LAYERS
+```
