@@ -20,6 +20,7 @@ Candle HTTP concurrency ограничена безопасным уровнем
 """
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import threading
 
 from config import get_refresh_token, save_refresh_token
@@ -360,9 +361,78 @@ class BCSAPI:
 
     @staticmethod
     def _candle_cache_key(ticker, class_code, interval, start_dt, end_dt):
+        interval_key = str(interval).upper()
+        if interval_key == "M5":
+            moscow_date = start_dt.astimezone(ZoneInfo("Europe/Moscow")).date()
+            return (
+                str(ticker).upper(),
+                str(class_code),
+                interval_key,
+                moscow_date.isoformat(),
+            )
         start_key = start_dt.replace(second=0, microsecond=0).isoformat()
         end_key = end_dt.replace(second=0, microsecond=0).isoformat()
-        return (str(ticker).upper(), str(class_code), str(interval).upper(), start_key, end_key)
+        return (
+            str(ticker).upper(),
+            str(class_code),
+            interval_key,
+            start_key,
+            end_key,
+        )
+
+    @staticmethod
+    def _candle_record_datetime(record):
+        if not isinstance(record, dict):
+            return None
+
+        value = (
+            record.get("dateTime")
+            or record.get("datetime")
+            or record.get("date")
+            or record.get("time")
+            or record.get("timestamp")
+        )
+        if value is None:
+            return None
+
+        try:
+            if isinstance(value, datetime):
+                dt = value
+            elif isinstance(value, (int, float)):
+                dt = datetime.fromtimestamp(
+                    value / 1000.0 if value > 10_000_000_000 else value,
+                    tz=timezone.utc,
+                )
+            else:
+                text = str(value).strip()
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                dt = datetime.fromisoformat(text)
+
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @classmethod
+    def _slice_candle_data(cls, data, start_dt, end_dt):
+        if not isinstance(data, dict):
+            return data
+
+        records = data.get("records")
+        if not isinstance(records, list):
+            return data
+
+        filtered = []
+        for record in records:
+            dt = cls._candle_record_datetime(record)
+            if dt is None or start_dt <= dt < end_dt:
+                filtered.append(record)
+
+        result = dict(data)
+        result["records"] = filtered
+        return result
 
     def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
         """Load BCS candles with bounded retry, cache and safe concurrency."""
@@ -395,14 +465,48 @@ class BCSAPI:
         if start_dt is None or end_dt is None or start_dt >= end_dt:
             print("❌ Invalid candle period")
             return {}
-        cache_key = self._candle_cache_key(ticker, class_code, interval, start_dt, end_dt)
+        interval_key = str(interval).upper()
+        cache_key = self._candle_cache_key(ticker, class_code, interval_key, start_dt, end_dt)
+
         cached = self._candle_cache.get(cache_key)
         if cached is not None:
-            cached_at, cached_data = cached
+            cached_at, cached_data, cached_start, cached_end = cached
             if (now - cached_at).total_seconds() < self.CANDLE_CACHE_TTL:
-                return cached_data
+                if interval_key != "M5" or (cached_start <= start_dt and end_dt <= cached_end):
+                    return self._slice_candle_data(cached_data, start_dt, end_dt)
+
             self._candle_cache.pop(cache_key, None)
-        params = {"ticker": ticker, "classCode": class_code, "startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "timeFrame": interval}
+
+        request_start = start_dt
+        request_end = end_dt
+
+        if interval_key == "M5":
+            moscow_tz = ZoneInfo("Europe/Moscow")
+            trading_date = start_dt.astimezone(moscow_tz).date()
+            session_start_msk = datetime(
+                trading_date.year,
+                trading_date.month,
+                trading_date.day,
+                7, 0, 0,
+                tzinfo=moscow_tz,
+            )
+            session_end_msk = datetime(
+                trading_date.year,
+                trading_date.month,
+                trading_date.day,
+                23, 59, 59,
+                tzinfo=moscow_tz,
+            )
+            request_start = session_start_msk.astimezone(timezone.utc)
+            request_end = session_end_msk.astimezone(timezone.utc)
+
+        params = {
+            "ticker": ticker,
+            "classCode": class_code,
+            "startDate": request_start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "endDate": request_end.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "timeFrame": interval_key,
+        }
         try:
             with self._candle_semaphore:
                 r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.CANDLE_TIMEOUT, max_retries=self.CANDLE_RETRIES)
@@ -417,8 +521,13 @@ class BCSAPI:
         except ValueError:
             print("❌ Candles JSON error:", ticker, interval)
             return {}
-        self._candle_cache[cache_key] = (now, data)
-        return data
+        self._candle_cache[cache_key] = (
+            now,
+            data,
+            request_start,
+            request_end,
+        )
+        return self._slice_candle_data(data, start_dt, end_dt)
 
     def get_trades_period(self, ticker, class_code, start_time, end_time):
         start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
