@@ -1,8 +1,6 @@
 name: one-time BCS catalog integration
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -36,14 +34,18 @@ jobs:
       - name: Run regression tests
         run: python -m pytest -q
 
-      - name: Build macOS application
-        run: ./scripts/build_mac_app.sh
-
-      - name: Commit integrated scanner
+      - name: Commit integrated scanner before build
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Program/services/futures_oi_marketdata_scanner_service.py
+          git commit -m "Integrate exact BCS underlying catalog"
+
+      - name: Build macOS application
+        run: ./scripts/build_mac_app.sh
+
+      - name: Remove one-time integration tooling
+        run: |
           git rm scripts/integrate_bcs_catalog_once.py .github/workflows/bcs-catalog-integration-once.yml
-          git commit -m "Integrate exact BCS underlying catalog" || exit 0
+          git commit -m "Remove one-time BCS integration tooling"
           git push origin HEAD:main
