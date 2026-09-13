@@ -3,16 +3,15 @@
 **Состояние на:** 13.09.2026  
 **Repo:** `ilshat-71-wq/Trader_7_12`  
 **Branch:** `main`  
-**Latest commit after passport update:** `3c72f23e2f8dd740324ceaf1556b8feb10141b`  
-**Previous functional commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`
+**Latest infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
+**Latest passport commit:** `4ea447bcbd6371adef0a315bf17a5876d2d08238`  
+**Previous functional/sound commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`
 
 ## 0. Готовая инструкция для нового чата
 
-В новом чате пользователь может написать:
+> Продолжаем существующий проект TRADER_7_12. Это НЕ новый проект. Прочитай `Docs/PROJECT_PASSPORT.md` и `Docs/NEW_CHAT_STATE.md` в GitHub и продолжай строго с текущего состояния. Я — автор идеи и требований, ты — архитектор и технический руководитель. Не создавай новые приложения, мини-сканеры или лишние архитектурные слои. Главные текущие задачи: довести mapping до production-quality, скорость полного сканирования до профессионального уровня и завершить macOS build/signing validation. REAL DATA ONLY. Сначала проверь фактическое состояние GitHub/local, затем работай с измеренным bottleneck.
 
-> Продолжаем существующий проект TRADER_7_12. Это НЕ новый проект. Прочитай `Docs/PROJECT_PASSPORT.md` и `Docs/NEW_CHAT_STATE.md` в GitHub и продолжай строго с текущего состояния. Я — автор идеи и требований, ты — архитектор и технический руководитель. Не создавай новые приложения, мини-сканеры или лишние архитектурные слои. Главные текущие задачи: довести mapping до production-quality и довести скорость полного сканирования до нормального профессионального уровня. REAL DATA ONLY. Сначала проверь текущее состояние GitHub/local, затем работай с фактическим bottleneck.
-
-## 1. Что это за проект
+## 1. Проект
 
 Trader_7_12 Pro — единое macOS read-only приложение для рыночной информации.
 
@@ -25,9 +24,7 @@ Trader_7_12 Pro — единое macOS read-only приложение для р�
 - отдельно показывает Futures OI и futures liquidity;
 - НЕ торгует и НЕ выставляет заявки.
 
-## 2. Главный принцип
-
-Не угадывать абсолютное направление отдельной бумаги.
+Главный принцип:
 
 ```text
 UP market   → сильные относительно рынка → Long candidates
@@ -39,11 +36,9 @@ NEUTRAL     → строгий directional candidate не создаём
 RS = PRICE Δ% − IDX Δ%
 ```
 
-Benchmark: `IMOEX2`; `IRUS2` — fallback только при невозможности использовать IMOEX2.
+Benchmark = `IMOEX2`, fallback `IRUS2` только при необходимости. Meaningful RS = `0.10 pp`.
 
-Meaningful RS = `0.10 pp`.
-
-## 3. BASE universe
+## 2. BASE universe
 
 ```text
 ALL MOEX TQBR STOCKS
@@ -53,19 +48,9 @@ GAS
 USDRUB
 ```
 
-Только реальные BCS BASE/SPOT.
+Только реальные BCS BASE/SPOT. Нельзя использовать futures как SPOT substitute, synthetic quote, fake classCode/ticker/liquidity или нули вместо missing data.
 
-Нельзя:
-- заменять SPOT фьючерсом;
-- создавать synthetic quote;
-- ставить 0 при отсутствии данных;
-- считать отсутствие данных отсутствием движения.
-
-GOLD → `GLDRUB_TOM` при наличии real BCS SPOT.  
-USDRUB → real SPOT.  
-OIL/GAS → только real BASE/SPOT; иначе UNAVAILABLE.
-
-## 4. Liquidity
+## 3. Liquidity / M5
 
 ```text
 MIN_MONEY_PER_MINUTE        = 8000 ₽/min
@@ -80,31 +65,23 @@ Acceleration:
 recent complete 15m pace / previous complete 15m pace - 1
 ```
 
-Нужны 3 M5 candles + 3 M5 candles и positive previous flow.
+Нужны 3 M5 candles в каждом полном окне и positive previous flow.
 
-## 5. D1
+Production M5 coverage minimum = 80%; ниже → `INSUFFICIENT_COVERAGE`.
+
+## 4. D1
 
 `DailyTrendProfileService` deterministic/no network.
 
-STRONG = green candles + strictly rising High + strictly rising Low + positive D1 RS every matched day.  
-WEAK = зеркально.
+STRONG = зелёные candles + строго растущие High + Low + положительный D1 RS относительно IMOEX2 каждый сопоставленный день. WEAK — зеркально.
 
 D1 — quality/context, не замена current RS.
 
-## 6. M5 / coverage
-
-Production coverage minimum = 80%.
-
-<80% → `INSUFFICIENT_COVERAGE`.
-
-Missing data visible in diagnostics.
-
-## 7. Futures OI
+## 5. Futures OI
 
 Source = MOEX RFUD marketdata.
 
-Primary OI = real SECID marketdata.  
-FUTOI = supplemental.
+Primary OI = real SECID marketdata. FUTOI = supplemental.
 
 Front:
 
@@ -114,13 +91,9 @@ ACTIVE → NON-EXPIRED → OI > 0 → NEAREST EXPIRY → FRONT
 
 Liquidity = only RFUD `VALTODAY`.
 
-Never use:
-- PRICE × VOLUME;
-- undefined VALUE;
-- synthetic turnover;
-- manual promotion of expected roots.
+Never use PRICE × VOLUME, synthetic VALUE/turnover or manual promotion of roots.
 
-## 8. Canonical futures underlying mappings
+Canonical mappings:
 
 ```text
 GZ      → GAZP
@@ -134,40 +107,15 @@ MX/MM   → IMOEX
 IMOEXF  → IMOEX
 ```
 
-Examples:
+Examples include `SIU6 → USDRUB`, `CRU6 → CNYRUB`, `MXU6 → IMOEX`, `GDU6 → GLDRUB_TOM`, `RIU6 → RTS`, `SRU6 → SBER/TQBR`, `GZU6 → GAZP/SMAL`, `EUU6 → EUR_RUB__TOM/CETS`.
 
-```text
-SIU6     → USDRUB
-CRU6     → CNYRUB → CNYRUB_TOM/CETS
-MXU6     → IMOEX → IMOEX/INDX
-GDU6     → GLDRUB_TOM → GLDRUB_TOM/CETS_MTL
-IMOEXF   → IMOEX/INDX
-CNYRUBF  → CNYRUB_TOM/CETS
-USDRUBF  → USDRUB
-EUU6     → EURRUB → EUR_RUB__TOM/CETS
-RIU6     → RTS
-SRU6     → SBER/TQBR
-GZU6     → GAZP/SMAL
-SFU6     → SPY/QMEBLCK
-NAU6     → QQQ/SPBXM
-EDU6     → ED/SPBXM
-RBZ6     → RGBI/INDX
-```
+MIX and IMOEXF remain separate futures products even when economic underlying is IMOEX.
 
-MIX and IMOEXF are separate futures products even when economic underlying is IMOEX.
+## 6. Mapping — CURRENT P0
 
-## 9. Mapping problem — CURRENT PRIORITY #1
+Mapping is improved but not production-complete.
 
-Mapping has improved substantially but is not finished.
-
-Historical diagnostics showed:
-
-```text
-earlier: 41.21% mapping coverage
-later:   24.12% mapping coverage
-```
-
-Later diagnostic:
+Latest important diagnostic:
 
 ```text
 underlying_requested = 195
@@ -179,56 +127,30 @@ underlying_exact_matches = 48
 underlying_semantic_matches = 0
 ```
 
-These 147 are NOT automatically 147 broken mappings.
-
-Next action:
+The 147 missing entries must be classified:
 
 ```text
-A. supported BASE universe needing BASE Δ%
-B. futures-only instruments outside BASE universe
-C. genuinely unresolved BCS mappings
+A. supported BASE requiring BASE Δ%
+B. futures-only outside BASE
+C. genuinely unresolved BCS mapping
 ```
 
-Then repair C and verify A using real BCS metadata.
+BCS live metadata is source of truth. Catalog is preferred lookup only. No synthetic fallback.
 
-BCS preferred catalog:
+## 7. Performance — CURRENT P1
 
-```text
-USDRUB      → USDRUB_TOM / CETS
-EURRUB      → EURRUB_TOM / CETS
-CNYRUB      → CNYRUB_TOM / CETS
-GLDRUB_TOM  → GLDRUB_TOM / CETS_MTL
-IMOEX       → IMOEX / INDX
-RTS         → RTS / INDX
-RGBI        → RGBI / INDX
-SBER        → SBER / TQBR
-GAZP        → GAZP / SMAL
-QQQ         → QQQ / SPBXM
-SPY         → SPY / QMEBLCK
-```
-
-Catalog is lookup preference only. Live BCS metadata is source of truth.
-
-Real BCS alias example: `EUR_RUB__TOM` may correspond to requested `EURRUB_TOM`; normalize only for matching an actual returned record, never invent it.
-
-## 10. Speed problem — CURRENT PRIORITY #2
-
-User reported scanner is very slow, even slower than before.
-
-Already done:
+Already implemented:
 - process-wide BCS API singleton;
 - candle cache/retry/bounded concurrency;
 - shared BCS metadata cache;
-- SPOT universe uses shared metadata cache;
+- SPOT universe cache reuse;
 - partial futures/index mapping cache reuse;
-- D1 profiles parallelized with `D1_MAX_WORKERS = 6`;
-- `timings_seconds` added to Radar diagnostics.
+- D1 parallelization with `D1_MAX_WORKERS = 6`;
+- `timings_seconds` diagnostics.
 
-Current Radar version = `2.5.1`.
+Current candle concurrency = 4. Do not blindly increase it.
 
-Current BCS candle concurrency is bounded at 4, so do NOT blindly raise workers.
-
-Next exact workflow:
+Exact workflow:
 
 ```text
 1. run one real scan;
@@ -236,30 +158,115 @@ Next exact workflow:
 3. inspect timings_seconds;
 4. identify dominant phase;
 5. fix only measured bottleneck;
-6. run pytest;
-7. build app;
-8. measure full scan again.
+6. pytest;
+7. build;
+8. measure again.
 ```
 
-Potential bottlenecks:
+Likely bottlenecks: metadata/universe, M5 history/session requests, or duplicated BCS metadata calls. Do not weaken trading criteria for speed.
+
+## 8. UI / sound
+
+One application only:
 
 ```text
-universe / metadata
-→ central cache + in-flight dedupe
-
-M5
-→ history candle/session cache + request dedupe
-
-D1
-→ measure actual post-parallel timing first
-
-BCS metadata
-→ eliminate repeated full instrument-page loading
+RADAR
+FUTURES OI
+DIAGNOSTICS
+SETTINGS
 ```
 
-Do not weaken market criteria to make scan appear faster.
+Real Qt tables, sorting, copy, scan visual overlay, persistent sound settings.
 
-## 11. Architecture files that matter
+Sound status tested 13.09.2026:
+- final completion melody = **WORKS**;
+- final melody plays after complete RADAR + Futures OI workflow;
+- start melody = **NOT HEARD / NOT CONFIRMED**.
+
+Latest sound commit: `89d63cd`.
+
+## 9. macOS build/signing — CURRENT BLOCKER
+
+The previous build reached PyInstaller BUNDLE but failed signing with:
+
+```text
+resource fork, Finder information, or similar detritus not allowed
+```
+
+Diagnostics proved:
+
+```text
+source Python.framework → clean
+source PySide6 → clean
+build/ → clean
+dist/ → contaminated
+```
+
+Generated `dist` contained `com.apple.FinderInfo` and `com.apple.fileprovider.fpfs#P` on nested Python/PySide6 frameworks. No `._*` files and no `com.apple.ResourceFork` were found.
+
+Therefore post-build `xattr -cr` was too late: PyInstaller itself attempts BUNDLE signing before the script's cleanup stage.
+
+### Implemented fix
+
+Commit:
+
+```text
+f2e0aff5bf5034aa483cb81b3834640735feb382
+```
+
+`build_mac_app.sh` was changed to stage PyInstaller output outside the affected project/File Provider metadata tree, then perform controlled final signing/verification before putting the production `.app` into `dist`.
+
+**This fix is committed but NOT YET LOCALLY VERIFIED.** Do not call the build green until the real local run ends with:
+
+```text
+=== APP BUILD OK ===
+Code signing: ad-hoc verified
+```
+
+## 10. Tests
+
+Latest confirmed regression:
+
+```text
+121 passed in 1.21s
+```
+
+Build script test stage also reported:
+
+```text
+121 passed in 1.34s
+```
+
+## 11. Next exact command
+
+On the user's iMac:
+
+```bash
+cd ~/Documents/Trader_7_12 && \
+git pull --ff-only origin main && \
+./scripts/build_mac_app.sh
+```
+
+Do not run more signing diagnostics before this build. The root cause is already established and the staging fix is committed.
+
+After successful build, launch:
+
+```bash
+cd ~/Documents/Trader_7_12 && \
+pkill -f "Trader_7_12 Pro" 2>/dev/null || true && \
+open "dist/Trader_7_12 Pro.app"
+```
+
+Then verify:
+1. app opens;
+2. single-window UI intact;
+3. RADAR scan works;
+4. Futures OI works;
+5. final sound works;
+6. start sound remains the next audio/UI item if still absent;
+7. diagnostics show real timings.
+
+## 12. Important files
 
 ```text
 Program/api/bcs_api.py
@@ -276,76 +283,12 @@ Program/oi_watchlist_ui.py
 Program/professional_window.py
 Program/main.py
 scripts/build_mac_app.sh
+scripts/Trader_7_12_Pro.spec
 Docs/PROJECT_PASSPORT.md
+Docs/NEW_CHAT_STATE.md
 ```
 
-## 12. Current UI
-
-One application only:
-
-```text
-RADAR
-FUTURES OI
-DIAGNOSTICS
-SETTINGS
-```
-
-Real Qt tables, sorting, copy, scan visual overlay, persistent sound settings.
-
-## 13. Sound status
-
-User tested latest build:
-
-- final completion melody: **WORKS**;
-- final melody plays after complete RADAR + Futures OI workflow;
-- start melody: **NOT WORKING / NOT HEARD** according to latest user report.
-
-Latest sound commit:
-
-```text
-89d63cd — Fix completion sound to fire after full scan
-```
-
-Do not confuse this UI issue with market-data pipeline.
-
-## 14. Tests/build
-
-Last confirmed regression before latest sound work:
-
-```text
-111 passed
-```
-
-Standard local verification:
-
-```bash
-cd ~/Documents/Trader_7_12 && \
-git pull --ff-only && \
-python3 -m compileall -q Program && \
-pytest -q && \
-./scripts/build_mac_app.sh
-```
-
-Launch:
-
-```bash
-cd ~/Documents/Trader_7_12 && \
-pkill -f "Trader_7_12 Pro" 2>/dev/null || true && \
-open "dist/Trader_7_12 Pro.app"
-```
-
-## 15. Important historical commits
-
-```text
-5cfa792  Add shared process BCS metadata cache
- d363e02 Use shared BCS metadata cache in SPOT universe
-c681166  Improve shared BCS metadata reuse for underlying mapping
-2a65b6c  Cache real INDEX metadata for futures underlying mapping
-6ab8d45  Speed up Radar D1 stage and expose scan timings
-89d63cd  Fix completion sound to fire after full scan
-```
-
-## 16. Non-negotiable rules
+## 13. Non-negotiable rules
 
 ```text
 REAL DATA ONLY
@@ -356,23 +299,23 @@ NO FAKE TICKERS
 NO FAKE LIQUIDITY
 NO ORDER EXECUTION
 NO PORTFOLIO MANAGEMENT
+
+NEVER RESTART THE PROJECT
+NEVER SPLIT INTO MINI-SCANNERS
+NEVER CREATE EXTRA APPLICATIONS OR UNNECESSARY ARCHITECTURE LAYERS
 ```
 
-Never restart the project. Never split it into separate applications or mini-scanners. Keep one professional application.
+## 14. Definition of professional completion
 
-## 17. Definition of professional completion
-
-Before calling the project production-ready:
-
-- supported BASE mapping is materially complete and verified against real BCS metadata;
-- unresolved mappings are classified honestly;
-- no synthetic fallback exists;
-- full scan speed is measured and predictable;
-- repeated metadata requests are deduplicated;
-- M5/D1 candle access is cached safely;
-- coverage/diagnostics are truthful;
+- supported BASE mapping materially complete and verified against real BCS metadata;
+- unresolved mappings honestly classified;
+- no synthetic fallback;
+- full scan speed measured and predictable;
+- repeated metadata requests deduplicated;
+- M5/D1 access cached safely;
+- coverage/diagnostics truthful;
 - Futures OI uses real RFUD/OI/VALTODAY;
-- Radar uses true relative strength vs market;
+- Radar uses true RS vs market;
 - regression suite green;
-- macOS build green;
-- UI is one coherent professional application.
+- macOS build green and signature verified;
+- one coherent professional application.
