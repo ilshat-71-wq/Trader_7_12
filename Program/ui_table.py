@@ -1,7 +1,5 @@
 """Reusable professional Qt tables for Trader_7_12 Pro."""
 
-import re
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
@@ -63,6 +61,15 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 """
 
 
+class _SortableItem(QTableWidgetItem):
+    def __lt__(self, other):
+        left = self.data(Qt.ItemDataRole.UserRole)
+        right = other.data(Qt.ItemDataRole.UserRole)
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            return left < right
+        return super().__lt__(other)
+
+
 class MarketTableWidget(QTableWidget):
     """Professional read-only table with sorting and copy-friendly TSV export."""
 
@@ -107,7 +114,7 @@ class MarketTableWidget(QTableWidget):
         for row_index, row in enumerate(rows):
             for column_index, value in enumerate(row):
                 text = "—" if value is None or value == "" else str(value)
-                item = QTableWidgetItem(text)
+                item = _SortableItem(text)
 
                 if isinstance(value, _NumericCell):
                     item.setTextAlignment(
