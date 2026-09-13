@@ -11,14 +11,14 @@ from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
 # The production app uses one premium scan visual across the UI.  Patch the
-# legacy widget name before TraderWindow is imported so the old three-dial
-# animation cannot be instantiated by the application.
+# legacy widget name before the dashboard is imported so the old animation
+# cannot be instantiated by the application.
 import ui as trader_ui
 from premium_scan_visual import PremiumScanVisual
 
 trader_ui.MeltingClocksWidget = PremiumScanVisual
 
-from oi_watchlist_ui import OIWatchlistTraderWindow
+from professional_window import ProfessionalTraderWindow
 
 
 class ScanningSplash(QSplashScreen):
@@ -121,13 +121,14 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Trader_7_12 Pro")
+    app.setOrganizationName("Trader_7_12")
     app.setQuitOnLastWindowClosed(True)
 
     splash = ScanningSplash()
     splash.show()
     app.processEvents()
 
-    window = OIWatchlistTraderWindow(scanner_enabled=True)
+    window = ProfessionalTraderWindow(scanner_enabled=True)
     window.show()
     window.raise_()
     window.activateWindow()
