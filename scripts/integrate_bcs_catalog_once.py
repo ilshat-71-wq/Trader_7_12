@@ -23,9 +23,9 @@ NEW_BLOCK = '''    @staticmethod
     def _underlying_quotes(self, contracts):
         """Resolve futures to a real BCS economic underlying and real quote only.
 
-        A catalog entry is only a preferred lookup pair. It never fabricates a
-        quote: BCS metadata must confirm the exact ticker/classCode before the
-        instrument is accepted.
+        The catalog is only a preferred lookup table. A value is accepted only
+        after the live BCS instrument directory confirms the real instrument.
+        No synthetic quote, classCode, or price is ever created here.
         """
         requested = {}
         family_tickers = {}
@@ -83,7 +83,7 @@ NEW_BLOCK = '''    @staticmethod
                 actual_ticker = self._text(record, "ticker", "secCode", "securityCode").strip().upper()
                 class_code = self._text(record, "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
                 if actual_ticker and class_code:
-                    records_by_ticker.setdefault(actual_ticker, []).append((record, class_code))
+                    records_by_ticker.setdefault(self._normalize_mapping_text(actual_ticker), []).append((actual_ticker, record, class_code))
 
         instruments = []
         for canonical, entry in requested.items():
@@ -91,16 +91,26 @@ NEW_BLOCK = '''    @staticmethod
             for candidate in entry["candidates"]:
                 wanted_ticker = str(candidate.get("ticker") or "").strip().upper()
                 wanted_class = str(candidate.get("classCode") or "").strip().upper()
-                for record, actual_class in records_by_ticker.get(wanted_ticker, ()):
-                    if wanted_class and actual_class.upper() != wanted_class:
-                        continue
-                    accepted = (wanted_ticker, actual_class, record)
-                    break
+                matches = records_by_ticker.get(self._normalize_mapping_text(wanted_ticker), ())
+                if not matches:
+                    continue
+                # Prefer the catalog's classCode when BCS returned several real
+                # instruments with the same normalized ticker. If it is not
+                # present, accept the unique live BCS classCode and keep it as
+                # the authority rather than inventing the catalog class.
+                if wanted_class:
+                    preferred = [match for match in matches if match[2].upper() == wanted_class]
+                    if preferred:
+                        accepted = preferred[0]
+                    elif len(matches) == 1:
+                        accepted = matches[0]
+                elif len(matches) == 1:
+                    accepted = matches[0]
                 if accepted:
                     break
             if not accepted:
                 continue
-            actual_ticker, class_code, record = accepted
+            actual_ticker, record, class_code = accepted
             entry["classCode"] = class_code
             entry["bcsTicker"] = actual_ticker
             entry["mappingSource"] = "BCS_EXACT_CATALOG" if preferred_instruments(canonical) else "BCS_EXACT_LOOKUP"
