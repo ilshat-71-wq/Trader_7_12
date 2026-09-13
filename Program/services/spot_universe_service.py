@@ -21,6 +21,7 @@ class SpotUniverseService:
         "COMMODITY",
         "COMMODITIES",
         "METALS",
+        "INDICES",
     )
     CACHE_SECONDS = BCSMetadataCacheService.CACHE_SECONDS
     MAX_WORKERS = 6
@@ -84,6 +85,8 @@ class SpotUniverseService:
             return "MOEX_CURRENCY"
         if kind in {"GOODS", "COMMODITY", "COMMODITIES", "METALS"}:
             return "MARKET_DRIVER"
+        if kind == "INDICES":
+            return "MARKET_INDEX"
         return "SPOT"
 
     @staticmethod
