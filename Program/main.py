@@ -5,10 +5,12 @@ Read-only market-information scanner with futures/OI context. No order execution
 
 import math
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
-from PySide6.QtWidgets import QApplication, QSplashScreen, QWidget
+from PySide6.QtWidgets import QApplication, QSplashScreen
 
 # The production app uses one premium scan visual across the UI.  Patch the
 # legacy widget name before the dashboard is imported so the old animation
@@ -21,8 +23,11 @@ trader_ui.MeltingClocksWidget = PremiumScanVisual
 from professional_window import ProfessionalTraderWindow
 
 
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
 class ScanningSplash(QSplashScreen):
-    """Luxury startup splash using the same turquoise/gold watch language."""
+    """Startup splash with a real-time Moscow clock and animated sweep."""
 
     def __init__(self):
         size = 520
@@ -39,6 +44,10 @@ class ScanningSplash(QSplashScreen):
     def _advance(self):
         self._angle = (self._angle + 2.4) % 360.0
         self._redraw()
+
+    @staticmethod
+    def _moscow_time():
+        return datetime.now(MOSCOW_TZ)
 
     def _redraw(self):
         s = self._size
@@ -80,15 +89,24 @@ class ScanningSplash(QSplashScreen):
                 QPointF(cx + math.cos(a) * outer, cy + math.sin(a) * outer),
             )
 
-        for angle, length, width in ((126, r * 0.50, 7), (18, r * 0.67, 5)):
-            a = math.radians(angle - 90)
+        # Real Moscow time: the startup clock is no longer a static illustration.
+        now = self._moscow_time()
+        seconds = now.second + now.microsecond / 1_000_000.0
+        minutes = now.minute + seconds / 60.0
+        hours = (now.hour % 12) + minutes / 60.0
+
+        for angle, length, width in (
+            (hours * 30.0 - 90.0, 0.50, 7),
+            (minutes * 6.0 - 90.0, 0.67, 5),
+        ):
+            a = math.radians(angle)
             p.setPen(QPen(QColor("#f4d47a"), width, Qt.SolidLine, Qt.RoundCap))
             p.drawLine(
                 QPointF(cx, cy),
-                QPointF(cx + math.cos(a) * length, cy + math.sin(a) * length),
+                QPointF(cx + math.cos(a) * r * length, cy + math.sin(a) * r * length),
             )
 
-        a = math.radians(self._angle - 90)
+        a = math.radians(seconds * 6.0 - 90.0)
         p.setPen(QPen(QColor(91, 239, 224, 55), 6, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(
             QPointF(cx, cy),
@@ -112,6 +130,8 @@ class ScanningSplash(QSplashScreen):
         p.drawText(0, int(s * 0.77), s, 28, Qt.AlignCenter, "TRADER 7_12 PRO")
         p.setPen(QColor("#74d8cf"))
         p.drawText(0, int(s * 0.84), s, 24, Qt.AlignCenter, "MARKET SCANNING")
+        p.setPen(QColor("#f0d27a"))
+        p.drawText(0, int(s * 0.90), s, 22, Qt.AlignCenter, f"MSK  {now:%H:%M:%S}")
         p.end()
         self.setPixmap(pixmap)
 
@@ -150,7 +170,6 @@ class ScanVisualTraderWindow(ProfessionalTraderWindow):
 
     def _start_scan_animation(self):
         super()._start_scan_animation()
-        # Use the global watch as the single scan visual, including RADAR.
         self.result_stack.setCurrentWidget(self.result_panel)
         self._show_global_scan_visual()
 
