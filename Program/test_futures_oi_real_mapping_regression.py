@@ -7,9 +7,9 @@ class FakeBCS:
             "SBER": {"ticker": "SBER", "boards": [{"classCode": "TQBR", "exchange": "MOEX"}]},
             "LKOH": {"ticker": "LKOH", "boards": [{"classCode": "TQBR", "exchange": "MOEX"}]},
             "GLDRUB_TOM": {"ticker": "GLDRUB_TOM", "shortName": "Золото", "boards": [{"classCode": "CETS_MTL", "exchange": "MOEX"}]},
-            "USDRUB": {"ticker": "USDRUB_TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
-            "EURRUB": {"ticker": "EUR_RUB__TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
-            "CNYRUB": {"ticker": "CNYRUB_TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
+            "USDRUB_TOM": {"ticker": "USDRUB_TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
+            "EURRUB_TOM": {"ticker": "EUR_RUB__TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
+            "CNYRUB_TOM": {"ticker": "CNYRUB_TOM", "boards": [{"classCode": "CETS", "exchange": "MOEX"}]},
         }
         return [records[ticker] for ticker in tickers if ticker in records]
 
