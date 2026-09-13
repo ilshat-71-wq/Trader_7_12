@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from services.futures_oi_scanner_service import FuturesOIScannerService
+from api.bcs_underlying_catalog import preferred_instruments
 
 
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
@@ -152,18 +153,26 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
 
     @staticmethod
     def _underlying_lookup_aliases(ticker):
-        """Return real BCS ticker spellings for a canonical economic underlying."""
+        """Return only real BCS ticker spellings; no synthetic instrument names."""
         normalized = "".join(ch for ch in str(ticker or "").upper() if ch.isalnum())
         aliases = {
-            "USDRUB": ("USDRUB", "USDRUB_TOM"),
-            "EURRUB": ("EURRUB", "EURRUB_TOM"),
-            "CNYRUB": ("CNYRUB", "CNYRUB_TOM"),
-            "GLDRUBTOM": ("GLDRUB_TOM", "GLDRUB", "GOLD"),
+            "USDRUB": ("USDRUB_TOM", "USDRUB_TOD"),
+            "EURRUB": ("EURRUB_TOM", "EURRUB_TOD"),
+            "CNYRUB": ("CNYRUB_TOM", "CNYRUB_TOD"),
+            "GLDRUBTOM": ("GLDRUB_TOM",),
         }
+        preferred = preferred_instruments(ticker)
+        if preferred:
+            return tuple(item["ticker"] for item in preferred if item.get("ticker"))
         return aliases.get(normalized, (str(ticker).upper(),))
 
     def _underlying_quotes(self, contracts):
-        """Resolve futures -> real underlying using canonical BCS/MOEX family mapping."""
+        """Resolve futures to a real BCS economic underlying and real quote only.
+
+        The catalog is only a preferred lookup table. A value is accepted only
+        after the live BCS instrument directory confirms the real instrument.
+        No synthetic quote, classCode, or price is ever created here.
+        """
         requested = {}
         family_tickers = {}
         for item in contracts:
@@ -180,23 +189,31 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             }
             canonical = ticker_aliases.get(normalized_ticker, canonical)
             family_tickers[family] = canonical
-            item_class = self._text(item, "underlying_class_code", "underlyingClassCode", "underlying_class_code")
+            item_class = self._text(item, "underlying_class_code", "underlyingClassCode")
             entry = requested.setdefault(canonical, {"ticker": canonical, "classCode": "", "families": set()})
             entry["families"].add(family)
             if item_class and not entry["classCode"]:
                 entry["classCode"] = item_class
 
-        unresolved = [key for key, item in requested.items() if not item.get("classCode")]
-        lookup_batches = 0
+        lookup_tickers = []
+        for canonical, entry in requested.items():
+            candidates = preferred_instruments(canonical)
+            if not candidates and entry.get("classCode"):
+                candidates = ({"ticker": canonical, "classCode": entry["classCode"]},)
+            if not candidates:
+                candidates = tuple({"ticker": ticker} for ticker in self._underlying_lookup_aliases(canonical))
+            entry["candidates"] = tuple(candidates)
+            for candidate in entry["candidates"]:
+                ticker = str(candidate.get("ticker") or "").strip().upper()
+                if ticker and ticker not in lookup_tickers:
+                    lookup_tickers.append(ticker)
+
         lookup_records = 0
-        semantic_matches = 0
-        for start in range(0, len(unresolved), self.ENRICH_BATCH_SIZE):
-            batch_keys = unresolved[start:start + self.ENRICH_BATCH_SIZE]
-            batch = []
-            for key in batch_keys:
-                for alias in self._underlying_lookup_aliases(key):
-                    if alias not in batch:
-                        batch.append(alias)
+        exact_matches = 0
+        lookup_batches = 0
+        records_by_ticker = {}
+        for start in range(0, len(lookup_tickers), self.ENRICH_BATCH_SIZE):
+            batch = lookup_tickers[start:start + self.ENRICH_BATCH_SIZE]
             lookup_batches += 1
             try:
                 records = self.api.get_instruments_by_tickers(batch)
@@ -209,30 +226,44 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             for record in records:
                 if not self._is_real_underlying_record(record):
                     continue
-                actual_ticker = self._text(record, "_underlying_bcs_ticker", "ticker", "secCode", "securityCode").upper()
-                class_code = self._text(record, "_underlying_bcs_class_code", "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
-                if not actual_ticker or not class_code:
-                    continue
-                record_values = []
-                for key in ("ticker", "secCode", "securityCode", "baseAssetTicker", "base_asset_ticker", "underlyingAsset", "underlying_asset", "underlying", "underlyingTicker", "underlying_ticker", "underlyingSecCode", "underlying_sec_code", "assetCode", "asset_code", "baseAsset", "base_asset", "baseTicker", "base_ticker", "shortCode", "short_code", "shortName", "name", "fullName"):
-                    value = record.get(key)
-                    if value:
-                        record_values.append(value)
-                record_aliases = set()
-                for value in record_values:
-                    record_aliases.update(self._semantic_aliases(value))
-                for economic_ticker, entry in requested.items():
-                    wanted = set(self._semantic_aliases(economic_ticker))
-                    for family in entry["families"]:
-                        wanted.update(self._semantic_aliases(family))
-                    if not wanted.intersection(record_aliases):
-                        continue
-                    entry["classCode"] = class_code
-                    entry["bcsTicker"] = actual_ticker
-                    entry["mappingSource"] = "BCS_CANONICAL_UNDERLYING"
-                    semantic_matches += 1
+                actual_ticker = self._text(record, "ticker", "secCode", "securityCode").strip().upper()
+                class_code = self._text(record, "classCode", "class_code", "classcode") or self._select_underlying_class_code(record)
+                if actual_ticker and class_code:
+                    records_by_ticker.setdefault(self._normalize_mapping_text(actual_ticker), []).append((actual_ticker, record, class_code))
 
-        self._underlying_class_codes = {key: value["classCode"] for key, value in requested.items() if value.get("classCode")}
+        instruments = []
+        for canonical, entry in requested.items():
+            accepted = None
+            for candidate in entry["candidates"]:
+                wanted_ticker = str(candidate.get("ticker") or "").strip().upper()
+                wanted_class = str(candidate.get("classCode") or "").strip().upper()
+                matches = records_by_ticker.get(self._normalize_mapping_text(wanted_ticker), ())
+                if not matches:
+                    continue
+                # Prefer the catalog's classCode when BCS returned several real
+                # instruments with the same normalized ticker. If it is not
+                # present, accept the unique live BCS classCode and keep it as
+                # the authority rather than inventing the catalog class.
+                if wanted_class:
+                    preferred = [match for match in matches if match[2].upper() == wanted_class]
+                    if preferred:
+                        accepted = preferred[0]
+                    elif len(matches) == 1:
+                        accepted = matches[0]
+                elif len(matches) == 1:
+                    accepted = matches[0]
+                if accepted:
+                    break
+            if not accepted:
+                continue
+            actual_ticker, record, class_code = accepted
+            entry["classCode"] = class_code
+            entry["bcsTicker"] = actual_ticker
+            entry["mappingSource"] = "BCS_EXACT_CATALOG" if preferred_instruments(canonical) else "BCS_EXACT_LOOKUP"
+            exact_matches += 1
+            instruments.append({"ticker": actual_ticker, "classCode": class_code})
+
+        self._underlying_class_codes = {key: value["classCode"] for key, value in requested.items() if value.get("classCode") and value.get("bcsTicker")}
         self._underlying_bcs_tickers = {key: value["bcsTicker"] for key, value in requested.items() if value.get("bcsTicker")}
         self._underlying_mapping_source = {key: value["mappingSource"] for key, value in requested.items() if value.get("mappingSource")}
         self._underlying_family_tickers = family_tickers
@@ -242,14 +273,9 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "underlying_class_code_missing": max(0, len(requested) - len(self._underlying_class_codes)),
             "underlying_metadata_lookup_batches": lookup_batches,
             "underlying_metadata_lookup_records": lookup_records,
-            "underlying_semantic_matches": semantic_matches,
+            "underlying_exact_matches": exact_matches,
+            "underlying_semantic_matches": 0,
         }
-        instruments = []
-        for economic_ticker, item in requested.items():
-            class_code = item.get("classCode")
-            bcs_ticker = item.get("bcsTicker") or economic_ticker
-            if class_code and bcs_ticker:
-                instruments.append({"ticker": bcs_ticker, "classCode": class_code})
         if not instruments:
             return {}
         try:
