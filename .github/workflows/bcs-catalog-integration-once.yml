@@ -1,6 +1,8 @@
 name: one-time BCS catalog integration
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -8,6 +10,7 @@ permissions:
 
 jobs:
   integrate-test-commit:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run one-time BCS catalog integration'
     runs-on: macos-15-intel
     steps:
       - name: Checkout main
