@@ -1,47 +1,34 @@
 # TRADER_7_12 PRO — NEW CHAT STATE / HANDOFF
 
-**Состояние на:** 13.09.2026  
-**Repo:** `ilshat-71-wq/Trader_7_12`  
-**Branch:** `main`
+**Состояние:** 13.09.2026
 
-## Verified sync
+## Verified state before handoff edits
 
-Before this handoff, local `main`, `origin/main`, and the running app were verified from commit `d51f9405fc3e36ddb0f42275585a3dcc73882a0e`; local working tree was clean. The handoff update itself is now committed on `main`.
+Local `main`, `origin/main`, and the running application were verified by the user at `d51f9405fc3e36ddb0f42275585a3dcc73882a0e`; working tree was clean.
 
-## Current market-off diagnostic
+This document was then updated directly on GitHub `main`. Therefore the user's local checkout must be fast-forwarded before any further local work:
 
-13.09.2026 is Sunday. `SPOT / MARKET RADAR = MARKET_CLOSED`, `universe_total=0`, and absent current `LIQ NOW / FLOW` are expected. Do not synthesize closed-market values.
+```bash
+cd ~/Documents/Trader_7_12 && git pull --ff-only origin main
+```
 
-Futures pipeline observed: 600 raw contracts, 199 active, 233 analyzed, 233 OI available, 224 liquidity available, top 20 returned; turnover source is real MOEX RFUD `VALTODAY`; money flow is `NO_DATA` because the market is closed.
+## Current technical priorities
 
-## P0 — mapping
+1. P0: production-quality BCS underlying mapping.
+2. P1: BASE Δ% coverage through real BCS classCode and real M5 data during an open session.
+3. Closed-market UI clarity.
+4. Final UI polish.
 
-Current underlying mapping is incomplete:
-- requested 195
-- class codes 48
-- missing 147
-- exact matches 48
-- semantic matches 0
-- coverage 24.12%
+## Market-off observation
 
-The 147 missing entries must be truthfully classified as:
-A. supported BASE requiring BASE Δ%;
-B. futures-only outside BASE;
-C. genuinely unresolved BCS mapping.
+13.09.2026 is Sunday. `MARKET_CLOSED`, zero SPOT universe, and absent current LIQ NOW/FLOW are expected. Do not synthesize values.
 
-BCS live metadata remains source of truth. Catalog is lookup assistance only. No synthetic class codes/tickers/quotes/liquidity.
+Observed Futures OI pipeline: 600 raw, 199 active, 233 analyzed, 233 OI available, 224 liquidity available, top 20 returned; turnover uses real MOEX RFUD `VALTODAY`; money flow is `NO_DATA` while closed.
 
-## Work order without live market
+## Mapping defect
 
-1. Inspect mapping/catalog/metadata code.
-2. Improve deterministic canonical family → economic underlying → BCS lookup → real instrument acceptance.
-3. Add regression tests for canonical futures families and known aliases.
-4. Make missing mapping diagnostics explicit and truthful.
-5. Review BASE Δ% path for supported mapped BASE instruments.
-6. Polish closed-market UI and existing tables without adding architecture layers.
-7. Run pytest/build locally.
-8. Validate live-market mapping/BASE Δ%/RS/M5/LIQ NOW/FLOW on the next session.
+Observed: 195 underlying requests, 48 class codes, 147 missing, 48 exact matches, 0 semantic matches, 24.12% coverage. Missing mappings must be classified as supported BASE, futures-only outside BASE, or genuinely unresolved BCS mapping. BCS live metadata is source of truth. No synthetic fallback.
 
 ## Rules
 
-REAL DATA ONLY. NO SYNTHETIC VALUES. NO FUTURES AS SPOT SUBSTITUTE. NO FAKE CLASS CODES. NO FAKE TICKERS. NO FAKE LIQUIDITY. NO ORDER EXECUTION. NO PORTFOLIO MANAGEMENT. One application only; work on `main`.
+REAL DATA ONLY. NO SYNTHETIC VALUES. NO FUTURES AS SPOT SUBSTITUTE. NO FAKE CLASS CODES. NO FAKE TICKERS. NO FAKE LIQUIDITY. NO ORDER EXECUTION. NO PORTFOLIO MANAGEMENT. One application only. Work on `main`.
