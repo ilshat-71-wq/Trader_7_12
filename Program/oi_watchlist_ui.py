@@ -8,6 +8,7 @@ from ui import TraderWindow
 from ui_table import MarketTableWidget, numeric
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.money_flow_service import MoneyFlowService
+from services.signal_probability_service import SignalProbabilityService
 
 
 class FuturesOIWorker(QObject):
@@ -52,6 +53,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.oi_thread = None
         self.oi_worker = None
         self._oi_diagnostics = {}
+        self.signal_probability = SignalProbabilityService()
+        self._oi_previous_probabilities = {}
         self.oi_panel = self._build_oi_panel()
         self.market_tabs.addTab(self.oi_panel, "FUTURES OI")
         self.market_tabs.tabBar().moveTab(2, 1)
@@ -88,8 +91,9 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar.addWidget(self.oi_copy_button)
         layout.addLayout(toolbar)
         self.oi_table = MarketTableWidget(
-            ["#", "Root", "Contract", "Base", "FUT Δ%", "OI", "ΔOI%", "DAY ₽", "LIQ NOW", "FLOW", "ACTION", "ZONE"],
-            [38, 55, 112, 92, 68, 92, 70, 94, 118, 125, 130, 142],
+            ["#", "Root", "Contract", "Base", "FUT Δ%", "OI", "ΔOI%", "DAY ₽", "LIQ NOW", "FLOW", "ACTION", "ZONE",
+             "SIGNAL", "PROB", "ΔPROB"],
+            [38, 55, 112, 92, 68, 92, 70, 94, 118, 125, 130, 142, 78, 72, 72],
         )
         layout.addWidget(self.oi_table, 1)
         return panel
@@ -246,7 +250,27 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"ACTION = цена + ΔOI • ZONE = поток / VWAP"
         )
         rows = []
-        for index, item in enumerate(results or [], 1):
+        prepared_results = []
+        for item in results or []:
+            signal = self.signal_probability.futures(item)
+            key = item.get("futures_ticker") or item.get("oi_root") or ""
+            previous = self._oi_previous_probabilities.get(key)
+            item = dict(item)
+            item.update({
+                "signal": signal["signal"],
+                "signal_probability": signal["probability"],
+                "long_probability": signal["long_probability"],
+                "short_probability": signal["short_probability"],
+                "signal_model": signal["signal_model"],
+                "signal_probability_delta": (
+                    round(signal["probability"] - previous, 1)
+                    if previous is not None else None
+                ),
+            })
+            self._oi_previous_probabilities[key] = signal["probability"]
+            prepared_results.append(item)
+
+        for index, item in enumerate(prepared_results, 1):
             oi = item.get("oi_analysis") or {}
             rows.append([
                 numeric(item.get("money_flow_rank") or index),
@@ -261,9 +285,25 @@ class OIWatchlistTraderWindow(TraderWindow):
                 self._flow_text(item),
                 self._action_text(item),
                 self._zone_text(item),
+                str(item.get("signal") or "—"),
+                numeric(
+                    f"{self._fmt(item.get('signal_probability'), 1)}%"
+                    if item.get("signal_probability") is not None else "—"
+                ),
+                numeric(
+                    f"{self._signed(item.get('signal_probability_delta'), 1)}%"
+                    if item.get("signal_probability_delta") is not None else "NEW"
+                ),
             ])
         self.oi_table.set_rows(rows)
-        self._highlight_money_rows(results or [])
+        self._highlight_money_rows(prepared_results)
+        for row_index, item in enumerate(prepared_results):
+            signal = str(item.get('signal') or '')
+            brush = QBrush(QColor('#69e59a' if signal == 'LONG' else '#ff7d7d' if signal == 'SHORT' else '#c9d0d6'))
+            for col in (12, 13, 14):
+                cell = self.oi_table.item(row_index, col)
+                if cell:
+                    cell.setForeground(brush)
         self.oi_table.setToolTip(
             "LIQ NOW — где сейчас максимальная реальная денежная активность по сделкам BCS за 5 минут. "
             "FLOW — наблюдаемое направление потока за 30 минут с учётом текущего стакана. "

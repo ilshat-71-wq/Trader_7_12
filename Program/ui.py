@@ -216,8 +216,10 @@ class TraderWindow(QWidget):
 
         self.result_table = MarketTableWidget(
             ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%",
-             "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score"],
-            [42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72],
+             "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
+             "SIGNAL", "PROB", "ΔPROB"],
+            [42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72,
+             78, 72, 72],
         )
 
         self.result_panel = QWidget()
@@ -531,11 +533,31 @@ class TraderWindow(QWidget):
                 numeric(_money(item.get("recent_money"))),
                 numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
                 numeric(_number(item.get("directional_score"), 1)),
+                str(item.get("signal") or "—"),
+                numeric(
+                    f"{_number(item.get('signal_probability'), 1)}%"
+                    if item.get("signal_probability") is not None else "—"
+                ),
+                numeric(
+                    f"{_number(item.get('signal_probability_delta'), 1)}%"
+                    if item.get("signal_probability_delta") is not None else "NEW"
+                ),
             ])
 
         self.result_table.set_rows(rows)
         for row_index, rs in enumerate(rs_values):
             self._apply_relative_strength_tint(self.result_table, row_index, rs)
+            item = (results or [])[row_index]
+            signal = str(item.get("signal") or "")
+            signal_color = (
+                QColor("#69e59a") if signal == "LONG"
+                else QColor("#ff7d7d") if signal == "SHORT"
+                else QColor("#c9d0d6")
+            )
+            for col in (13, 14, 15):
+                cell = self.result_table.item(row_index, col)
+                if cell:
+                    cell.setForeground(signal_color)
 
         self.result_table.setToolTip(
             "Зелёный оттенок — инструмент сильнее IMOEX2; красный — слабее IMOEX2. "

@@ -8,6 +8,7 @@ from services.spot_universe_service import SpotUniverseService
 from services.history_candle_service import HistoryCandleService
 from services.market_session_service import MarketSessionService
 from services.daily_trend_profile_service import DailyTrendProfileService
+from services.signal_probability_service import SignalProbabilityService
 
 
 class MarketAttentionScannerService:
@@ -41,6 +42,8 @@ class MarketAttentionScannerService:
         self.history = history_service or HistoryCandleService()
         self.session = session_service or MarketSessionService()
         self._last_scan_diagnostics = {}
+        self.signal_probability = SignalProbabilityService()
+        self._previous_signal_probabilities = {}
 
     @staticmethod
     def _f(value, default=0.0):
@@ -192,7 +195,7 @@ class MarketAttentionScannerService:
             recent_pace = recent_money / max(1, recent_minutes)
             acceleration = 0.0
         change = (last / first - 1.0) * 100.0
-        return {
+        result = {
             **item,
             "price": last,
             "change_percent": change,
@@ -205,6 +208,22 @@ class MarketAttentionScannerService:
             "candle_count": len(candles),
             "data_status": "AVAILABLE",
         }
+        signal = self.signal_probability.spot(result)
+        key = result.get("spot_ticker") or ""
+        previous = self._previous_signal_probabilities.get(key)
+        result.update({
+            "signal": signal["signal"],
+            "signal_probability": signal["probability"],
+            "long_probability": signal["long_probability"],
+            "short_probability": signal["short_probability"],
+            "signal_model": signal["signal_model"],
+            "signal_probability_delta": (
+                round(signal["probability"] - previous, 1)
+                if previous is not None else None
+            ),
+        })
+        self._previous_signal_probabilities[key] = signal["probability"]
+        return result
 
     def _quote_session_return(self, ticker, class_code, now):
         try:

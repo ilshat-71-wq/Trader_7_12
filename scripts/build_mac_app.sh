@@ -1,14 +1,14 @@
 #!/bin/zsh
 # macOS app build script for Trader_7_12 Pro.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.."\nROOT_DIR="$(pwd)"
 
 APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
 APP_VERSION="2.4.3"
-PUBLISHED_APP="${HOME}/Applications/${APP_NAME}"
+PUBLISHED_APP="${ROOT_DIR}/${DIST_DIR}/${APP_NAME}"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/null || echo unknown)" "Commit: $(git rev-parse HEAD)"
@@ -125,14 +125,13 @@ codesign --verify --deep --strict --verbose=2 "${STAGE_APP}"
 # The repository lives under Documents, where macOS/File Provider can attach
 # FinderInfo/FileProvider metadata to newly published bundle directories.
 # Never use that managed directory as the canonical signed artifact. Publish
-# the verified bundle under ~/Applications and expose a symlink from dist.
-mkdir -p "${HOME}/Applications"
+# Keep exactly one canonical application inside the project.
+mkdir -p "${ROOT_DIR}/dist"
 rm -rf "${PUBLISHED_APP}"
 ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${PUBLISHED_APP}"
 xattr -cr "${PUBLISHED_APP}" 2>/dev/null || true
 codesign --verify --deep --strict --verbose=2 "${PUBLISHED_APP}"
 
-rm -rf "${DIST_DIR}/${APP_NAME}"
-ln -s "${PUBLISHED_APP}" "${DIST_DIR}/${APP_NAME}"
+
 
 printf '%s\n' "" "=== APP BUILD OK ===" "${PUBLISHED_APP}" "dist/${APP_NAME} -> ${PUBLISHED_APP}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
