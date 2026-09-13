@@ -8,7 +8,7 @@ import sys
 
 from PySide6.QtCore import QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtWidgets import QApplication, QSplashScreen, QWidget
 
 # The production app uses one premium scan visual across the UI.  Patch the
 # legacy widget name before the dashboard is imported so the old animation
@@ -116,6 +116,61 @@ class ScanningSplash(QSplashScreen):
         self.setPixmap(pixmap)
 
 
+class ScanVisualTraderWindow(ProfessionalTraderWindow):
+    """Keep the same premium watch visible over every tab while any scan runs."""
+
+    def __init__(self, scanner_enabled=True):
+        super().__init__(scanner_enabled=scanner_enabled)
+        self.global_scan_visual = PremiumScanVisual(self.market_tabs)
+        self.global_scan_visual.hide()
+        self._position_global_scan_visual()
+
+    def _position_global_scan_visual(self):
+        if not hasattr(self, "global_scan_visual"):
+            return
+        tab_bar = self.market_tabs.tabBar()
+        top = tab_bar.geometry().bottom() + 1
+        width = max(1, self.market_tabs.width() - 2)
+        height = max(1, self.market_tabs.height() - top - 2)
+        self.global_scan_visual.setGeometry(1, top, width, height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_global_scan_visual()
+
+    def _show_global_scan_visual(self):
+        self._position_global_scan_visual()
+        self.global_scan_visual.show()
+        self.global_scan_visual.raise_()
+        self.global_scan_visual.start()
+
+    def _hide_global_scan_visual(self):
+        self.global_scan_visual.stop()
+        self.global_scan_visual.hide()
+
+    def _start_scan_animation(self):
+        super()._start_scan_animation()
+        # Use the global watch as the single scan visual, including RADAR.
+        self.result_stack.setCurrentWidget(self.result_panel)
+        self._show_global_scan_visual()
+
+    def _stop_scan_animation(self):
+        super()._stop_scan_animation()
+        self._hide_global_scan_visual()
+
+    def _start_oi_scan(self):
+        self._show_global_scan_visual()
+        super()._start_oi_scan()
+
+    def _oi_finished(self, results, diagnostics):
+        self._hide_global_scan_visual()
+        super()._oi_finished(results, diagnostics)
+
+    def _oi_failed(self, error):
+        self._hide_global_scan_visual()
+        super()._oi_failed(error)
+
+
 def main():
     print("🚀 Запуск Trader_7_12 Pro — Market Information Radar")
 
@@ -128,7 +183,7 @@ def main():
     splash.show()
     app.processEvents()
 
-    window = ProfessionalTraderWindow(scanner_enabled=True)
+    window = ScanVisualTraderWindow(scanner_enabled=True)
     window.show()
     window.raise_()
     window.activateWindow()
