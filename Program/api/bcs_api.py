@@ -22,6 +22,7 @@ Candle HTTP concurrency ограничена безопасным уровнем
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import threading
+import time
 
 from config import get_refresh_token, save_refresh_token
 from api.request_helper import RequestHelper
@@ -51,34 +52,74 @@ class BCSAPI:
         if self.__class__._initialized:
             return
         self.access_token = None
+        self._access_token_expires_at = 0.0
+        self._auth_lock = threading.RLock()
         self.info_url = "https://be.broker.ru/trade-api-information-service/api/v1"
         self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         self._candle_cache = {}
         self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
 
-    def authorize(self):
-        if self.access_token:
+    def authorize(self, force=False):
+        """Ensure a valid BCS read-only access token is available."""
+        now = time.time()
+        if (
+            not force
+            and self.access_token
+            and now < self._access_token_expires_at - 60
+        ):
             return True
-        refresh_token = get_refresh_token()
-        if not refresh_token:
-            print("❌ BCS refresh token is not configured")
+
+        with self._auth_lock:
+            now = time.time()
+            if (
+                not force
+                and self.access_token
+                and now < self._access_token_expires_at - 60
+            ):
+                return True
+
+            refresh_token = get_refresh_token()
+            if not refresh_token:
+                print("❌ BCS refresh token is not configured")
+                return False
+
+            url = (
+                "https://be.broker.ru/trade-api-keycloak/"
+                "realms/tradeapi/protocol/openid-connect/token"
+            )
+            payload = {
+                "client_id": "trade-api-read",
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            }
+
+            r = RequestHelper.post(url, data=payload)
+
+            if r.status_code == 200:
+                data = r.json()
+                access_token = data.get("access_token")
+                if not access_token:
+                    print("❌ BCS authorization response has no access_token")
+                    return False
+
+                self.access_token = access_token
+                expires_in = float(data.get("expires_in") or 86400)
+                self._access_token_expires_at = time.time() + expires_in
+
+                rotated_token = data.get("refresh_token")
+                if rotated_token:
+                    save_refresh_token(rotated_token)
+
+                print("✅ Авторизация БКС успешна")
+                return True
+
+            print("❌ BCS authorization HTTP:", r.status_code)
             return False
-        url = "https://be.broker.ru/trade-api-keycloak/realms/tradeapi/protocol/openid-connect/token"
-        payload = {"client_id": "trade-api-read", "grant_type": "refresh_token", "refresh_token": refresh_token}
-        r = RequestHelper.post(url, data=payload)
-        if r.status_code == 200:
-            data = r.json()
-            self.access_token = data.get("access_token")
-            rotated_token = data.get("refresh_token")
-            if rotated_token:
-                save_refresh_token(rotated_token)
-            print("✅ Авторизация БКС успешна")
-            return bool(self.access_token)
-        print(r.text)
-        return False
 
     def headers(self):
+        if not self.authorize():
+            return {}
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def get_instruments(self, instrument_type="FUTURES"):
@@ -93,7 +134,11 @@ class BCSAPI:
             if r.status_code != 200:
                 break
             data = r.json()
-            records = data if isinstance(data, list) else data.get("records", [])
+            records = (
+                data
+                if isinstance(data, list)
+                else data.get("instruments", data.get("records", []))
+            )
             if not records:
                 break
             result.extend(records)
