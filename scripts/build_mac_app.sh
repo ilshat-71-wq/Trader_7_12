@@ -85,6 +85,8 @@ PY
 command -v iconutil >/dev/null 2>&1 || { echo "ERROR: iconutil is required."; exit 1; }
 iconutil -c icns "${ICONSET}" -o "${ICNS}"
 rm -rf "${ICONSET}"
+# Keep the generated icon free of Finder metadata/resource forks before PyInstaller copies it.
+xattr -cr "${ICNS}" 2>/dev/null || true
 export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
 "${PYTHON_BIN}" -m PyInstaller --noconfirm --clean "${SPEC}"
 
@@ -98,9 +100,13 @@ ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${APP_PATH}/C
 [[ "${BUNDLE_VERSION}" == "${APP_VERSION}" ]] || { echo "ERROR: bundle version mismatch."; exit 1; }
 [[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
-# macOS metadata/resource forks can make codesign reject an otherwise valid bundle.
-xattr -cr "${APP_PATH}" 2>/dev/null || true
+# PyInstaller may attempt an ad-hoc BUNDLE signature before this script gets control.
+# Clean every bundle item again, including Finder metadata/resource forks and AppleDouble
+# sidecars, then apply one controlled final signature below.
+dot_clean -m "${APP_PATH}" >/dev/null 2>&1 || true
 find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
+find "${APP_PATH}" -exec xattr -c {} + 2>/dev/null || true
+xattr -cr "${APP_PATH}" 2>/dev/null || true
 
 # Ad-hoc signing makes the local production build internally consistent without
 # requiring a Developer ID certificate. A future notarized distribution can use
