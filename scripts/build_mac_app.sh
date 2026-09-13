@@ -101,12 +101,19 @@ ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${APP_PATH}/C
 [[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
 # PyInstaller may attempt an ad-hoc BUNDLE signature before this script gets control.
-# Clean every bundle item again, including Finder metadata/resource forks and AppleDouble
-# sidecars, then apply one controlled final signature below.
+# A final clean copy strips macOS resource forks, Finder metadata, extended attributes,
+# and AppleDouble sidecars that can survive in the generated bundle.
+CLEAN_APP="${DIST_DIR}/.Trader_7_12_Pro.clean.app"
+rm -rf "${CLEAN_APP}"
 dot_clean -m "${APP_PATH}" >/dev/null 2>&1 || true
 find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
-find "${APP_PATH}" -exec xattr -c {} + 2>/dev/null || true
+ditton_flags=(--norsrc --noextattr --noqtn)
+ditton_flags+=("${APP_PATH}" "${CLEAN_APP}")
+ditton "${ditton_flags[@]}"
+rm -rf "${APP_PATH}"
+mv "${CLEAN_APP}" "${APP_PATH}"
 xattr -cr "${APP_PATH}" 2>/dev/null || true
+find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
 
 # Ad-hoc signing makes the local production build internally consistent without
 # requiring a Developer ID certificate. A future notarized distribution can use
