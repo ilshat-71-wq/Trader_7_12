@@ -5,12 +5,13 @@ from zoneinfo import ZoneInfo
 
 from services.futures_oi_scanner_service import FuturesOIScannerService
 from api.bcs_underlying_catalog import preferred_instruments
+from services.market_session_service import MarketSessionService
 
 
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.14"
+    VERSION = "2.7.15"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -118,6 +119,40 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         canonical = canonical_aliases.get(normalized_canonical, canonical)
         return canonical
 
+    @classmethod
+    def _base_underlying_keys(cls):
+        """Canonical economic underlyings that belong to BASE/SPOT."""
+        keys = {
+            cls._normalize_mapping_text(value)
+            for value in FuturesOIScannerService.MOEX_SHORT_CODE_BY_UNDERLYING
+        }
+        keys.update(
+            cls._normalize_mapping_text(value)
+            for value in FuturesOIScannerService.MOEX_SHORT_CODE_BY_UNDERLYING.values()
+        )
+        keys.update(
+            cls._normalize_mapping_text(value)
+            for value in (
+                "USDRUB",
+                "EURRUB",
+                "CNYRUB",
+                "GLDRUB_TOM",
+                "IMOEX",
+                "RTS",
+                "RVI",
+                "RGBI",
+                "QQQ",
+                "SPY",
+                "SP500",
+                "OIL",
+                "GAS",
+                "BR",
+                "CL",
+                "NG",
+            )
+        )
+        return keys
+
     @staticmethod
     def _select_underlying_class_code(record):
         if not isinstance(record, dict):
@@ -212,6 +247,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         exact_matches = 0
         lookup_batches = 0
         records_by_ticker = {}
+        records_by_alias = {}
         for start in range(0, len(lookup_tickers), self.ENRICH_BATCH_SIZE):
             batch = lookup_tickers[start:start + self.ENRICH_BATCH_SIZE]
             lookup_batches += 1
@@ -238,38 +274,88 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                     or self._select_underlying_class_code(record)
                 )
                 if actual_ticker and class_code:
-                    records_by_ticker.setdefault(self._normalize_mapping_text(actual_ticker), []).append((actual_ticker, record, class_code))
+                    match = (actual_ticker, record, class_code)
+                    records_by_ticker.setdefault(
+                        self._normalize_mapping_text(actual_ticker), []
+                    ).append(match)
+
+                    requested_aliases = record.get("_underlying_requested_aliases") or ()
+                    for alias in requested_aliases:
+                        normalized_alias = self._normalize_mapping_text(alias)
+                        if normalized_alias:
+                            records_by_alias.setdefault(normalized_alias, []).append(match)
 
         instruments = []
+        semantic_matches = 0
         for canonical, entry in requested.items():
             accepted = None
+            accepted_kind = "EXACT"
+
             for candidate in entry["candidates"]:
                 wanted_ticker = str(candidate.get("ticker") or "").strip().upper()
                 wanted_class = str(candidate.get("classCode") or "").strip().upper()
-                matches = records_by_ticker.get(self._normalize_mapping_text(wanted_ticker), ())
+                matches = records_by_ticker.get(
+                    self._normalize_mapping_text(wanted_ticker), ()
+                )
                 if not matches:
                     continue
-                # Prefer the catalog's classCode when BCS returned several real
-                # instruments with the same normalized ticker. If it is not
-                # present, accept the unique live BCS classCode and keep it as
-                # the authority rather than inventing the catalog class.
+
                 if wanted_class:
-                    preferred = [match for match in matches if match[2].upper() == wanted_class]
+                    preferred = [
+                        match for match in matches
+                        if match[2].upper() == wanted_class
+                    ]
                     if preferred:
                         accepted = preferred[0]
                     elif len(matches) == 1:
                         accepted = matches[0]
                 elif len(matches) == 1:
                     accepted = matches[0]
+
                 if accepted:
                     break
+
+            if not accepted:
+                semantic_aliases = self._semantic_aliases(canonical)
+                for alias in semantic_aliases:
+                    matches = records_by_alias.get(alias, ())
+                    if not matches:
+                        continue
+
+                    wanted_class = str(entry.get("classCode") or "").strip().upper()
+                    if wanted_class:
+                        preferred = [
+                            match for match in matches
+                            if match[2].upper() == wanted_class
+                        ]
+                        accepted = preferred[0] if preferred else (
+                            matches[0] if len(matches) == 1 else None
+                        )
+                    elif len(matches) == 1:
+                        accepted = matches[0]
+
+                    if accepted:
+                        accepted_kind = "SEMANTIC"
+                        break
+
             if not accepted:
                 continue
+
             actual_ticker, record, class_code = accepted
             entry["classCode"] = class_code
             entry["bcsTicker"] = actual_ticker
-            entry["mappingSource"] = "BCS_EXACT_CATALOG" if preferred_instruments(canonical) else "BCS_EXACT_LOOKUP"
+            entry["mappingSource"] = (
+                "BCS_SEMANTIC_METADATA"
+                if accepted_kind == "SEMANTIC"
+                else (
+                    "BCS_EXACT_CATALOG"
+                    if preferred_instruments(canonical)
+                    else "BCS_EXACT_LOOKUP"
+                )
+            )
             exact_matches += 1
+            if accepted_kind == "SEMANTIC":
+                semantic_matches += 1
             instruments.append({"ticker": actual_ticker, "classCode": class_code})
 
         self._underlying_class_codes = {key: value["classCode"] for key, value in requested.items() if value.get("classCode") and value.get("bcsTicker")}
@@ -283,7 +369,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "underlying_metadata_lookup_batches": lookup_batches,
             "underlying_metadata_lookup_records": lookup_records,
             "underlying_exact_matches": exact_matches,
-            "underlying_semantic_matches": 0,
+            "underlying_semantic_matches": semantic_matches,
         }
         if not instruments:
             return {}
@@ -486,6 +572,9 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         base_change_available = 0
         base_change_source_counts = {}
         turnover_source_counts = {}
+        market_session = MarketSessionService().get_session()
+        market_is_open = market_session != "CLOSED"
+        base_underlying_keys = self._base_underlying_keys()
         for family, marketdata in sorted(front_contracts.items()):
             secid = self._text(marketdata, "secid", "ticker", "securityCode").upper()
             if not secid:
@@ -506,11 +595,39 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             oi_available += 1
             liquidity_available += int(turnover_rub > 0)
             underlying_ticker = self._underlying_family_tickers.get(family) or self._known_underlying_ticker(family, bcs_contracts)
-            underlying_quote = underlying_quotes.get(self._underlying_bcs_tickers.get(underlying_ticker, underlying_ticker), {})
-            underlying_price = self._float(underlying_quote, "lastPrice", "last", "price", "currentPrice", "close")
-            underlying_change, underlying_change_source = self._underlying_day_change(underlying_ticker)
-            base_change_source_counts[underlying_change_source] = base_change_source_counts.get(underlying_change_source, 0) + 1
-            if underlying_change is not None: base_change_available += 1
+            underlying_quote = underlying_quotes.get(
+                self._underlying_bcs_tickers.get(underlying_ticker, underlying_ticker),
+                {},
+            )
+            underlying_price = self._float(
+                underlying_quote,
+                "lastPrice",
+                "last",
+                "price",
+                "currentPrice",
+                "close",
+            )
+
+            normalized_underlying = self._normalize_mapping_text(underlying_ticker)
+            if normalized_underlying not in base_underlying_keys:
+                underlying_change = None
+                underlying_change_source = "NOT_BASE_UNDERLYING"
+            elif not market_is_open:
+                underlying_change = None
+                underlying_change_source = "MARKET_CLOSED"
+            else:
+                underlying_change, underlying_change_source = self._underlying_day_change(
+                    underlying_ticker
+                )
+
+            base_change_source_counts[underlying_change_source] = (
+                base_change_source_counts.get(underlying_change_source, 0) + 1
+            )
+            if (
+                normalized_underlying in base_underlying_keys
+                and underlying_change is not None
+            ):
+                base_change_available += 1
             candidates.append({"futures_root": family, "oi_root": family, "futures_ticker": secid, "last": last, "change_pct": change, "change_percent": change, "volume": volume, "turnover_rub": turnover_rub, "turnover_source": turnover_source, "oi": oi, "oi_analysis": oi, "underlying_ticker": underlying_ticker, "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker), "underlying_class_code": self._underlying_class_codes.get(underlying_ticker), "underlying_price": underlying_price, "underlying_change_pct": underlying_change, "underlying_change_source": underlying_change_source})
         candidates.sort(key=lambda row: float(row.get("turnover_rub") or 0.0), reverse=True)
         selected = candidates[:self.LIQUIDITY_TOP_LIMIT]
@@ -518,17 +635,102 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         diagnostics.update(getattr(self, "_underlying_metadata_diagnostics", {}))
         process_status = "OK" if candidates else ("DEGRADED" if marketdata_error else "NO_DATA")
         underlying_requested = len(self._underlying_family_tickers)
+        underlying_supported_base_keys = {
+            self._normalize_mapping_text(ticker)
+            for ticker in self._underlying_family_tickers.values()
+            if self._normalize_mapping_text(ticker) in base_underlying_keys
+        }
+        underlying_supported_base = len(underlying_supported_base_keys)
+        underlying_supported_base_mapped = sum(
+            1
+            for ticker in self._underlying_family_tickers.values()
+            if (
+                self._normalize_mapping_text(ticker) in base_underlying_keys
+                and ticker in self._underlying_class_codes
+            )
+        )
+        underlying_futures_only = max(
+            0,
+            underlying_requested - underlying_supported_base,
+        )
+        underlying_unresolved_base = max(
+            0,
+            underlying_supported_base - underlying_supported_base_mapped,
+        )
         underlying_class_codes = len(self._underlying_class_codes)
-        underlying_class_code_missing = max(0, underlying_requested - underlying_class_codes)
-        base_change_total = len(candidates)
+
+        eligible_base_candidates = [
+            row
+            for row in candidates
+            if self._normalize_mapping_text(row.get("underlying_ticker"))
+            in base_underlying_keys
+        ]
+        base_change_total = len(eligible_base_candidates)
         base_change_missing = max(0, base_change_total - base_change_available)
-        base_change_coverage = round(base_change_available / base_change_total * 100.0, 2) if base_change_total else 0.0
-        underlying_mapping_coverage = round(underlying_class_codes / underlying_requested * 100.0, 2) if underlying_requested else 0.0
+        base_change_coverage = (
+            round(base_change_available / base_change_total * 100.0, 2)
+            if base_change_total
+            else 0.0
+        )
+        underlying_mapping_coverage = (
+            round(
+                underlying_supported_base_mapped
+                / underlying_supported_base
+                * 100.0,
+                2,
+            )
+            if underlying_supported_base
+            else 100.0
+        )
+
         data_quality_issues = []
-        if underlying_class_code_missing: data_quality_issues.append("INCOMPLETE_UNDERLYING_MAPPING")
-        if base_change_missing: data_quality_issues.append("INCOMPLETE_BASE_CHANGE")
-        if marketdata_error: data_quality_issues.append("MARKETDATA_ERROR")
+        if underlying_unresolved_base:
+            data_quality_issues.append("INCOMPLETE_UNDERLYING_MAPPING")
+        if base_change_missing and market_is_open:
+            data_quality_issues.append("INCOMPLETE_BASE_CHANGE")
+        if marketdata_error:
+            data_quality_issues.append("MARKETDATA_ERROR")
         data_quality_status = "COMPLETE" if not data_quality_issues else "INCOMPLETE"
-        diagnostics.update({"status": process_status, "process_status": process_status, "data_quality_status": data_quality_status, "data_quality_issues": data_quality_issues, "underlying_mapping_coverage_percent": underlying_mapping_coverage, "base_change_coverage_percent": base_change_coverage, "version": self.VERSION, "contracts": len(candidates), "analyzed": len(candidates), "returned": len(selected), "oi_available": oi_available, "skipped": skipped, "liquidity_available": liquidity_available, "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT, "liquidity_top_returned": len(selected), "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER", "turnover_source": "VALTODAY_ONLY", "turnover_source_counts": turnover_source_counts, "base_change_available": base_change_available, "base_change_missing": base_change_missing, "base_change_policy": "BCS_INTRADAY_07:00_NOW", "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL, "base_change_source_counts": base_change_source_counts, "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY", "mapping": "BCS_CANONICAL_UNDERLYING + MOEX_RFUD_SECID_TO_FAMILY", "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY", "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME", "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA", "marketdata_error": marketdata_error})
+
+        diagnostics.update({
+            "status": process_status,
+            "process_status": process_status,
+            "market_session": market_session,
+            "data_quality_status": data_quality_status,
+            "data_quality_issues": data_quality_issues,
+            "underlying_requested": underlying_requested,
+            "underlying_supported_base": underlying_supported_base,
+            "underlying_supported_base_mapped": underlying_supported_base_mapped,
+            "underlying_unresolved_base": underlying_unresolved_base,
+            "underlying_futures_only": underlying_futures_only,
+            "underlying_class_codes": underlying_class_codes,
+            "underlying_class_code_missing": underlying_unresolved_base,
+            "underlying_mapping_coverage_percent": underlying_mapping_coverage,
+            "base_change_eligible": base_change_total,
+            "base_change_coverage_percent": base_change_coverage,
+            "version": self.VERSION,
+            "contracts": len(candidates),
+            "analyzed": len(candidates),
+            "returned": len(selected),
+            "oi_available": oi_available,
+            "skipped": skipped,
+            "liquidity_available": liquidity_available,
+            "liquidity_top_limit": self.LIQUIDITY_TOP_LIMIT,
+            "liquidity_top_returned": len(selected),
+            "liquidity_metric": "MOEX_RFUD_CURRENT_DAY_MONETARY_TURNOVER",
+            "turnover_source": "VALTODAY_ONLY",
+            "turnover_source_counts": turnover_source_counts,
+            "base_change_available": base_change_available,
+            "base_change_missing": base_change_missing,
+            "base_change_policy": "BCS_INTRADAY_07:00_NOW",
+            "base_change_interval": self.UNDERLYING_CANDLE_INTERVAL,
+            "base_change_source_counts": base_change_source_counts,
+            "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY",
+            "mapping": "BCS_CANONICAL_UNDERLYING + MOEX_RFUD_SECID_TO_FAMILY",
+            "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY",
+            "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
+            "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA",
+            "marketdata_error": marketdata_error,
+        })
         self._last_diagnostics = diagnostics
         return selected, diagnostics
