@@ -87,35 +87,56 @@ iconutil -c icns "${ICONSET}" -o "${ICNS}"
 rm -rf "${ICONSET}"
 xattr -cr "${ICNS}" 2>/dev/null || true
 export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
-"${PYTHON_BIN}" -m PyInstaller --noconfirm --clean "${SPEC}"
 
-APP_PATH="${DIST_DIR}/${APP_NAME}"
-[[ -d "${APP_PATH}" ]] || { echo "ERROR: app bundle was not created."; exit 1; }
-[[ -x "${APP_PATH}/Contents/MacOS/Trader_7_12_Pro" ]] || { echo "ERROR: app executable is missing."; exit 1; }
-BUNDLE_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "${APP_PATH}/Contents/Info.plist")"
-BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP_PATH}/Contents/Info.plist")"
-ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${APP_PATH}/Contents/Info.plist")"
+# Build the PyInstaller payload outside the repository/File Provider tree.
+# macOS can attach FinderInfo/FileProvider metadata to Framework directories
+# created under Documents; PyInstaller's automatic BUNDLE signing then rejects
+# those attributes as "resource fork, Finder information, or similar detritus".
+# A native /tmp staging area prevents that metadata from entering the bundle
+# before PyInstaller performs its own ad-hoc BUNDLE signing.
+STAGE_DIR="$(mktemp -d /tmp/trader712-build.XXXXXX)"
+trap 'rm -rf "${STAGE_DIR}"' EXIT
+STAGE_DIST="${STAGE_DIR}/dist"
+STAGE_WORK="${STAGE_DIR}/build"
+mkdir -p "${STAGE_DIST}" "${STAGE_WORK}"
+
+"${PYTHON_BIN}" -m PyInstaller \
+    --noconfirm \
+    --clean \
+    --distpath "${STAGE_DIST}" \
+    --workpath "${STAGE_WORK}" \
+    "${SPEC}"
+
+STAGE_APP="${STAGE_DIST}/${APP_NAME}"
+[[ -d "${STAGE_APP}" ]] || { echo "ERROR: staged app bundle was not created."; exit 1; }
+[[ -x "${STAGE_APP}/Contents/MacOS/Trader_7_12_Pro" ]] || { echo "ERROR: staged app executable is missing."; exit 1; }
+BUNDLE_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSourceCommit' "${STAGE_APP}/Contents/Info.plist")"
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${STAGE_APP}/Contents/Info.plist")"
+ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${STAGE_APP}/Contents/Info.plist")"
 [[ "${BUNDLE_COMMIT}" == "${TRADER_BUILD_COMMIT}" ]] || { echo "ERROR: bundle provenance mismatch."; exit 1; }
 [[ "${BUNDLE_VERSION}" == "${APP_VERSION}" ]] || { echo "ERROR: bundle version mismatch."; exit 1; }
-[[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
+[[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${STAGE_APP}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
-# PyInstaller may attempt an ad-hoc BUNDLE signature before this script gets control.
-# A final clean copy strips macOS resource forks, Finder metadata, extended attributes,
-# and AppleDouble sidecars that can survive in the generated bundle.
-CLEAN_APP="${DIST_DIR}/.Trader_7_12_Pro.clean.app"
-rm -rf "${CLEAN_APP}"
-dot_clean -m "${APP_PATH}" >/dev/null 2>&1 || true
-find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
-ditto --norsrc --noextattr --noqtn "${APP_PATH}" "${CLEAN_APP}"
+# PyInstaller 6.x performs its own ad-hoc BUNDLE signing during COLLECT/BUNDLE.
+# Verify that the clean /tmp staging build has no metadata that prevents signing.
+if xattr -lr "${STAGE_APP}" 2>/dev/null | grep -E 'com\.apple\.(FinderInfo|ResourceFork)|com\.apple\.fileprovider\.' >/dev/null; then
+    echo "ERROR: staged app still contains macOS metadata before final packaging."
+    xattr -lr "${STAGE_APP}" 2>/dev/null | head -80
+    exit 1
+fi
+
+# Re-sign only after the staged bundle is confirmed clean. No --deep cleanup/copy
+# cycle is performed before this signing step; the source of the old failure was
+# metadata entering the bundle before PyInstaller's automatic signing.
+codesign --force --deep --sign - --timestamp=none "${STAGE_APP}"
+codesign --verify --deep --strict --verbose=2 "${STAGE_APP}"
+
+# Publish the already-signed production bundle back to the repository dist folder.
+# The copy deliberately avoids resource forks and Finder/FileProvider metadata.
+APP_PATH="${DIST_DIR}/${APP_NAME}"
 rm -rf "${APP_PATH}"
-mv "${CLEAN_APP}" "${APP_PATH}"
+ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${APP_PATH}"
 xattr -cr "${APP_PATH}" 2>/dev/null || true
-find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
-
-# Ad-hoc signing makes the local production build internally consistent without
-# requiring a Developer ID certificate. A future notarized distribution can use
-# Developer ID signing here without changing the application architecture.
-codesign --force --deep --sign - --timestamp=none "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
 
 printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
