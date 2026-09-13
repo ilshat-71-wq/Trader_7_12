@@ -8,6 +8,7 @@ DIST_DIR="dist"
 BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
 APP_VERSION="2.4.3"
+PUBLISHED_APP="${HOME}/Applications/${APP_NAME}"
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/null || echo unknown)" "Commit: $(git rev-parse HEAD)"
@@ -89,11 +90,6 @@ xattr -cr "${ICNS}" 2>/dev/null || true
 export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
 
 # Build the PyInstaller payload outside the repository/File Provider tree.
-# macOS can attach FinderInfo/FileProvider metadata to Framework directories
-# created under Documents; PyInstaller's automatic BUNDLE signing then rejects
-# those attributes as "resource fork, Finder information, or similar detritus".
-# A native /tmp staging area prevents that metadata from entering the bundle
-# before PyInstaller performs its own ad-hoc BUNDLE signing.
 STAGE_DIR="$(mktemp -d /tmp/trader712-build.XXXXXX)"
 trap 'rm -rf "${STAGE_DIR}"' EXIT
 STAGE_DIST="${STAGE_DIR}/dist"
@@ -117,26 +113,26 @@ ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${STAGE_APP}/
 [[ "${BUNDLE_VERSION}" == "${APP_VERSION}" ]] || { echo "ERROR: bundle version mismatch."; exit 1; }
 [[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${STAGE_APP}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
-# PyInstaller 6.x performs its own ad-hoc BUNDLE signing during COLLECT/BUNDLE.
-# Verify that the clean /tmp staging build has no metadata that prevents signing.
 if xattr -lr "${STAGE_APP}" 2>/dev/null | grep -E 'com\.apple\.(FinderInfo|ResourceFork)|com\.apple\.fileprovider\.' >/dev/null; then
-    echo "ERROR: staged app still contains macOS metadata before final packaging."
+    echo "ERROR: staged app still contains macOS metadata before final signing."
     xattr -lr "${STAGE_APP}" 2>/dev/null | head -80
     exit 1
 fi
 
-# Re-sign only after the staged bundle is confirmed clean. No --deep cleanup/copy
-# cycle is performed before this signing step; the source of the old failure was
-# metadata entering the bundle before PyInstaller's automatic signing.
 codesign --force --deep --sign - --timestamp=none "${STAGE_APP}"
 codesign --verify --deep --strict --verbose=2 "${STAGE_APP}"
 
-# Publish the already-signed production bundle back to the repository dist folder.
-# The copy deliberately avoids resource forks and Finder/FileProvider metadata.
-APP_PATH="${DIST_DIR}/${APP_NAME}"
-rm -rf "${APP_PATH}"
-ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${APP_PATH}"
-xattr -cr "${APP_PATH}" 2>/dev/null || true
-codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+# The repository lives under Documents, where macOS/File Provider can attach
+# FinderInfo/FileProvider metadata to newly published bundle directories.
+# Never use that managed directory as the canonical signed artifact. Publish
+# the verified bundle under ~/Applications and expose a symlink from dist.
+mkdir -p "${HOME}/Applications"
+rm -rf "${PUBLISHED_APP}"
+ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${PUBLISHED_APP}"
+xattr -cr "${PUBLISHED_APP}" 2>/dev/null || true
+codesign --verify --deep --strict --verbose=2 "${PUBLISHED_APP}"
 
-printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
+rm -rf "${DIST_DIR}/${APP_NAME}"
+ln -s "${PUBLISHED_APP}" "${DIST_DIR}/${APP_NAME}"
+
+printf '%s\n' "" "=== APP BUILD OK ===" "${PUBLISHED_APP}" "dist/${APP_NAME} -> ${PUBLISHED_APP}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
