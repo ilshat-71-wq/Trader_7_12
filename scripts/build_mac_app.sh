@@ -85,7 +85,6 @@ PY
 command -v iconutil >/dev/null 2>&1 || { echo "ERROR: iconutil is required."; exit 1; }
 iconutil -c icns "${ICONSET}" -o "${ICNS}"
 rm -rf "${ICONSET}"
-# Keep the generated icon free of Finder metadata/resource forks before PyInstaller copies it.
 xattr -cr "${ICNS}" 2>/dev/null || true
 export TRADER_BUILD_COMMIT="$(git rev-parse HEAD)"
 "${PYTHON_BIN}" -m PyInstaller --noconfirm --clean "${SPEC}"
@@ -107,9 +106,7 @@ CLEAN_APP="${DIST_DIR}/.Trader_7_12_Pro.clean.app"
 rm -rf "${CLEAN_APP}"
 dot_clean -m "${APP_PATH}" >/dev/null 2>&1 || true
 find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
-ditton_flags=(--norsrc --noextattr --noqtn)
-ditton_flags+=("${APP_PATH}" "${CLEAN_APP}")
-ditton "${ditton_flags[@]}"
+ditto --norsrc --noextattr --noqtn "${APP_PATH}" "${CLEAN_APP}"
 rm -rf "${APP_PATH}"
 mv "${CLEAN_APP}" "${APP_PATH}"
 xattr -cr "${APP_PATH}" 2>/dev/null || true
