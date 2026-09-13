@@ -25,11 +25,14 @@ class FuturesOIWorker(QObject):
             results = self.money_flow.analyze(results, api=self.service.api)
             diagnostics = dict(diagnostics or {})
             available = [r for r in results if r.get("money_flow_status") == "AVAILABLE"]
+            hot = [r for r in available if r.get("money_flow_liquidity_state") == "HOT"]
             diagnostics.update({
                 "money_flow_status": "AVAILABLE" if available else "NO_DATA",
                 "money_flow_available": len(available),
+                "money_flow_hot_liquidity": len(hot),
                 "money_flow_top_ranked": min(5, len(available)),
                 "money_flow_window_minutes": MoneyFlowService.WINDOW_MINUTES,
+                "money_flow_liquidity_window_minutes": MoneyFlowService.LIQUIDITY_WINDOW_MINUTES,
                 "money_flow_source": "BCS_LAST_TRADES_30M_PLUS_CURRENT_ORDER_BOOK",
                 "money_flow_policy": "REAL_BCS_DATA_ONLY; NO_PARTICIPANT_IDENTITY_CLAIM",
             })
@@ -41,7 +44,7 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """One professional read-only window: SPOT radar + Futures OI + money flow."""
 
-    VERSION = "2.8.0"
+    VERSION = "2.9.0"
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -75,8 +78,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         hint = QLabel(
-            "🟢 MONEY TOP = наибольшая реальная активность за последние 30 мин • "
-            "FLOW = BUY/SELL • ZONE = вероятная зона концентрации потока"
+            "🟢 LIQUIDITY NOW = максимальный реальный денежный поток за последние 5 мин • "
+            "FLOW = направление • ACTION = вероятное состояние позиции по цене + OI • ZONE = зона потока"
         )
         hint.setStyleSheet("color:#7f8a94;font-size:10px;padding-left:3px;")
         toolbar.addWidget(hint, 1)
@@ -85,8 +88,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar.addWidget(self.oi_copy_button)
         layout.addLayout(toolbar)
         self.oi_table = MarketTableWidget(
-            ["#", "Root", "Contract", "Base", "FUT Δ%", "BASE Δ%", "OI", "ΔOI%", "DAY ₽", "MONEY", "FLOW", "ZONE"],
-            [42, 58, 122, 100, 72, 82, 105, 78, 105, 92, 150, 150],
+            ["#", "Root", "Contract", "Base", "FUT Δ%", "BASE Δ%", "OI", "ΔOI%", "DAY ₽", "LIQ NOW", "FLOW", "ACTION", "ZONE"],
+            [42, 58, 122, 100, 72, 82, 105, 78, 105, 92, 150, 145, 150],
         )
         layout.addWidget(self.oi_table, 1)
         return panel
@@ -99,7 +102,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_meta.setText("ЗАГРУЗКА FUTURES OI • реальный VALTODAY • Last Trades 30m • текущий Order Book…")
+        self.oi_meta.setText("ЗАГРУЗКА FUTURES OI • реальный VALTODAY • Last Trades 30m • Liquidity Now 5m • текущий Order Book…")
         self.oi_table.hide()
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
@@ -146,24 +149,45 @@ class OIWatchlistTraderWindow(TraderWindow):
         return f"{signal} {float(delta):+.1f}% / {confidence}"
 
     @staticmethod
+    def _liquidity_text(item):
+        score = item.get("money_flow_liquidity_score")
+        total = item.get("money_flow_recent_total")
+        direction = item.get("money_flow_liquidity_direction") or "NO_DATA"
+        state = item.get("money_flow_liquidity_state") or "NO_DATA"
+        if score is None or not total: return "—"
+        return f"{state} {float(score):.0f} • {direction} • {OIWatchlistTraderWindow._money(total)}"
+
+    @staticmethod
+    def _action_text(item):
+        action = item.get("money_flow_position_action") or "—"
+        confidence = item.get("money_flow_position_confidence") or "LOW"
+        return f"{action} / {confidence}"
+
+    @staticmethod
     def _zone_text(item):
         low = item.get("money_flow_zone_low")
         high = item.get("money_flow_zone_high")
+        vwap = item.get("money_flow_zone_vwap")
         if low is None or high is None: return "—"
         if abs(float(high) - float(low)) < 1e-12:
             return f"{float(low):.4f}"
-        return f"{float(low):.4f}–{float(high):.4f}"
+        suffix = f" • VWAP {float(vwap):.4f}" if vwap is not None else ""
+        return f"{float(low):.4f}–{float(high):.4f}{suffix}"
 
     def _highlight_money_rows(self, results):
         for row, item in enumerate(results):
             rank = item.get("money_flow_rank")
+            liquidity = str(item.get("money_flow_liquidity_state") or "")
             signal = str(item.get("money_flow_signal") or "")
+            action = str(item.get("money_flow_position_action") or "")
             confidence = str(item.get("money_flow_confidence") or "")
-            if rank is not None and int(rank) <= 5:
-                if confidence == "HIGH":
-                    brush = QBrush(QColor("#123f2a"))
-                else:
-                    brush = QBrush(QColor("#163b2f"))
+            if liquidity == "HOT":
+                brush = QBrush(QColor("#123f2a"))
+            elif rank is not None and int(rank) <= 5:
+                brush = QBrush(QColor("#163b2f"))
+            else:
+                brush = None
+            if brush:
                 for col in range(self.oi_table.columnCount()):
                     cell = self.oi_table.item(row, col)
                     if cell: cell.setBackground(brush)
@@ -173,6 +197,15 @@ class OIWatchlistTraderWindow(TraderWindow):
             elif signal in {"DISTRIBUTION", "SELL_ABSORPTION", "SELLER_ACTIVE"}:
                 cell = self.oi_table.item(row, 10)
                 if cell: cell.setForeground(QBrush(QColor("#ff7d7d")))
+            if action in {"LONG_BUILDUP", "SHORT_COVERING"}:
+                cell = self.oi_table.item(row, 11)
+                if cell: cell.setForeground(QBrush(QColor("#69e59a")))
+            elif action in {"SHORT_BUILDUP", "LONG_LIQUIDATION"}:
+                cell = self.oi_table.item(row, 11)
+                if cell: cell.setForeground(QBrush(QColor("#ff7d7d")))
+            if confidence == "HIGH":
+                cell = self.oi_table.item(row, 11)
+                if cell: cell.setFont(cell.font())
 
     def _oi_finished(self, results, diagnostics):
         self._oi_diagnostics = diagnostics or {}
@@ -180,9 +213,9 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"FUTURES OI • STATUS {diagnostics.get('status') or '—'} • "
             f"TOP {diagnostics.get('liquidity_top_returned', len(results))} • "
             f"OI {diagnostics.get('oi_available', 0)} • "
-            f"MONEY DATA {diagnostics.get('money_flow_available', 0)}\n"
-            f"DAY ₽ = VALTODAY • MONEY = Last Trades 30m + текущий стакан • "
-            f"🟢 TOP-5 — максимальная наблюдаемая денежная активность"
+            f"HOT LIQUIDITY {diagnostics.get('money_flow_hot_liquidity', 0)}\n"
+            f"DAY ₽ = VALTODAY • LIQ NOW = Last Trades 5m • FLOW = Last Trades 30m + текущий стакан • "
+            f"ACTION = вероятная структура позиции по цене + ΔOI • 🟢 = максимальная текущая активность"
         )
         rows = []
         for index, item in enumerate(results or [], 1):
@@ -197,17 +230,18 @@ class OIWatchlistTraderWindow(TraderWindow):
                 numeric(self._fmt(oi.get("oi"), 0)),
                 numeric(self._signed(oi.get("oi_change_percent"), 2)),
                 numeric(self._money(item.get("turnover_rub"))),
-                numeric(self._fmt(item.get("money_flow_score"), 0)),
+                self._liquidity_text(item),
                 self._flow_text(item),
+                self._action_text(item),
                 self._zone_text(item),
             ])
         self.oi_table.set_rows(rows)
         self._highlight_money_rows(results or [])
         self.oi_table.setToolTip(
-            "MONEY — реальная сумма обезличенных сделок BCS за последние 30 минут. "
-            "FLOW показывает наблюдаемое направление агрессивного потока. "
-            "ZONE — вероятная зона концентрации доминирующего потока, не идентификация конкретного участника. "
-            "DAY ₽ = реальный VALTODAY."
+            "LIQ NOW — реальная денежная активность обезличенных сделок BCS за последние 5 минут. "
+            "FLOW — наблюдаемое направление потока за 30 минут с учётом текущего стакана. "
+            "ACTION — вероятная структура позиции по направлению цены и изменению OI; это не идентификация участника. "
+            "ZONE — ценовой диапазон доминирующего потока и его VWAP. DAY ₽ = реальный VALTODAY."
         )
         self.oi_table.setVisible(bool(rows))
         if not rows:
