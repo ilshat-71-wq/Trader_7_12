@@ -122,6 +122,11 @@ class BCSAPI:
         direct = str(record.get("classCode") or record.get("class_code") or record.get("classcode") or "").strip()
         if direct:
             return direct
+        # Records enriched by _underlying_metadata_fallback carry the
+        # authoritative class code under this explicit internal field.
+        fallback = str(record.get("_underlying_bcs_class_code") or "").strip()
+        if fallback:
+            return fallback
         boards = record.get("boards")
         if isinstance(boards, dict):
             boards = [boards]
@@ -378,63 +383,3 @@ class BCSAPI:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(timezone.utc)
         now = datetime.now(timezone.utc)
-        try:
-            end_dt = normalize_time(end_time) if end_time is not None else now
-            if start_time is not None:
-                start_dt = normalize_time(start_time)
-            elif interval == "D":
-                start_dt = end_dt - timedelta(days=30)
-            else:
-                start_dt = end_dt - timedelta(hours=4)
-        except (TypeError, ValueError) as exc:
-            print("❌ Invalid candle time:", exc)
-            return {}
-        if start_dt is None or end_dt is None or start_dt >= end_dt:
-            print("❌ Invalid candle period")
-            return {}
-        cache_key = self._candle_cache_key(ticker, class_code, interval, start_dt, end_dt)
-        cached = self._candle_cache.get(cache_key)
-        if cached is not None:
-            cached_at, cached_data = cached
-            if (now - cached_at).total_seconds() < self.CANDLE_CACHE_TTL:
-                return cached_data
-            self._candle_cache.pop(cache_key, None)
-        params = {"ticker": ticker, "classCode": class_code, "startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "timeFrame": interval}
-        try:
-            with self._candle_semaphore:
-                r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.CANDLE_TIMEOUT, max_retries=self.CANDLE_RETRIES)
-        except Exception as exc:
-            print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
-            return {}
-        if r.status_code != 200:
-            print("⚠️ Candle HTTP:", ticker, interval, r.status_code)
-            return {}
-        try:
-            data = r.json()
-        except ValueError:
-            print("❌ Candles JSON error:", ticker, interval)
-            return {}
-        self._candle_cache[cache_key] = (now, data)
-        return data
-
-    def get_trades_period(self, ticker, class_code, start_time, end_time):
-        start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-        records = []
-        current = start
-        while current < end:
-            chunk_end = min(current + timedelta(hours=1), end)
-            payload = {"ticker": ticker, "classCode": class_code, "startDateTime": current.isoformat(), "endDateTime": chunk_end.isoformat()}
-            print("\nPERIOD TRADES PAYLOAD:")
-            print(payload)
-            r = RequestHelper.post(f"{self.market_url}/last-trades", headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
-            print("Period trades status:", r.status_code)
-            if r.status_code == 200:
-                data = r.json()
-                chunk_records = data.get("records", [])
-                records.extend(chunk_records)
-                print("Chunk records:", len(chunk_records))
-            else:
-                print("Period trades raw:", r.text[:500])
-            current = chunk_end
-        return {"records": records}
