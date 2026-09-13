@@ -80,7 +80,7 @@ class ScanSound:
         try:
             self.stop()
             self._process = subprocess.Popen(
-                [afplay, self._ensure_file()],
+                [afplay, "-v", "1.0", self._ensure_file()],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -192,11 +192,28 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_timer.stop()
         self.sound.stop()
 
+    def _play_completion_sound(self):
+        if not (self.sound_on_finish and self.sound_enabled):
+            return
+        # Let the Qt event loop finish the UI update before launching afplay.
+        # The completion sound belongs to the whole workflow, including Futures OI.
+        QTimer.singleShot(300, self.sound.play)
+
     def _scan_finished(self, results, diagnostics):
+        # Radar/SPOT finished. OIWatchlistTraderWindow starts Futures OI here.
+        # Do not play the completion sound yet: the full workflow is still running.
         self._stop_scan_sound()
         super()._scan_finished(results, diagnostics)
-        if self.sound_on_finish and self.sound_enabled:
-            QTimer.singleShot(180, self.sound.play)
+        if self.oi_thread is None or not self.oi_thread.isRunning():
+            self._play_completion_sound()
+
+    def _oi_finished(self, results, diagnostics):
+        super()._oi_finished(results, diagnostics)
+        self._play_completion_sound()
+
+    def _oi_failed(self, error):
+        super()._oi_failed(error)
+        self._play_completion_sound()
 
     def _scan_failed(self, error):
         self._stop_scan_sound()
