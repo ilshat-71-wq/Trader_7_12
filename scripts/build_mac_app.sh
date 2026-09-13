@@ -18,10 +18,11 @@ printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/n
 PYTHON_BIN="$(command -v python3)"
 [[ -n "${PYTHON_BIN}" ]] || { echo "ERROR: python3 not found."; exit 1; }
 "${PYTHON_BIN}" -c 'import PyInstaller' >/dev/null 2>&1 || { echo "ERROR: PyInstaller is not installed."; exit 1; }
+command -v codesign >/dev/null 2>&1 || { echo "ERROR: codesign is required."; exit 1; }
 
 "${PYTHON_BIN}" -m compileall -q Program
 PYTHONPATH=Program "${PYTHON_BIN}" -m pytest -q Program
-rm -rf "${DIST_DIR}/${APP_NAME}" "${BUILD_DIR}/Trader_7_12_Pro"
+rm -rf "${DIST_DIR}/${APP_NAME}" "${DIST_DIR}/Trader_7_12_Pro" "${BUILD_DIR}/Trader_7_12_Pro"
 mkdir -p "${BUILD_DIR}"
 
 ICONSET="${BUILD_DIR}/Trader_7_12_Pro.iconset"
@@ -62,7 +63,6 @@ for i in range(12):
 for angle,length,width in ((138,r*.50,25),(18,r*.66,18)):
     a=math.radians(angle-90); p.setPen(QPen(QColor("#f4d47a"),width,Qt.SolidLine,Qt.RoundCap))
     p.drawLine(QPointF(cx,cy),QPointF(cx+math.cos(a)*length,cy+math.sin(a)*length))
-# Static second hand points upward; the live splash animates this hand.
 a=math.radians(-90)
 p.setPen(QPen(QColor("#d4ad4d"),9,Qt.SolidLine,Qt.RoundCap))
 p.drawLine(QPointF(cx,cy),QPointF(cx+math.cos(a)*r*.76,cy+math.sin(a)*r*.76))
@@ -98,4 +98,14 @@ ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${APP_PATH}/C
 [[ "${BUNDLE_VERSION}" == "${APP_VERSION}" ]] || { echo "ERROR: bundle version mismatch."; exit 1; }
 [[ "${ICON_FILE}" == "Trader_7_12_Pro.icns" && -f "${APP_PATH}/Contents/Resources/Trader_7_12_Pro.icns" ]] || { echo "ERROR: turquoise-gold app icon is missing."; exit 1; }
 
-printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Single-window dashboard: SPOT + Futures OI"
+# macOS metadata/resource forks can make codesign reject an otherwise valid bundle.
+xattr -cr "${APP_PATH}" 2>/dev/null || true
+find "${APP_PATH}" -name '._*' -type f -delete 2>/dev/null || true
+
+# Ad-hoc signing makes the local production build internally consistent without
+# requiring a Developer ID certificate. A future notarized distribution can use
+# Developer ID signing here without changing the application architecture.
+codesign --force --deep --sign - --timestamp=none "${APP_PATH}"
+codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+
+printf '%s\n' "" "=== APP BUILD OK ===" "${APP_PATH}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
