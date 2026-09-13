@@ -41,7 +41,7 @@ def test_short_rebound_is_spot_first():
 def test_main_session_uses_main_window():
     history = FakeHistory([candle(0, 100, 101, 99, 100)])
     SpotFirstPullbackService(history, FakeSession("MAIN")).analyze("SBER", "SPBRU", "LONG")
-    assert history.calls[0][2].hour == 7
+    assert history.calls[0][2].hour == 6
     assert history.calls[0][3].hour == 16
     assert history.calls[0][2].tzinfo == ZoneInfo("UTC")
 

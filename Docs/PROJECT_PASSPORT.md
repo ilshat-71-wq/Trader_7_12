@@ -316,8 +316,8 @@ Do not weaken market criteria for speed.
 ## 15. Calendar
 
 ```text
-MORNING  07:00–10:00 MSK
-MAIN     10:00–19:00 MSK
+MORNING  06:50–09:00 MSK
+MAIN     09:00–19:00 MSK
 EVENING  19:00–23:50 MSK
 DSWD     09:50–19:00 MSK
 ```

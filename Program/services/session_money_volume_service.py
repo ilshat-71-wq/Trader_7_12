@@ -14,8 +14,8 @@ class SessionMoneyVolumeService:
     RECENT_MONEY_MINUTES = 15
 
     SESSION_WINDOWS = {
-        "MORNING": (time(7, 0), time(10, 0)),
-        "MAIN": (time(10, 0), time(19, 0)),
+        "MORNING": (time(7, 0), time(9, 0)),
+        "MAIN": (time(9, 0), time(19, 0)),
         "EVENING": (time(19, 0), time(23, 50)),
     }
 

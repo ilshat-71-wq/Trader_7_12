@@ -32,14 +32,14 @@ def test_pre_open_is_distinct_from_closed():
     service = MarketSessionService()
     value = msk("2026-09-14T06:55:00")
     assert service.get_session(value) == "PRE_OPEN"
-    assert service.get_session_start(value).isoformat() == "07:00:00"
+    assert service.get_session_start(value).isoformat() == "06:50:00"
     assert service.is_market_open(value) is False
 
 
 def test_regular_sessions_have_expected_boundaries():
     service = MarketSessionService()
     assert service.get_session(msk("2026-09-14T07:00:00")) == "MORNING"
-    assert service.get_session(msk("2026-09-14T09:59:59")) == "MORNING"
+    assert service.get_session(msk("2026-09-14T08:59:59")) == "MORNING"
     assert service.get_session(msk("2026-09-14T10:00:00")) == "MAIN"
     assert service.get_session(msk("2026-09-14T18:59:59")) == "MAIN"
     assert service.get_session(msk("2026-09-14T19:00:00")) == "EVENING"

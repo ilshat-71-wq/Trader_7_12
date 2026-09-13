@@ -121,8 +121,9 @@ class MarketSessionService:
             return self.WEEKEND_SESSION_START
         return self.PRE_OPEN_START
 
-    def is_market_open(self, value=None):
-        return self.get_session(value) in {"PRE_OPEN", "MORNING", "MAIN", "WEEKEND_SESSION", "EVENING"}
+    def is_market_open(self, value):
+        session = self.get_session(value)
+        return session in {"MORNING", "MAIN", "WEEKEND_SESSION", "EVENING"}
 
     def get_session_info(self, value=None):
         value = self.now() if value is None else self.to_moscow(value)

@@ -13,7 +13,7 @@ class FakeAPI:
 class FakeSession:
     TIMEZONE = ZoneInfo("Europe/Moscow")
     MORNING_START = time(7, 0)
-    MAIN_START = time(10, 0)
+    MAIN_START = time(9, 0)
     def now(self):
         return datetime(2026, 9, 2, 10, 0, tzinfo=self.TIMEZONE)
     def get_trading_day(self):
@@ -148,7 +148,7 @@ def test_scanner_continues_after_preferred_window(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("A", 1.0, 2_000_000), _row("B", -1.0, 1_900_000)], 0.2, session=FakeAfternoonSession())
     assert scanner.scan(limit=2)
     assert scanner._last_scan_diagnostics["preferred_window_active"] is False
-    assert scanner._last_scan_diagnostics["scan_window"] == "10:00-до закрытия MSK"
+    assert scanner._last_scan_diagnostics["scan_window"] == "09:00-до закрытия MSK"
 
 
 def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):

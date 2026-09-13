@@ -25,7 +25,7 @@ class MarketAttentionScannerService:
     MIN_RECENT_MONEY_PER_MINUTE = 5_000.0
     RS_SCORE_WEIGHT = 0.60
     ATTENTION_SCORE_WEIGHT = 0.40
-    SCAN_START = time(7, 0)
+    SCAN_START = time(6, 50)
     PREFERRED_START = time(9, 50)
     PREFERRED_END = time(13, 0)
     BENCHMARKS = ("IMOEX2", "IRUS2")

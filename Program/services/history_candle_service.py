@@ -11,7 +11,7 @@ History Candle Service
 - перевод времени в Europe/Moscow;
 - расчёт money_volume;
 - расчёт среднего дневного денежного оборота;
-- расчёт утреннего оборота 07:00–10:00 MSK;
+- расчёт утреннего оборота 06:50–09:00 MSK;
 - исключение текущего незавершённого дня.
 
 ВАЖНО:
@@ -38,8 +38,8 @@ class HistoryCandleService:
 
     HISTORY_DAYS_TO_LOAD = 10
 
-    MORNING_START = time(7, 0)
-    MORNING_END = time(10, 0)
+    MORNING_START = time(6, 50)
+    MORNING_END = time(9, 0)
 
     TIMEFRAME_MAP = {
         1: "M1",
@@ -438,7 +438,7 @@ class HistoryCandleService:
         """
         Загружает свечи утренней сессии:
 
-            07:00–10:00 MSK
+            06:50–09:00 MSK
 
         Если trading_date не задан,
         используется текущая московская дата.
@@ -532,7 +532,7 @@ class HistoryCandleService:
     ):
         """
         Считает фактический денежный оборот
-        утренней сессии 07:00–10:00 MSK.
+        утренней сессии 06:50–09:00 MSK.
         """
 
         candles = self.load_morning_candles(

@@ -21,7 +21,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     MARKETDATA_PAGE_SIZE = 100
     MARKETDATA_MAX_PAGES = 10
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
-    RADAR_START = time(7, 0)
+    RADAR_START = time(6, 50)
     UNDERLYING_CANDLE_INTERVAL = "M5"
 
     def __init__(self, api=None, oi_service=None):
