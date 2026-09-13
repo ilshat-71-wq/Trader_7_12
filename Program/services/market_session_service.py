@@ -12,8 +12,10 @@ class MarketSessionService:
     from 09:50 to 19:00 MSK. Only dates explicitly declared non-trading
     by the current MOEX calendar are closed.
 
-    From 14 September 2026 the stock and futures morning session is
-    06:50–09:00 MSK and the main session is 09:00–19:00 MSK.
+    From 14 September 2026 the stock/futures trading schedule is:
+    06:50–09:00 morning session, 09:00–19:00 main session and
+    19:00–23:50 evening session. The first 10 minutes of the morning
+    session are the opening auction for instruments participating in it.
 
     The scanner's intraday market-data window is the whole current trading
     session from the official session start through the moment of scanning.
@@ -21,15 +23,13 @@ class MarketSessionService:
     """
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
-    PRE_OPEN_START = time(6, 40)
-    MORNING_START = time(6, 50)
+    PRE_OPEN_START = time(6, 50)
+    MORNING_START = time(7, 0)
     MAIN_START = time(9, 0)
     WEEKEND_SESSION_START = time(9, 50)
     EVENING_START = time(19, 0)
     MARKET_CLOSE = time(23, 50)
 
-    # MOEX 2026 weekend calendar. 28–29 Nov became non-trading after the
-    # September 2026 calendar update; 5–6 Dec became trading dates instead.
     NON_TRADING_WEEKEND_DATES_2026 = frozenset(
         date(2026, month, day)
         for month, day in (
@@ -113,16 +113,16 @@ class MarketSessionService:
         return value.date() if value is not None else None
 
     def get_session_start(self, value=None):
-        """Return the data start appropriate to the active trading session."""
+        """Return the official intraday data start for the active session."""
         session = self.get_session(value)
         if session == "CLOSED":
             return None
         if session == "WEEKEND_SESSION":
             return self.WEEKEND_SESSION_START
-        return self.MORNING_START
+        return self.PRE_OPEN_START
 
     def is_market_open(self, value=None):
-        return self.get_session(value) in {"MORNING", "MAIN", "WEEKEND_SESSION", "EVENING"}
+        return self.get_session(value) in {"PRE_OPEN", "MORNING", "MAIN", "WEEKEND_SESSION", "EVENING"}
 
     def get_session_info(self, value=None):
         value = self.now() if value is None else self.to_moscow(value)
