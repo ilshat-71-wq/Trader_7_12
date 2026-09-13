@@ -5,7 +5,7 @@
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Версия pipeline:** 2.5.0  
-**Futures OI scanner:** 2.7.11
+**Futures OI scanner:** 2.7.14
 
 ## 1. Назначение
 
