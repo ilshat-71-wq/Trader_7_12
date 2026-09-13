@@ -42,12 +42,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# Keep the executable as a normal onedir payload. PyInstaller's macOS
+# onefile + .app combination is deprecated and will become an error in v7.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="Trader_7_12_Pro",
     debug=False,
     bootloader_ignore_signals=False,
@@ -56,8 +57,17 @@ exe = EXE(
     console=False,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="Trader_7_12_Pro",
+)
+
+app = BUNDLE(
+    coll,
     name="Trader_7_12 Pro.app",
     icon=ICON_PATH,
     bundle_identifier="com.ilshat.trader712pro",
