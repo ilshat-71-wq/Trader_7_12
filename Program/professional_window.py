@@ -1,0 +1,203 @@
+"""Professional shell around the existing Trader_7_12 single-window dashboard.
+
+Keeps the market/OI calculation pipeline untouched. Adds only presentation,
+copy workflow, persistent sound settings, and scan audio feedback.
+"""
+
+import math
+import shutil
+import subprocess
+import tempfile
+import wave
+from pathlib import Path
+
+from PySide6.QtCore import QSettings, QTimer, Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from oi_watchlist_ui import OIWatchlistTraderWindow
+
+
+class ScanSound:
+    """Small generated public-domain-style classical motif; no bundled recording."""
+
+    SAMPLE_RATE = 44100
+
+    def __init__(self):
+        self._path = None
+        self._process = None
+
+    def _ensure_file(self):
+        if self._path and Path(self._path).exists():
+            return self._path
+
+        root = Path(tempfile.gettempdir()) / "trader_7_12"
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "scan_motif.wav"
+        if path.exists():
+            self._path = str(path)
+            return self._path
+
+        # Short synthesized motif using notes from Bach's public-domain Badinerie.
+        # It is intentionally a new synthesized rendering, not a commercial recording.
+        notes = [
+            (783.99, 0.16), (880.00, 0.16), (987.77, 0.16),
+            (1046.50, 0.22), (987.77, 0.16), (880.00, 0.16),
+            (783.99, 0.16), (698.46, 0.22),
+        ]
+        frames = []
+        for frequency, duration in notes:
+            count = int(self.SAMPLE_RATE * duration)
+            attack = max(1, int(self.SAMPLE_RATE * 0.012))
+            release = max(1, int(self.SAMPLE_RATE * 0.035))
+            for i in range(count):
+                envelope = min(1.0, i / attack, (count - i) / release)
+                sample = math.sin(2.0 * math.pi * frequency * i / self.SAMPLE_RATE)
+                sample += 0.22 * math.sin(4.0 * math.pi * frequency * i / self.SAMPLE_RATE)
+                value = int(max(-1.0, min(1.0, sample * 0.18 * envelope)) * 32767)
+                frames.append(value.to_bytes(2, byteorder="little", signed=True))
+
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(self.SAMPLE_RATE)
+            audio.writeframes(b"".join(frames))
+
+        self._path = str(path)
+        return self._path
+
+    def play(self):
+        afplay = shutil.which("afplay")
+        if not afplay:
+            return
+        try:
+            self.stop()
+            self._process = subprocess.Popen(
+                [afplay, self._ensure_file()],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            self._process = None
+
+    def stop(self):
+        if self._process is not None and self._process.poll() is None:
+            self._process.terminate()
+        self._process = None
+
+
+class ProfessionalTraderWindow(OIWatchlistTraderWindow):
+    """Single production window: existing data pipeline + professional controls."""
+
+    def __init__(self, scanner_enabled=True):
+        super().__init__(scanner_enabled=scanner_enabled)
+        self.settings = QSettings("Trader_7_12", "Trader_7_12 Pro")
+        self.sound = ScanSound()
+        self.sound_timer = QTimer(self)
+        self.sound_timer.timeout.connect(self._play_scan_tick)
+        self.sound_enabled = self.settings.value("sound/enabled", True, type=bool)
+        self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
+        self._configure_professional_tabs()
+        self._build_settings_tab()
+
+    def _configure_professional_tabs(self):
+        if self.market_tabs.count() >= 3:
+            self.market_tabs.setTabText(0, "RADAR")
+            self.market_tabs.setTabText(1, "FUTURES OI")
+            self.market_tabs.setTabText(2, "DIAGNOSTICS")
+        self.market_tabs.setToolTip("Рынок → Futures OI → техническая диагностика → настройки")
+
+    def _build_settings_tab(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("НАСТРОЙКИ ПРИЛОЖЕНИЯ")
+        title.setStyleSheet("font-size:16px;font-weight:800;color:#e8ecef;")
+        subtitle = QLabel(
+            "Настройки влияют только на интерфейс и уведомления. Рыночные расчёты не изменяются."
+        )
+        subtitle.setStyleSheet("font-size:11px;color:#7f8a94;")
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame{background:#20262c;border:1px solid #353e46;border-radius:10px;}"
+            "QCheckBox{color:#e6e9ed;font-size:12px;padding:8px;}"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+
+        self.sound_checkbox = QCheckBox("Звуковая мелодия во время сканирования")
+        self.sound_checkbox.setChecked(self.sound_enabled)
+        self.sound_checkbox.toggled.connect(self._set_sound_enabled)
+        card_layout.addWidget(self.sound_checkbox)
+
+        self.finish_sound_checkbox = QCheckBox("Звук успешного завершения сканирования")
+        self.finish_sound_checkbox.setChecked(self.sound_on_finish)
+        self.finish_sound_checkbox.toggled.connect(self._set_finish_sound_enabled)
+        card_layout.addWidget(self.finish_sound_checkbox)
+
+        test_row = QHBoxLayout()
+        test_button = QPushButton("ПРОВЕРИТЬ МЕЛОДИЮ")
+        test_button.clicked.connect(self.sound.play)
+        test_row.addWidget(test_button)
+        test_row.addStretch(1)
+        card_layout.addLayout(test_row)
+        layout.addWidget(card)
+
+        help_text = QLabel(
+            "⌘C / Ctrl+C — копирование выбранных строк таблицы.\n"
+            "Контекстное меню таблиц — копировать выбранное / всю таблицу / без заголовков.\n"
+            "Сортировка — кликом по заголовку. Изменение ширины колонок сохраняется в текущем сеансе."
+        )
+        help_text.setStyleSheet("font-size:11px;color:#aab3bb;line-height:1.4;")
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+        layout.addStretch(1)
+
+        self.market_tabs.addTab(panel, "SETTINGS")
+
+    def _set_sound_enabled(self, enabled):
+        self.sound_enabled = bool(enabled)
+        self.settings.setValue("sound/enabled", self.sound_enabled)
+        if not self.sound_enabled:
+            self.sound_timer.stop()
+            self.sound.stop()
+
+    def _set_finish_sound_enabled(self, enabled):
+        self.sound_on_finish = bool(enabled)
+        self.settings.setValue("sound/on_finish", self.sound_on_finish)
+
+    def _play_scan_tick(self):
+        if self.sound_enabled:
+            self.sound.play()
+
+    def run_market_scan(self):
+        if self.sound_enabled:
+            self.sound.play()
+            self.sound_timer.start(8500)
+        super().run_market_scan()
+
+    def _stop_scan_sound(self):
+        self.sound_timer.stop()
+        self.sound.stop()
+
+    def _scan_finished(self, results, diagnostics):
+        self._stop_scan_sound()
+        super()._scan_finished(results, diagnostics)
+        if self.sound_on_finish and self.sound_enabled:
+            QTimer.singleShot(180, self.sound.play)
+
+    def _scan_failed(self, error):
+        self._stop_scan_sound()
+        super()._scan_failed(error)
