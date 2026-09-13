@@ -22,13 +22,18 @@ class SpotUniverseService:
         "COMMODITIES",
         "METALS",
     )
+    # Metadata is not quote data. Keep a short-lived process cache so every
+    # scan does not download the same multi-thousand-row BCS catalogs again.
     CACHE_SECONDS = 300
-    MAX_WORKERS = 2
+    MAX_WORKERS = 6
+    _PROCESS_CACHE = {}
+    _PROCESS_CACHE_AT = {}
 
     def __init__(self, api=None):
         self.api = api or BCSAPI()
-        self._cache = {}
-        self._cache_at = {}
+        # Instance aliases are retained for compatibility with existing tests.
+        self._cache = self._PROCESS_CACHE
+        self._cache_at = self._PROCESS_CACHE_AT
 
     def _cached(self, instrument_type):
         records = self._cache.get(instrument_type)
