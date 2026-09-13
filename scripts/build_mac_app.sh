@@ -1,7 +1,8 @@
 #!/bin/zsh
 # macOS app build script for Trader_7_12 Pro.
 set -euo pipefail
-cd "$(dirname "$0")/.."\nROOT_DIR="$(pwd)"
+cd "$(dirname "$0")/.."
+ROOT_DIR="$(pwd)"
 
 APP_NAME="Trader_7_12 Pro.app"
 DIST_DIR="dist"
