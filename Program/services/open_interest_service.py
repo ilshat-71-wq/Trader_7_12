@@ -14,9 +14,10 @@ class OpenInterestService:
     BASE_URL = "https://iss.moex.com/iss/analyticalproducts/futoi/securities"
     FUTURES_MARKETDATA_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities"
     FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"
+    MOEX_FUTURES_REFERENCE_URL = "https://iss.moex.com/iss/engines/futures/markets/forts/securities"
     MOEX_FUTURES_CALENDAR_URL = "https://iss.moex.com/iss/calendars/futures/securities.json"
     ROLLOVER_DAYS_BEFORE_EXPIRY = 3
-    VERSION = "1.5.1"
+    VERSION = "1.5.2"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
@@ -52,6 +53,7 @@ class OpenInterestService:
         self._marketdata_cache = {}
         self._marketdata_all_cache = None
         self._expiry_calendar_cache = {}
+        self._rfud_expiry_cache = {}
 
     @classmethod
     def _default_get(cls, url, timeout=8):
@@ -165,14 +167,72 @@ class OpenInterestService:
                 return prefix
         return secid
 
-    def _load_expiry_calendar(self, as_of=None):
-        """Load exact MOEX expiry metadata over a forward range."""
+    def _load_rfud_expiry_map(self, as_of=None):
+        """Load exact futures expiry from the working official MOEX RFUD reference endpoint.
+
+        LASTDELDATE is supplied by MOEX itself for every RFUD contract. It is
+        preferred over any date derived from the SECID and over the restricted
+        futures-calendar endpoint.
+        """
         if isinstance(as_of, datetime):
             as_of = as_of.date()
         as_of = as_of or date.today()
         key = as_of.isoformat()
+        if key in self._rfud_expiry_cache:
+            return dict(self._rfud_expiry_cache[key])
+
+        url = f"{self.MOEX_FUTURES_REFERENCE_URL}.json?iss.only=securities"
+        result = {}
+        try:
+            payload = self._http_get(url, timeout=self.TIMEOUT)
+        except Exception:
+            self._rfud_expiry_cache[key] = {}
+            return {}
+
+        block = payload.get("securities") if isinstance(payload, dict) else None
+        if isinstance(block, dict):
+            columns = [str(x).lower() for x in block.get("columns", [])]
+            for raw_row in block.get("data", []):
+                if not isinstance(raw_row, list):
+                    continue
+                row = dict(zip(columns, raw_row))
+                secid = str(row.get("secid") or "").strip().upper()
+                raw_date = str(
+                    row.get("lastdeldate")
+                    or row.get("last_delivery_date")
+                    or ""
+                ).strip()[:10]
+                if not secid or not raw_date:
+                    continue
+                try:
+                    expiry = date.fromisoformat(raw_date)
+                except ValueError:
+                    continue
+                if expiry >= as_of:
+                    result[secid] = expiry
+
+        self._rfud_expiry_cache[key] = result
+        return dict(result)
+
+    def _load_expiry_calendar(self, as_of=None):
+        """Load exact MOEX expiry metadata.
+
+        Primary source: official RFUD securities LASTDELDATE.
+        Secondary source: official MOEX futures calendar, when available.
+        No SECID/month-end approximation is used for production selection.
+        """
+        if isinstance(as_of, datetime):
+            as_of = as_of.date()
+        as_of = as_of or date.today()
+
+        rfud = self._load_rfud_expiry_map(as_of=as_of)
+        if rfud:
+            return rfud
+
+        key = as_of.isoformat()
         if key in self._expiry_calendar_cache:
             return dict(self._expiry_calendar_cache[key])
+
         till = as_of + timedelta(days=180)
         url = f"{self.MOEX_FUTURES_CALENDAR_URL}?{urlencode({'from': key, 'till': till.isoformat()})}"
         try:
@@ -180,36 +240,53 @@ class OpenInterestService:
         except Exception:
             self._expiry_calendar_cache[key] = {}
             return {}
+
         blocks = []
-        sec = payload.get('securities') if isinstance(payload, dict) else None
+        sec = payload.get("securities") if isinstance(payload, dict) else None
         if isinstance(sec, dict):
-            if isinstance(sec.get('forts'), dict):
-                blocks.append(sec['forts'])
-            if sec.get('columns') and sec.get('data'):
+            if isinstance(sec.get("forts"), dict):
+                blocks.append(sec["forts"])
+            if sec.get("columns") and sec.get("data"):
                 blocks.append(sec)
-        if isinstance(payload, dict) and isinstance(payload.get('forts'), dict):
-            blocks.append(payload['forts'])
+        if isinstance(payload, dict) and isinstance(payload.get("forts"), dict):
+            blocks.append(payload["forts"])
+
         result = {}
         for block in blocks:
-            cols = [str(x).lower() for x in block.get('columns', [])]
-            rows = [dict(zip(cols, r)) for r in block.get('data', []) if isinstance(r, list)]
+            cols = [str(x).lower() for x in block.get("columns", [])]
+            rows = [
+                dict(zip(cols, r))
+                for r in block.get("data", [])
+                if isinstance(r, list)
+            ]
             for row in rows:
-                raw = str(row.get('expiration_date') or row.get('expirationdate') or row.get('expiration') or '').strip()[:10]
+                raw = str(
+                    row.get("expiration_date")
+                    or row.get("expirationdate")
+                    or row.get("expiration")
+                    or ""
+                ).strip()[:10]
                 if not raw:
                     continue
                 try:
                     expiry = date.fromisoformat(raw)
                 except ValueError:
                     continue
-                for key_name in ('secid', 'ticker', 'securityid', 'security_code', 'securitycode', 'symbol'):
-                    value = str(row.get(key_name) or '').strip().upper()
+                for key_name in (
+                    "secid", "ticker", "securityid",
+                    "security_code", "securitycode", "symbol"
+                ):
+                    value = str(row.get(key_name) or "").strip().upper()
                     if value:
                         result[value] = expiry
+
         self._expiry_calendar_cache[key] = result
         return dict(result)
 
     def _exact_marketdata_expiry(self, secid, as_of=None):
-        return self._load_expiry_calendar(as_of=as_of).get(str(secid or '').strip().upper())
+        return self._load_expiry_calendar(as_of=as_of).get(
+            str(secid or "").strip().upper()
+        )
 
     def _marketdata_candidates(self, rows, as_of=None):
         as_of = as_of or date.today()
