@@ -780,12 +780,48 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             data_quality_issues.append("MARKETDATA_ERROR")
         data_quality_status = "COMPLETE" if not data_quality_issues else "INCOMPLETE"
 
+        # Detailed BCS underlying mapping diagnosis.
+        # Keep real-data policy strict: no synthetic classCode/ticker is created.
+        mapping_exact = []
+        mapping_semantic = []
+        mapping_found_no_classcode = []
+        mapping_not_found = []
+
+        for canonical, base_ticker in self._underlying_family_tickers.items():
+            normalized = self._normalize_mapping_text(base_ticker)
+            if normalized not in base_underlying_keys:
+                continue
+
+            if canonical in self._underlying_mapping_source:
+                source = self._underlying_mapping_source[canonical]
+                if source == "BCS_SEMANTIC_METADATA":
+                    mapping_semantic.append(str(base_ticker).upper())
+                else:
+                    mapping_exact.append(str(base_ticker).upper())
+                continue
+
+            # BCS returned a BASE instrument but could not provide a usable
+            # classCode: distinguish this from a genuine NOT_FOUND case.
+            bcs_ticker = self._underlying_bcs_tickers.get(canonical)
+            if bcs_ticker:
+                mapping_found_no_classcode.append(str(base_ticker).upper())
+            else:
+                mapping_not_found.append(str(base_ticker).upper())
+
         diagnostics.update({
             "status": process_status,
             "process_status": process_status,
             "market_session": market_session,
             "data_quality_status": data_quality_status,
             "data_quality_issues": data_quality_issues,
+            "underlying_mapping_exact": sorted(set(mapping_exact)),
+            "underlying_mapping_semantic": sorted(set(mapping_semantic)),
+            "underlying_mapping_found_no_classcode": sorted(set(mapping_found_no_classcode)),
+            "underlying_mapping_not_found": sorted(set(mapping_not_found)),
+            "underlying_mapping_exact_count": len(set(mapping_exact)),
+            "underlying_mapping_semantic_count": len(set(mapping_semantic)),
+            "underlying_mapping_found_no_classcode_count": len(set(mapping_found_no_classcode)),
+            "underlying_mapping_not_found_count": len(set(mapping_not_found)),
             "underlying_requested": underlying_requested,
             "underlying_supported_base": underlying_supported_base,
             "underlying_supported_base_mapped": underlying_supported_base_mapped,
