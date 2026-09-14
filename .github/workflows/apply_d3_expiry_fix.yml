@@ -1,0 +1,78 @@
+name: Apply MOEX D-3 expiry rollover fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch expiry selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Program/services/open_interest_service.py')
+          s = p.read_text()
+
+          s = s.replace('    FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"\n    VERSION = "1.4.2"', '    FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"\n    FUTURES_EXPIRY_CALENDAR_URL = "https://iss.moex.com/iss/calendars/futures/securities.json"\n    ROLLOVER_DAYS_BEFORE_EXPIRY = 3\n    VERSION = "1.5.0"')
+          s = s.replace('        self._marketdata_all_cache = None\n', '        self._marketdata_all_cache = None\n        self._expiry_calendar_cache = {}\n')
+
+          start = s.index('    @classmethod\n    def _marketdata_expiry(')
+          end = s.index('    @classmethod\n    def _front_marketdata_rows', start)
+          new = '''    @classmethod\n    def _marketdata_expiry(cls, secid, as_of=None):\n        """Best-effort SECID month expiry fallback for ordering only.\n\n        Production contract selection uses the official MOEX futures calendar\n        loaded by ``_exact_marketdata_expiry`` below. This fallback is retained\n        only for legacy callers that need a deterministic month/year ordering.\n        It is never used for the D-3 rollover decision.\n        """\n        secid = str(secid or "").strip().upper()\n        if not secid:\n            return date.max\n        if "-" in secid:\n            tail = secid.rsplit("-", 1)[1]\n            if "." in tail:\n                month_s, year_s = tail.split(".", 1)\n                if month_s.isdigit() and year_s.isdigit():\n                    try:\n                        year, month = 2000 + int(year_s), int(month_s)\n                        return date(year, month, calendar.monthrange(year, month)[1])\n                    except ValueError:\n                        pass\n        if len(secid) >= 3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():\n            digit, month = int(secid[-1]), cls.MONTH_CODES[secid[-2]]\n            reference_year = (as_of.year if isinstance(as_of, date) else date.today().year)\n            decade = (reference_year // 10) * 10\n            candidates = [decade - 10 + digit, decade + digit, decade + 10 + digit]\n            year = min(candidates, key=lambda candidate: abs(candidate - reference_year))\n            return date(year, month, calendar.monthrange(year, month)[1])\n        return date.max\n\n    def _load_expiry_calendar(self, as_of):\n        """Load exact futures expiry dates from the official MOEX calendar."""\n        if isinstance(as_of, datetime):\n            as_of = as_of.date()\n        key = as_of.isoformat()\n        if key in self._expiry_calendar_cache:\n            return dict(self._expiry_calendar_cache[key])\n\n        params = urlencode({"from": key, "till": key})\n        try:\n            payload = self._http_get(\n                f"{self.FUTURES_EXPIRY_CALENDAR_URL}?{params}",\n                timeout=self.TIMEOUT,\n            )\n        except Exception:\n            self._expiry_calendar_cache[key] = {}\n            return {}\n\n        securities = payload.get("securities") if isinstance(payload, dict) else None\n        forts = securities.get("forts") if isinstance(securities, dict) else None\n        if not isinstance(forts, dict):\n            forts = payload.get("forts") if isinstance(payload, dict) else None\n        if not isinstance(forts, dict):\n            self._expiry_calendar_cache[key] = {}\n            return {}\n\n        columns = [str(x).lower() for x in forts.get("columns", [])]\n        data = forts.get("data", [])\n        result = {}\n        for row in data if isinstance(data, list) else []:\n            if not isinstance(row, list):\n                continue\n            item = dict(zip(columns, row))\n            secid = str(item.get("secid") or "").strip().upper()\n            expiry_raw = str(item.get("expiration_date") or "").strip()[:10]\n            if not secid or not expiry_raw:\n                continue\n            try:\n                result[secid] = date.fromisoformat(expiry_raw)\n            except ValueError:\n                continue\n\n        self._expiry_calendar_cache[key] = result\n        return dict(result)\n\n    def _exact_marketdata_expiry(self, secid, as_of):\n        """Return exact MOEX expiry date; no month-end approximation for selection."""\n        ticker = str(secid or "").strip().upper()\n        calendar_rows = self._load_expiry_calendar(as_of)\n        return calendar_rows.get(ticker)\n\n    def _expiry_for_selection(self, secid, as_of):\n        expiry = self._exact_marketdata_expiry(secid, as_of)\n        return expiry\n\n    def _marketdata_candidates(self, rows, as_of):\n        """Return exact-expiry, active, OI-positive contracts grouped by family."""\n        if isinstance(as_of, datetime):\n            as_of = as_of.date()\n        grouped = {}\n        for row in rows:\n            if not isinstance(row, dict):\n                continue\n            secid = str(row.get("secid") or row.get("ticker") or "").upper().strip()\n            family = self._marketdata_family(secid)\n            oi = self._number(row.get("openposition"))\n            if not secid or not family or oi <= 0:\n                continue\n            expiry = self._expiry_for_selection(secid, as_of)\n            if expiry is None or expiry < as_of:\n                continue\n            grouped.setdefault(family, []).append((expiry, secid, row))\n        for candidates in grouped.values():\n            candidates.sort(key=lambda item: (item[0], item[1]))\n        return grouped\n\n'''
+          s = s[:start] + new + s[end:]
+
+          start = s.index('    @classmethod\n    def _front_marketdata_rows')
+          end = s.index('    def marketdata_front_contracts', start)
+          new = '''    def _front_marketdata_rows(self, rows, as_of=None):\n        """Select the working contract using the passport D-3 MOEX rule.\n\n        The expiring front contract is excluded when its exact MOEX expiry is\n        three or fewer calendar days away. The next contract then becomes the\n        working contract and must already have positive OI. No fallback to the\n        expiring contract is allowed after the D-3 switch.\n        """\n        as_of = as_of or date.today()\n        if isinstance(as_of, datetime):\n            as_of = as_of.date()\n        grouped = self._marketdata_candidates(rows, as_of)\n        selected = {}\n        for family, candidates in grouped.items():\n            front_expiry, front_secid, front_row = candidates[0]\n            chosen = candidates[0]\n            days_to_expiry = (front_expiry - as_of).days\n            rollover_active = days_to_expiry <= self.ROLLOVER_DAYS_BEFORE_EXPIRY\n            if rollover_active and len(candidates) >= 2:\n                chosen = candidates[1]\n\n            expiry, secid, row = chosen\n            item = dict(row)\n            item["_moex_family"] = family\n            item["_moex_expiry"] = expiry.isoformat()\n            item["_moex_front_contract"] = front_secid\n            item["_moex_rollover_active"] = rollover_active\n            item["_moex_rollover_days_to_expiry"] = days_to_expiry\n            item["_moex_contract_role"] = "NEXT" if chosen is not candidates[0] else "FRONT"\n            selected[family] = item\n        return selected\n\n'''
+          s = s[:start] + new + s[end:]
+
+          old = '''    def marketdata_curve_contracts(self, as_of=None):\n        """Return FRONT and NEXT active RFUD contracts for every MOEX family.\n\n        Uses the exact same marketdata source, family parser, expiry ordering,\n        non-expired filter and OI>0 rule as front selection.\n        """\n        as_of = as_of or date.today()\n        if isinstance(as_of, datetime):\n            as_of = as_of.date()\n\n        grouped = {}\n        for row in self._load_marketdata_all():\n            if not isinstance(row, dict):\n                continue\n\n            secid = str(row.get("secid") or row.get("ticker") or "").upper().strip()\n            family = self._marketdata_family(secid)\n            oi = self._number(row.get("openposition"))\n\n            if not secid or not family or oi <= 0:\n                continue\n\n            expiry = self._marketdata_expiry(secid, as_of)\n            if expiry != date.max and expiry < as_of:\n                continue\n\n            grouped.setdefault(family, []).append((expiry, secid, row))\n\n        result = {}\n        for family, candidates in grouped.items():\n            candidates.sort(key=lambda item: (item[0], item[1]))\n\n            curve = {}\n            for rank, (expiry, secid, row) in enumerate(candidates[:2], start=1):\n                item = dict(row)\n                item["_moex_family"] = family\n                item["_moex_expiry"] = (\n                    None if expiry == date.max else expiry.isoformat()\n                )\n                item["_moex_curve_rank"] = rank\n                item["_moex_curve_role"] = "FRONT" if rank == 1 else "NEXT"\n                curve["front" if rank == 1 else "next"] = item\n\n            if "front" in curve:\n                result[family] = curve\n\n        return result\n'''
+          if old not in s:
+              raise SystemExit('curve block not found')
+          new = '''    def marketdata_curve_contracts(self, as_of=None):\n        """Return exact-expiry FRONT and NEXT active RFUD contracts."""\n        as_of = as_of or date.today()\n        if isinstance(as_of, datetime):\n            as_of = as_of.date()\n        grouped = self._marketdata_candidates(self._load_marketdata_all(), as_of)\n        result = {}\n        for family, candidates in grouped.items():\n            curve = {}\n            for rank, (expiry, secid, row) in enumerate(candidates[:2], start=1):\n                item = dict(row)\n                item["_moex_family"] = family\n                item["_moex_expiry"] = expiry.isoformat()\n                item["_moex_curve_rank"] = rank\n                item["_moex_curve_role"] = "FRONT" if rank == 1 else "NEXT"\n                curve["front" if rank == 1 else "next"] = item\n            if "front" in curve:\n                result[family] = curve\n        return result\n'''
+          s = s.replace(old, new)
+
+          s = s.replace('selection_policy: MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY', 'selection_policy: MOEX_RFUD_LIQUID_WORKING_CONTRACT_D3_ROLLOVER')
+          p.write_text(s)
+          print('patched', p)
+          PY
+
+      - name: Add D-3 expiry tests
+        run: |
+          cat > /tmp/add_tests.py <<'PY'
+          from pathlib import Path
+          p = Path('Program/test_open_interest_d3_rollover.py')
+          p.write_text(r'''from datetime import date\n\nfrom services.open_interest_service import OpenInterestService\n\n\ndef _row(secid, oi=100):\n    return {"secid": secid, "openposition": oi}\n\n\ndef _service(expiries):\n    service = OpenInterestService(http_get=lambda *args, **kwargs: {})\n    service._expiry_calendar_cache["2026-09-14"] = {k: date.fromisoformat(v) for k, v in expiries.items()}\n    return service\n\n\ndef test_front_stays_active_more_than_three_days_before_expiry():\n    service = _service({"SiU6": "2026-09-17", "SiZ6": "2026-12-17"})\n    selected = service._front_marketdata_rows([_row("SiU6"), _row("SiZ6")], date(2026, 9, 13))\n    assert selected["SI"]["secid"] == "SIU6"\n    assert selected["SI"]["_moex_contract_role"] == "FRONT"\n\n\ndef test_exactly_three_days_before_expiry_switches_to_next():\n    service = _service({"SiU6": "2026-09-17", "SiZ6": "2026-12-17"})\n    selected = service._front_marketdata_rows([_row("SiU6"), _row("SiZ6")], date(2026, 9, 14))\n    assert selected["SI"]["secid"] == "SIZ6"\n    assert selected["SI"]["_moex_contract_role"] == "NEXT"\n    assert selected["SI"]["_moex_rollover_active"] is True\n\n\ndef test_after_d3_never_falls_back_to_expiring_front():\n    service = _service({"SiU6": "2026-09-17", "SiZ6": "2026-12-17"})\n    selected = service._front_marketdata_rows([_row("SiU6"), _row("SiZ6")], date(2026, 9, 16))\n    assert selected["SI"]["secid"] == "SIZ6"\n\n\ndef test_d3_requires_next_contract_with_positive_oi():\n    service = _service({"SiU6": "2026-09-17", "SiZ6": "2026-12-17"})\n    selected = service._front_marketdata_rows([_row("SiU6"), _row("SiZ6", oi=0)], date(2026, 9, 14))\n    assert "SI" in selected\n    assert selected["SI"]["secid"] == "SIU6"\n''')
+          PY
+          python3 /tmp/add_tests.py
+          python3 -m py_compile Program/services/open_interest_service.py Program/test_open_interest_d3_rollover.py
+          pytest -q
+          git diff --check
+
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Program/services/open_interest_service.py Program/test_open_interest_d3_rollover.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Use official MOEX expiry calendar for D-3 rollover'
+          git push
+
+      - name: Remove one-shot workflow
+        if: success()
+        run: |
+          git rm .github/workflows/apply_d3_expiry_fix.yml
+          git commit -m 'Remove one-shot D-3 expiry patch workflow'
+          git push
