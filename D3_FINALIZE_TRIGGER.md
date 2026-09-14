@@ -1,1 +1,0 @@
-Temporary trigger for exact MOEX D-3 rollover finalization. This file is removed by the finalizer.
