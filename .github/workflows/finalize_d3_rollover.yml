@@ -1,0 +1,36 @@
+name: Finalize MOEX D-3 rollover
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply D-3 patch
+        run: python3 scripts/finalize_d3_rollover.py
+      - name: Verify
+        run: |
+          python3 -m py_compile Program/services/open_interest_service.py Program/services/futures_oi_marketdata_scanner_service.py
+          git diff --check
+          pytest -q
+      - name: Commit production patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Program/services/open_interest_service.py Program/services/futures_oi_marketdata_scanner_service.py
+          git commit -m 'Harden exact MOEX D-3 futures rollover'
+          git push
+      - name: Remove finalizer
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/finalize_d3_rollover.yml scripts/finalize_d3_rollover.py D3_FINALIZE_TRIGGER.md
+          git commit -m 'Remove temporary D-3 finalizer'
+          git push
