@@ -819,10 +819,19 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
             "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA",
             "marketdata_error": marketdata_error,
-            "moex_expiry_source": "MOEX_FUTURES_CALENDAR_EXACT_ONLY",
+            "moex_expiry_source": "MOEX_RFUD_LASTDELDATE",
             "moex_rollover_rule": "D-3_CALENDAR_DAYS",
             "moex_working_contracts": sum(1 for item in front_contracts.values() if item.get("_moex_working_contract")),
             "moex_rollover_active": sum(1 for item in front_contracts.values() if item.get("_moex_rollover_active")),
+            "underlying_unresolved_base_tickers": sorted({
+                str(row.get("underlying_ticker") or "").upper()
+                for row in candidates
+                if (
+                    self._normalize_mapping_text(row.get("underlying_ticker"))
+                    in base_underlying_keys
+                    and not row.get("underlying_class_code")
+                )
+            }),
         })
         self._last_diagnostics = diagnostics
         return selected, diagnostics
