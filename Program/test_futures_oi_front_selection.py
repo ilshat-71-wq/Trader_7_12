@@ -14,7 +14,16 @@ def test_marketdata_family_and_expiry_parse_quarterly_contracts():
     assert OpenInterestService._marketdata_family("SiM7") == "SI"
 
 
-def test_front_contract_selection_uses_nearest_active_expiry_with_oi():
+def test_front_contract_selection_uses_nearest_exact_moex_expiry_with_oi():
+    service = OpenInterestService(http_get=lambda *args, **kwargs: {})
+    as_of = date(2026, 9, 9)
+    service._expiry_calendar_cache[as_of.isoformat()] = {
+        "ALU6": date(2026, 9, 17),
+        "ALZ6": date(2026, 12, 17),
+        "ALM7": date(2027, 6, 17),
+        "CHU6": date(2026, 9, 17),
+        "CHZ6": date(2026, 12, 17),
+    }
     rows = [
         {"secid": "ALZ6", "openposition": 1000},
         {"secid": "ALU6", "openposition": 2000},
@@ -22,7 +31,9 @@ def test_front_contract_selection_uses_nearest_active_expiry_with_oi():
         {"secid": "CHU6", "openposition": 500},
         {"secid": "CHZ6", "openposition": 0},
     ]
-    selected = OpenInterestService._front_marketdata_rows(rows, as_of=date(2026, 9, 9))
+    selected = service.marketdata_front_contracts(as_of=as_of)
+    assert not selected
+    selected = service._working_marketdata_rows(rows, as_of=as_of)
     assert selected["AL"]["secid"] == "ALU6"
     assert selected["CH"]["secid"] == "CHU6"
 
@@ -34,7 +45,12 @@ def test_front_selection_does_not_call_every_contract_individually():
             "data": [["ALU6", 2000], ["ALZ6", 1000]],
         }
     })
-    selected = service.marketdata_front_contracts(as_of=date(2026, 9, 9))
+    as_of = date(2026, 9, 9)
+    service._expiry_calendar_cache[as_of.isoformat()] = {
+        "ALU6": date(2026, 9, 17),
+        "ALZ6": date(2026, 12, 17),
+    }
+    selected = service.marketdata_front_contracts(as_of=as_of)
     assert selected["AL"]["secid"] == "ALU6"
 
 
