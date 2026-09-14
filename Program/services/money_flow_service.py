@@ -11,11 +11,12 @@ from math import log1p
 
 
 class MoneyFlowService:
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
     WINDOW_MINUTES = 30
     LIQUIDITY_WINDOW_MINUTES = 5
     MAX_WORKERS = 5
     MIN_TRADES = 5
+    DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
     def calculate(self, money_volume=0, average_money_volume=0):
         try:
@@ -51,10 +52,33 @@ class MoneyFlowService:
 
     @classmethod
     def _trade_value(cls, trade):
-        value = cls._float(trade.get("volume"))
-        if value > 0:
-            return value
-        return max(0.0, cls._float(trade.get("price")) * cls._float(trade.get("quantity"), cls._float(trade.get("tradeQuantity"))))
+        """Calculate traded money from price × quantity when quantity exists.
+
+        BCS market-data payloads may expose volume/quantity differently across
+        instrument types. Prefer explicit quantity-based notional and only use
+        volume as a fallback when quantity is absent.
+        """
+        price = cls._float(trade.get("price"))
+        quantity = cls._float(
+            trade.get("quantity"),
+            cls._float(trade.get("tradeQuantity"), cls._float(trade.get("qty"))),
+        )
+        if price > 0 and quantity > 0:
+            return price * quantity
+        for key in ("moneyVolume", "money_volume", "amount", "notional", "value", "volume"):
+            value = cls._float(trade.get(key))
+            if value > 0:
+                return value
+        return 0.0
+
+    @staticmethod
+    def _normalize_side(value):
+        text = str(value or "").strip().upper()
+        if text in {"BUY", "B", "BID", "BUYER", "1", "LONG"}:
+            return "BUY"
+        if text in {"SELL", "S", "ASK", "SELLER", "2", "SHORT"}:
+            return "SELL"
+        return ""
 
     @staticmethod
     def _percentile(values, fraction=0.90):
@@ -93,7 +117,7 @@ class MoneyFlowService:
         for trade in records if isinstance(records, list) else []:
             if not isinstance(trade, dict):
                 continue
-            side = str(trade.get("side") or "").upper()
+            side = cls._normalize_side(trade.get("side") or trade.get("tradeSide"))
             price = cls._float(trade.get("price"))
             value = cls._trade_value(trade)
             if side in {"BUY", "SELL"} and price > 0 and value > 0:
@@ -226,8 +250,23 @@ class MoneyFlowService:
         return action, confidence
 
     def _one(self, item, api):
-        ticker = str(item.get("underlying_bcs_ticker") or item.get("underlying_ticker") or "").upper()
-        class_code = str(item.get("underlying_class_code") or "").upper()
+        # Futures OI radar must measure flow on the actual front futures
+        # contract. Using the economic spot underlying here mixes two different
+        # markets and can legitimately return no trades for the requested
+        # instrument. Keep the real underlying only as a fallback.
+        ticker = str(
+            item.get("futures_ticker")
+            or item.get("underlying_bcs_ticker")
+            or item.get("underlying_ticker")
+            or ""
+        ).upper()
+        class_code = str(
+            item.get("futures_class_code")
+            or self.DEFAULT_FUTURES_CLASS_CODE
+            if item.get("futures_ticker")
+            else item.get("underlying_class_code")
+            or ""
+        ).upper()
         if not ticker or not class_code:
             return dict(item, money_flow_status="NO_CLASS_CODE", money_flow_signal="NO_DATA", money_flow_confidence="LOW")
         try:
@@ -243,6 +282,8 @@ class MoneyFlowService:
         action, action_confidence = self._position_interpretation(result)
         result["money_flow_position_action"] = action
         result["money_flow_position_confidence"] = action_confidence
+        result["money_flow_instrument"] = ticker
+        result["money_flow_class_code"] = class_code
         return result
 
     def analyze(self, results, api=None):
