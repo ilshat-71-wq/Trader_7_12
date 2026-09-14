@@ -23,9 +23,18 @@ class FakeHTTP:
         }
 
 
+def _with_exact_expiry(service):
+    service._expiry_calendar_cache["2026-09-08"] = {
+        "SBRF-9.26": date(2026, 9, 17),
+        "SBRF-12.26": date(2026, 12, 17),
+        "GAZR-9.26": date(2026, 9, 17),
+    }
+    return service
+
+
 def test_marketdata_family_fallback_selects_front_contract_and_oi():
     http = FakeHTTP()
-    service = OpenInterestService(http_get=http)
+    service = _with_exact_expiry(OpenInterestService(http_get=http))
 
     result = service.analyze("SR", 1.0, as_of=date(2026, 9, 8))
 
@@ -38,7 +47,7 @@ def test_marketdata_family_fallback_selects_front_contract_and_oi():
 
 
 def test_marketdata_family_fallback_supports_second_root():
-    service = OpenInterestService(http_get=FakeHTTP())
+    service = _with_exact_expiry(OpenInterestService(http_get=FakeHTTP()))
 
     result = service.analyze("GZ", -1.0, as_of=date(2026, 9, 8))
 
