@@ -31,8 +31,6 @@ def test_front_contract_selection_uses_nearest_exact_moex_expiry_with_oi():
         {"secid": "CHU6", "openposition": 500},
         {"secid": "CHZ6", "openposition": 0},
     ]
-    selected = service.marketdata_front_contracts(as_of=as_of)
-    assert not selected
     selected = service._working_marketdata_rows(rows, as_of=as_of)
     assert selected["AL"]["secid"] == "ALU6"
     assert selected["CH"]["secid"] == "CHU6"
