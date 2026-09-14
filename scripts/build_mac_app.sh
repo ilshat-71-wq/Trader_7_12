@@ -124,15 +124,23 @@ codesign --force --deep --sign - --timestamp=none "${STAGE_APP}"
 codesign --verify --deep --strict --verbose=2 "${STAGE_APP}"
 
 # The repository lives under Documents, where macOS/File Provider can attach
-# FinderInfo/FileProvider metadata to newly published bundle directories.
-# Never use that managed directory as the canonical signed artifact. Publish
-# Keep exactly one canonical application inside the project.
-mkdir -p "${ROOT_DIR}/dist"
-rm -rf "${PUBLISHED_APP}"
+# FinderInfo/FileProvider metadata to published bundle directories.
+# dist/ is therefore a visibility/copy artifact, not the canonical signed app.
+# The canonical signed application is installed under ~/Applications.
+INSTALL_DIR="${HOME}/Applications"
+INSTALLED_APP="${INSTALL_DIR}/${APP_NAME}"
+
+mkdir -p "${ROOT_DIR}/dist" "${INSTALL_DIR}"
+rm -rf "${PUBLISHED_APP}" "${INSTALLED_APP}"
+
 ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${PUBLISHED_APP}"
+ditto --norsrc --noextattr --noqtn "${STAGE_APP}" "${INSTALLED_APP}"
+
 xattr -cr "${PUBLISHED_APP}" 2>/dev/null || true
-codesign --verify --deep --strict --verbose=2 "${PUBLISHED_APP}"
+xattr -cr "${INSTALLED_APP}" 2>/dev/null || true
 
+# Documents may reattach FinderInfo after publication, so never use dist/
+# for the final codesign verification.
+codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
 
-
-printf '%s\n' "" "=== APP BUILD OK ===" "${PUBLISHED_APP}" "dist/${APP_NAME} -> ${PUBLISHED_APP}" "Bundle version: ${BUNDLE_VERSION}" "Bundle source commit: ${BUNDLE_COMMIT}" "Bundle icon: turquoise-gold watch dial" "Code signing: ad-hoc verified" "Packaging: PyInstaller onedir + macOS .app" "Single-window dashboard: SPOT + Futures OI"
+printf '%s\n' ""     "=== APP BUILD OK ==="     "Build artifact: ${PUBLISHED_APP}"     "Signed install: ${INSTALLED_APP}"     "Bundle version: ${BUNDLE_VERSION}"     "Bundle source commit: ${BUNDLE_COMMIT}"     "Bundle icon: turquoise-gold watch dial"     "Code signing: ad-hoc verified on installed app"     "Packaging: PyInstaller onedir + macOS .app"     "Single-window dashboard: SPOT + Futures OI"
