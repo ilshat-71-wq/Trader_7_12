@@ -23,34 +23,42 @@ class FakeHTTP:
         }
 
 
-def _with_exact_expiry(service):
-    service._expiry_calendar_cache["2026-09-08"] = {
+def _marketdata_rows(service, as_of):
+    rows = service._load_marketdata_all()
+    service._expiry_calendar_cache[as_of.isoformat()] = {
         "SBRF-9.26": date(2026, 9, 17),
         "SBRF-12.26": date(2026, 12, 17),
         "GAZR-9.26": date(2026, 9, 17),
     }
-    return service
+    return service._working_marketdata_rows(rows, as_of=as_of)
 
 
 def test_marketdata_family_fallback_selects_front_contract_and_oi():
-    http = FakeHTTP()
-    service = _with_exact_expiry(OpenInterestService(http_get=http))
+    service = OpenInterestService(http_get=FakeHTTP())
+    as_of = date(2026, 9, 8)
+    selected = _marketdata_rows(service, as_of)
+    row = selected["SBRF"]
+    analysis = service._marketdata_analysis(
+        row["secid"], "SBRF", 1.0, None
+    )
 
-    result = service.analyze("SR", 1.0, as_of=date(2026, 9, 8))
-
-    assert result["oi_status"] == "AVAILABLE"
-    assert result["oi_source"] == "MOEX_FUTURES_MARKETDATA"
-    assert result["oi_contract_ticker"] == "SBRF-9.26"
-    assert result["oi"] == 2000
-    assert result["oi_change_contracts"] == -20
-    assert result["oi_change_percent"] < 0
+    assert analysis["oi_status"] == "AVAILABLE"
+    assert analysis["oi_source"] == "MOEX_FUTURES_MARKETDATA"
+    assert analysis["oi_contract_ticker"] == "SBRF-9.26"
+    assert analysis["oi"] == 2000
+    assert analysis["oi_change_contracts"] == -20
+    assert analysis["oi_change_percent"] < 0
 
 
 def test_marketdata_family_fallback_supports_second_root():
-    service = _with_exact_expiry(OpenInterestService(http_get=FakeHTTP()))
+    service = OpenInterestService(http_get=FakeHTTP())
+    as_of = date(2026, 9, 8)
+    selected = _marketdata_rows(service, as_of)
+    row = selected["GAZR"]
+    analysis = service._marketdata_analysis(
+        row["secid"], "GAZR", -1.0, None
+    )
 
-    result = service.analyze("GZ", -1.0, as_of=date(2026, 9, 8))
-
-    assert result["oi_source"] == "MOEX_FUTURES_MARKETDATA"
-    assert result["oi_contract_ticker"] == "GAZR-9.26"
-    assert result["oi"] == 3000
+    assert analysis["oi_source"] == "MOEX_FUTURES_MARKETDATA"
+    assert analysis["oi_contract_ticker"] == "GAZR-9.26"
+    assert analysis["oi"] == 3000
