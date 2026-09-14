@@ -1,1 +1,1 @@
-Temporary trigger for the MOEX D-3 expiry rollover repair; this file is removed by the repair workflow after successful validation.
+D-3 MOEX expiry rollover fix is being applied and verified against official MOEX calendar and BCS market-data contracts.
