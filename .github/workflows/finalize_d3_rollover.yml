@@ -1,0 +1,69 @@
+name: Finalize MOEX D-3 rollover
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch exact MOEX expiry and D-3 working contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Program/services/open_interest_service.py')
+          s = p.read_text()
+          s = s.replace('    FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"\n    VERSION = "1.4.2"', '    FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"\n    FUTURES_EXPIRY_CALENDAR_URL = "https://iss.moex.com/iss/calendars/futures/securities.json"\n    ROLLOVER_DAYS_BEFORE_EXPIRY = 3\n    VERSION = "1.5.0"')
+          s = s.replace('        self._marketdata_all_cache = None\n', '        self._marketdata_all_cache = None\n        self._expiry_calendar_cache = {}\n')
+          a=s.index('    @classmethod\n    def _marketdata_expiry('); b=s.index('    @classmethod\n    def _front_marketdata_rows',a)
+          s=s[:a]+'''    @classmethod\n    def _marketdata_expiry(cls, secid, as_of=None):\n        """Legacy month-end fallback retained only for non-selection callers."""\n        secid=str(secid or "").strip().upper()\n        if not secid: return date.max\n        if len(secid)>=3 and secid[-2] in cls.MONTH_CODES and secid[-1].isdigit():\n            digit,month=int(secid[-1]),cls.MONTH_CODES[secid[-2]]\n            y=(as_of.year if isinstance(as_of,date) else date.today().year); decade=(y//10)*10\n            year=min([decade-10+digit,decade+digit,decade+10+digit],key=lambda x:abs(x-y))\n            return date(year,month,calendar.monthrange(year,month)[1])\n        return date.max\n\n    def _load_expiry_calendar(self, as_of):\n        if isinstance(as_of,datetime): as_of=as_of.date()\n        key=as_of.isoformat()\n        if key in self._expiry_calendar_cache: return dict(self._expiry_calendar_cache[key])\n        try:\n            payload=self._http_get(f"{self.FUTURES_EXPIRY_CALENDAR_URL}?{urlencode({'from':key,'till':key})}",timeout=self.TIMEOUT)\n        except Exception:\n            self._expiry_calendar_cache[key]={}; return {}\n        securities=payload.get('securities') if isinstance(payload,dict) else None\n        forts=securities.get('forts') if isinstance(securities,dict) else None\n        if not isinstance(forts,dict): forts=payload.get('forts') if isinstance(payload,dict) else None\n        if not isinstance(forts,dict): self._expiry_calendar_cache[key]={}; return {}\n        columns=[str(x).lower() for x in forts.get('columns',[])]\n        result={}\n        for row in forts.get('data',[]) if isinstance(forts.get('data'),list) else []:\n            if not isinstance(row,list): continue\n            item=dict(zip(columns,row)); secid=str(item.get('secid') or item.get('symbol') or '').strip().upper(); raw=str(item.get('expiration_date') or '').strip()[:10]\n            if not secid or not raw: continue\n            try: result[secid]=date.fromisoformat(raw)\n            except ValueError: pass\n        self._expiry_calendar_cache[key]=result; return dict(result)\n\n    def _exact_marketdata_expiry(self, secid, as_of):\n        return self._load_expiry_calendar(as_of).get(str(secid or '').strip().upper())\n\n    def _marketdata_candidates(self, rows, as_of):\n        if isinstance(as_of,datetime): as_of=as_of.date()\n        grouped={}\n        for row in rows:\n            if not isinstance(row,dict): continue\n            secid=str(row.get('secid') or row.get('ticker') or '').upper().strip(); family=self._marketdata_family(secid); oi=self._number(row.get('openposition'))\n            if not secid or not family or oi<=0: continue\n            expiry=self._exact_marketdata_expiry(secid,as_of)\n            if expiry is None or expiry<as_of: continue\n            grouped.setdefault(family,[]).append((expiry,secid,row))\n        for c in grouped.values(): c.sort(key=lambda x:(x[0],x[1]))\n        return grouped\n\n''' + s[b:]
+          a=s.index('    @classmethod\n    def _front_marketdata_rows'); b=s.index('    def marketdata_front_contracts',a)
+          s=s[:a]+'''    def _front_marketdata_rows(self, rows, as_of=None):\n        as_of=as_of or date.today()\n        if isinstance(as_of,datetime): as_of=as_of.date()\n        selected={}\n        for family,candidates in self._marketdata_candidates(rows,as_of).items():\n            front_expiry,front_secid,_=candidates[0]; days=(front_expiry-as_of).days; rollover=days<=self.ROLLOVER_DAYS_BEFORE_EXPIRY\n            if rollover:\n                if len(candidates)<2: continue\n                expiry,secid,row=candidates[1]; role='NEXT'\n            else:\n                expiry,secid,row=candidates[0]; role='FRONT'\n            item=dict(row); item['_moex_family']=family; item['_moex_expiry']=expiry.isoformat(); item['_moex_front_contract']=front_secid; item['_moex_rollover_active']=rollover; item['_moex_rollover_days_to_expiry']=days; item['_moex_contract_role']=role\n            selected[family]=item\n        return selected\n\n''' + s[b:]
+          a=s.index('    def marketdata_curve_contracts'); b=s.index('    def _request_marketdata_family',a)
+          s=s[:a]+'''    def marketdata_curve_contracts(self, as_of=None):\n        as_of=as_of or date.today()\n        if isinstance(as_of,datetime): as_of=as_of.date()\n        result={}\n        for family,candidates in self._marketdata_candidates(self._load_marketdata_all(),as_of).items():\n            curve={}\n            for rank,(expiry,secid,row) in enumerate(candidates[:2],1):\n                item=dict(row); item['_moex_family']=family; item['_moex_expiry']=expiry.isoformat(); item['_moex_curve_rank']=rank; item['_moex_curve_role']='FRONT' if rank==1 else 'NEXT'; curve['front' if rank==1 else 'next']=item\n            if 'front' in curve: result[family]=curve\n        return result\n\n''' + s[b:]
+          p.write_text(s)
+          PY
+
+      - name: Verify patch
+        run: |
+          python3 -m py_compile Program/services/open_interest_service.py
+          git diff --check
+          python3 - <<'PY'
+          from datetime import date
+          import sys
+          sys.path.insert(0,'Program')
+          from services.open_interest_service import OpenInterestService
+          x=OpenInterestService(http_get=lambda *a,**k:{})
+          x._expiry_calendar_cache['2026-09-14']={'SIU6':date(2026,9,17),'SIZ6':date(2026,12,17)}
+          r=lambda s,oi=100:{'secid':s,'openposition':oi}
+          assert x._front_marketdata_rows([r('SIU6'),r('SIZ6')],date(2026,9,13))['SI']['secid']=='SIU6'
+          assert x._front_marketdata_rows([r('SIU6'),r('SIZ6')],date(2026,9,14))['SI']['secid']=='SIZ6'
+          assert x._front_marketdata_rows([r('SIU6'),r('SIZ6')],date(2026,9,16))['SI']['secid']=='SIZ6'
+          assert 'SI' not in x._front_marketdata_rows([r('SIU6'),r('SIZ6',0)],date(2026,9,14))
+          print('D3_ROLLOVER_OK')
+          PY
+
+      - name: Commit production patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Program/services/open_interest_service.py
+          git commit -m 'Use official MOEX expiry calendar for D-3 rollover'
+          git push
+
+      - name: Remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/finalize_d3_rollover.yml D3_FIX_TRIGGER2.md
+          git commit -m 'Remove temporary D-3 finalizer'
+          git push
