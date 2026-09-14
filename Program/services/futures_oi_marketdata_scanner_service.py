@@ -545,6 +545,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         underlying_quotes = self._underlying_quotes(bcs_contracts)
         marketdata_error = None
         front_contracts = self.oi.marketdata_front_contracts(as_of=as_of) if hasattr(self.oi, "marketdata_front_contracts") else {}
+        curve_contracts = (
+            self.oi.marketdata_curve_contracts(as_of=as_of)
+            if hasattr(self.oi, "marketdata_curve_contracts")
+            else {}
+        )
         marketdata_error = getattr(self.oi, "_marketdata_all_error", None)
         if not front_contracts and hasattr(self.oi, "_request_marketdata_family"):
             family_rows = {}
@@ -593,6 +598,49 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             oi = self.oi._marketdata_analysis(secid, family, change, None)
             if not oi or oi.get("oi_status") not in {"AVAILABLE", "CURRENT_ONLY"}: skipped += 1; continue
             oi_available += 1
+
+            curve = curve_contracts.get(family, {})
+            front_row = curve.get("front") or marketdata
+            next_row = curve.get("next")
+
+            front_oi = self._float(front_row, "openposition") or 0.0
+            front_oi_change = self._float(front_row, "oichange") or 0.0
+
+            next_oi = (self._float(next_row, "openposition") or 0.0) if next_row else 0.0
+            next_oi_change = (self._float(next_row, "oichange") or 0.0) if next_row else 0.0
+
+            combined_oi = front_oi + next_oi
+            combined_previous_oi = (
+                max(0.0, front_oi - front_oi_change)
+                + max(0.0, next_oi - next_oi_change)
+            )
+            combined_oi_change_percent = (
+                (combined_oi / combined_previous_oi - 1.0) * 100.0
+                if combined_previous_oi > 0
+                else None
+            )
+
+            front_oi_change_percent = (
+                (front_oi_change / (front_oi - front_oi_change)) * 100.0
+                if front_oi - front_oi_change > 0
+                else None
+            )
+            next_oi_change_percent = (
+                (next_oi_change / (next_oi - next_oi_change)) * 100.0
+                if next_row and next_oi - next_oi_change > 0
+                else None
+            )
+
+            rollover_active = bool(
+                next_row
+                and front_oi_change < 0
+                and next_oi_change > 0
+            )
+            rollover_target = (
+                str(next_row.get("secid") or next_row.get("ticker") or "").upper()
+                if rollover_active and next_row
+                else None
+            )
             liquidity_available += int(turnover_rub > 0)
             underlying_ticker = self._underlying_family_tickers.get(family) or self._known_underlying_ticker(family, bcs_contracts)
             underlying_quote = underlying_quotes.get(
@@ -628,7 +676,47 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 and underlying_change is not None
             ):
                 base_change_available += 1
-            candidates.append({"futures_root": family, "oi_root": family, "futures_ticker": secid, "last": last, "change_pct": change, "change_percent": change, "volume": volume, "turnover_rub": turnover_rub, "turnover_source": turnover_source, "oi": oi, "oi_analysis": oi, "underlying_ticker": underlying_ticker, "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker), "underlying_class_code": self._underlying_class_codes.get(underlying_ticker), "underlying_price": underlying_price, "underlying_change_pct": underlying_change, "underlying_change_source": underlying_change_source})
+            candidates.append({
+                "futures_root": family,
+                "oi_root": family,
+                "futures_ticker": secid,
+                "last": last,
+                "change_pct": change,
+                "change_percent": change,
+                "volume": volume,
+                "turnover_rub": turnover_rub,
+                "turnover_source": turnover_source,
+                "oi": oi,
+                "oi_analysis": oi,
+                "front_contract": secid,
+                "next_contract": (
+                    str(next_row.get("secid") or next_row.get("ticker") or "").upper()
+                    if next_row else None
+                ),
+                "front_oi": round(front_oi, 3),
+                "next_oi": round(next_oi, 3) if next_row else None,
+                "front_oi_change_percent": (
+                    None if front_oi_change_percent is None
+                    else round(front_oi_change_percent, 3)
+                ),
+                "next_oi_change_percent": (
+                    None if next_oi_change_percent is None
+                    else round(next_oi_change_percent, 3)
+                ),
+                "combined_oi": round(combined_oi, 3),
+                "combined_oi_change_percent": (
+                    None if combined_oi_change_percent is None
+                    else round(combined_oi_change_percent, 3)
+                ),
+                "rollover_active": rollover_active,
+                "rollover_target": rollover_target,
+                "underlying_ticker": underlying_ticker,
+                "underlying_bcs_ticker": self._underlying_bcs_tickers.get(underlying_ticker),
+                "underlying_class_code": self._underlying_class_codes.get(underlying_ticker),
+                "underlying_price": underlying_price,
+                "underlying_change_pct": underlying_change,
+                "underlying_change_source": underlying_change_source,
+            })
         candidates.sort(key=lambda row: float(row.get("turnover_rub") or 0.0), reverse=True)
         selected = candidates[:self.LIQUIDITY_TOP_LIMIT]
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))

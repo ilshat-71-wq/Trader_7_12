@@ -223,6 +223,54 @@ class OpenInterestService:
         """Return the current front RFUD contract with OI>0 for each MOEX family."""
         return self._front_marketdata_rows(self._load_marketdata_all(), as_of=as_of)
 
+    def marketdata_curve_contracts(self, as_of=None):
+        """Return FRONT and NEXT active RFUD contracts for every MOEX family.
+
+        Uses the exact same marketdata source, family parser, expiry ordering,
+        non-expired filter and OI>0 rule as front selection.
+        """
+        as_of = as_of or date.today()
+        if isinstance(as_of, datetime):
+            as_of = as_of.date()
+
+        grouped = {}
+        for row in self._load_marketdata_all():
+            if not isinstance(row, dict):
+                continue
+
+            secid = str(row.get("secid") or row.get("ticker") or "").upper().strip()
+            family = self._marketdata_family(secid)
+            oi = self._number(row.get("openposition"))
+
+            if not secid or not family or oi <= 0:
+                continue
+
+            expiry = self._marketdata_expiry(secid, as_of)
+            if expiry != date.max and expiry < as_of:
+                continue
+
+            grouped.setdefault(family, []).append((expiry, secid, row))
+
+        result = {}
+        for family, candidates in grouped.items():
+            candidates.sort(key=lambda item: (item[0], item[1]))
+
+            curve = {}
+            for rank, (expiry, secid, row) in enumerate(candidates[:2], start=1):
+                item = dict(row)
+                item["_moex_family"] = family
+                item["_moex_expiry"] = (
+                    None if expiry == date.max else expiry.isoformat()
+                )
+                item["_moex_curve_rank"] = rank
+                item["_moex_curve_role"] = "FRONT" if rank == 1 else "NEXT"
+                curve["front" if rank == 1 else "next"] = item
+
+            if "front" in curve:
+                result[family] = curve
+
+        return result
+
     def _request_marketdata_family(self, root):
         root = str(root or "").strip().upper()
         if not root:
