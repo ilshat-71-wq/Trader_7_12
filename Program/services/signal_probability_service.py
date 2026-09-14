@@ -14,7 +14,7 @@ class SignalProbabilityService:
     are accumulated.
     """
 
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
 
     @staticmethod
     def _f(value, default=0.0):
@@ -44,11 +44,9 @@ class SignalProbabilityService:
         recent_pace = self._f(item.get("recent_money_per_minute"))
         structure = self._structure_score(item.get("daily_structure"))
 
-        # Real-data directional features.
         momentum = tanh(change / 0.80)
         rs_signal = tanh(rs / 1.00)
         acceleration = tanh(accel / 20.0)
-
         liquidity = tanh(max(pace, 0.0) / 25000.0)
         recent_liquidity = tanh(max(recent_pace, 0.0) / 25000.0)
 
@@ -63,7 +61,6 @@ class SignalProbabilityService:
             + 0.55 * flow
         )
 
-        # Convert directional score into a bounded model probability.
         long_probability = self._sigmoid(score) * 100.0
         short_probability = 100.0 - long_probability
 
@@ -87,9 +84,21 @@ class SignalProbabilityService:
 
     def futures(self, item):
         change = self._f(item.get("change_percent"))
-        oi_change = self._f(
-            (item.get("oi_analysis") or {}).get("oi_change_percent")
-        )
+        oi_analysis = item.get("oi_analysis") or {}
+        front_oi_change = self._f(oi_analysis.get("oi_change_percent"))
+
+        # Near expiry, front-contract OI can fall sharply while the next
+        # contract absorbs the position rollover. In that case front OI
+        # alone is not a directional feature: use the combined front+next
+        # curve OI change supplied by the market-data scanner.
+        rollover_active = bool(item.get("rollover_active"))
+        combined_oi_change = item.get("combined_oi_change_percent")
+        if combined_oi_change is None:
+            combined_oi_change = oi_analysis.get("combined_oi_change_percent")
+        if rollover_active and combined_oi_change is not None:
+            oi_change = self._f(combined_oi_change)
+        else:
+            oi_change = front_oi_change
 
         flow_delta = self._f(item.get("money_flow_delta_pct"))
         liquidity_score = self._f(item.get("money_flow_liquidity_score"))
@@ -117,9 +126,14 @@ class SignalProbabilityService:
             "SELLER_ACTIVE": -0.70,
         }.get(flow_signal, 0.0)
 
+        # The price/OI relationship remains the primary futures structure.
+        # During rollover the combined curve OI is used, so a front OI drop
+        # caused only by migration into the next contract cannot create a
+        # false bearish signal.
+        oi_price_alignment = 1.0 if change >= 0 else -1.0
         score = (
             1.15 * price_signal
-            + 0.90 * oi_signal * (1.0 if change >= 0 else -1.0)
+            + 0.90 * oi_signal * oi_price_alignment
             + 0.95 * flow_signal_score
             + 0.70 * action_score
             + 0.35 * flow_direction
@@ -145,4 +159,6 @@ class SignalProbabilityService:
             "long_probability": round(long_probability, 1),
             "short_probability": round(short_probability, 1),
             "signal_model": self.VERSION,
+            "rollover_active": rollover_active,
+            "oi_feature": "COMBINED_CURVE" if rollover_active and combined_oi_change is not None else "FRONT_CONTRACT",
         }
