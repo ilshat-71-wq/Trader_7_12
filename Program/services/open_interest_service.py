@@ -16,7 +16,7 @@ class OpenInterestService:
     FUTURES_MARKETDATA_ALL_URL = f"{FUTURES_MARKETDATA_URL}.json?iss.only=marketdata"
     MOEX_FUTURES_CALENDAR_URL = "https://iss.moex.com/iss/calendars/futures/securities.json"
     ROLLOVER_DAYS_BEFORE_EXPIRY = 3
-    VERSION = "1.5.0"
+    VERSION = "1.5.1"
     HISTORY_DAYS = 60
     ZSCORE_WINDOW = 20
     TIMEOUT = 8
@@ -166,150 +166,101 @@ class OpenInterestService:
         return secid
 
     def _load_expiry_calendar(self, as_of=None):
-        """Load exact MOEX futures expiration metadata for the calculation date."""
+        """Load exact MOEX expiry metadata over a forward range."""
         if isinstance(as_of, datetime):
             as_of = as_of.date()
         as_of = as_of or date.today()
         key = as_of.isoformat()
-
         if key in self._expiry_calendar_cache:
             return dict(self._expiry_calendar_cache[key])
-
-        params = urlencode({"from": key, "till": key})
-        url = f"{self.MOEX_FUTURES_CALENDAR_URL}?{params}"
-
+        till = as_of + timedelta(days=180)
+        url = f"{self.MOEX_FUTURES_CALENDAR_URL}?{urlencode({'from': key, 'till': till.isoformat()})}"
         try:
             payload = self._http_get(url, timeout=self.TIMEOUT)
-            rows = self._parse_block(payload, "securities")
         except Exception:
-            rows = []
-
-        calendar = {}
-        for row in rows:
-            secid = str(
-                row.get("secid")
-                or row.get("ticker")
-                or row.get("securityid")
-                or ""
-            ).strip().upper()
-            if not secid:
-                continue
-
-            expiration = str(
-                row.get("expiration_date")
-                or row.get("expirationdate")
-                or ""
-            ).strip()[:10]
-
-            end_date = str(
-                row.get("end_date")
-                or row.get("enddate")
-                or ""
-            ).strip()[:10]
-
-            if expiration or end_date:
-                calendar[secid] = {
-                    "expiration_date": expiration or None,
-                    "end_date": end_date or None,
-                }
-
-        self._expiry_calendar_cache[key] = calendar
-        return dict(calendar)
+            self._expiry_calendar_cache[key] = {}
+            return {}
+        blocks = []
+        sec = payload.get('securities') if isinstance(payload, dict) else None
+        if isinstance(sec, dict):
+            if isinstance(sec.get('forts'), dict):
+                blocks.append(sec['forts'])
+            if sec.get('columns') and sec.get('data'):
+                blocks.append(sec)
+        if isinstance(payload, dict) and isinstance(payload.get('forts'), dict):
+            blocks.append(payload['forts'])
+        result = {}
+        for block in blocks:
+            cols = [str(x).lower() for x in block.get('columns', [])]
+            rows = [dict(zip(cols, r)) for r in block.get('data', []) if isinstance(r, list)]
+            for row in rows:
+                raw = str(row.get('expiration_date') or row.get('expirationdate') or row.get('expiration') or '').strip()[:10]
+                if not raw:
+                    continue
+                try:
+                    expiry = date.fromisoformat(raw)
+                except ValueError:
+                    continue
+                for key_name in ('secid', 'ticker', 'securityid', 'security_code', 'securitycode', 'symbol'):
+                    value = str(row.get(key_name) or '').strip().upper()
+                    if value:
+                        result[value] = expiry
+        self._expiry_calendar_cache[key] = result
+        return dict(result)
 
     def _exact_marketdata_expiry(self, secid, as_of=None):
-        """Return exact MOEX expiration date when available."""
-        secid = str(secid or "").strip().upper()
-        calendar = self._load_expiry_calendar(as_of=as_of)
-        meta = calendar.get(secid)
-        if meta and meta.get("expiration_date"):
-            try:
-                return date.fromisoformat(meta["expiration_date"])
-            except ValueError:
-                pass
-        return self._marketdata_expiry(secid, as_of=as_of)
+        return self._load_expiry_calendar(as_of=as_of).get(str(secid or '').strip().upper())
 
     def _marketdata_candidates(self, rows, as_of=None):
-        """Return active RFUD candidates grouped by family, ordered by exact expiry."""
         as_of = as_of or date.today()
         if isinstance(as_of, datetime):
             as_of = as_of.date()
-
         grouped = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
-
-            secid = str(row.get("secid") or row.get("ticker") or "").strip().upper()
+            secid = str(row.get('secid') or row.get('ticker') or '').strip().upper()
             family = self._marketdata_family(secid)
-            oi = self._number(row.get("openposition"))
-
+            oi = self._number(row.get('openposition'))
             if not secid or not family or oi <= 0:
                 continue
-
-            expiry = self._exact_marketdata_expiry(secid, as_of=as_of)
-            if expiry != date.max and expiry < as_of:
+            expiry = self._exact_marketdata_expiry(secid, as_of)
+            if expiry is None or expiry < as_of:
                 continue
-
             grouped.setdefault(family, []).append((expiry, secid, row))
-
-        for family in grouped:
-            grouped[family].sort(key=lambda item: (item[0], item[1]))
-
+        for values in grouped.values():
+            values.sort(key=lambda item: (item[0], item[1]))
         return grouped
 
     def _working_marketdata_rows(self, rows, as_of=None):
-        """Select the passport working contract with mandatory D-3 rollover."""
         as_of = as_of or date.today()
         if isinstance(as_of, datetime):
             as_of = as_of.date()
-
         selected = {}
-
-        for family, candidates in self._marketdata_candidates(rows, as_of=as_of).items():
-            if not candidates:
-                continue
-
-            front = candidates[0]
-            expiry, secid, row = front
-            days_to_expiry = (
-                (expiry - as_of).days if expiry != date.max else None
-            )
-
-            working = front
-            role = "FRONT"
-            rollover_active = False
-
-            if (
-                days_to_expiry is not None
-                and days_to_expiry <= self.ROLLOVER_DAYS_BEFORE_EXPIRY
-            ):
+        for family, candidates in self._marketdata_candidates(rows, as_of).items():
+            front_expiry, front_secid, _ = candidates[0]
+            days = (front_expiry - as_of).days
+            if days <= self.ROLLOVER_DAYS_BEFORE_EXPIRY:
                 if len(candidates) < 2:
-                    # Mandatory D-3 rule: never fall back to the expiring contract.
                     continue
-
-                next_expiry, next_secid, next_row = candidates[1]
-                working = (next_expiry, next_secid, next_row)
-                role = "NEXT"
-                rollover_active = True
-
-            working_expiry, working_secid, working_row = working
-
-            item = dict(working_row)
-            item["_moex_family"] = family
-            item["_moex_expiry"] = (
-                None if working_expiry == date.max
-                else working_expiry.isoformat()
-            )
-            item["_moex_curve_role"] = role
-            item["_moex_working_contract"] = working_secid
-            item["_moex_rollover_active"] = rollover_active
-            item["_moex_days_to_expiry"] = (
-                (working_expiry - as_of).days
-                if working_expiry != date.max
-                else None
-            )
+                expiry, secid, row = candidates[1]
+                role = 'NEXT'
+                rollover = True
+            else:
+                expiry, secid, row = candidates[0]
+                role = 'FRONT'
+                rollover = False
+            item = dict(row)
+            item.update({
+                '_moex_family': family,
+                '_moex_expiry': expiry.isoformat(),
+                '_moex_curve_role': role,
+                '_moex_working_contract': secid,
+                '_moex_front_contract': front_secid,
+                '_moex_rollover_active': rollover,
+                '_moex_days_to_expiry': days,
+            })
             selected[family] = item
-
         return selected
 
     @classmethod
@@ -341,105 +292,33 @@ class OpenInterestService:
             return date(year, month, calendar.monthrange(year, month)[1])
         return date.max
 
-    @classmethod
-    def _front_marketdata_rows(cls, rows, as_of=None):
-        """Select one active, non-zero-OI front contract per MOEX family."""
-        as_of = as_of or date.today()
-        if isinstance(as_of, datetime):
-            as_of = as_of.date()
-        grouped = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            secid = str(row.get("secid") or row.get("ticker") or "").upper()
-            family = cls._marketdata_family(secid)
-            oi = cls._number(row.get("openposition"))
-            if not secid or not family or oi <= 0:
-                continue
-            expiry = cls._marketdata_expiry(secid, as_of)
-            if expiry != date.max and expiry < as_of:
-                continue
-            grouped.setdefault(family, []).append((expiry, secid, row))
-        selected = {}
-        for family, candidates in grouped.items():
-            candidates.sort(key=lambda item: (item[0], item[1]))
-            expiry, secid, row = candidates[0]
-            selected[family] = dict(row)
-            selected[family]["_moex_family"] = family
-            selected[family]["_moex_expiry"] = None if expiry == date.max else expiry.isoformat()
-        return selected
+    def _front_marketdata_rows(self, rows, as_of=None):
+        return self._working_marketdata_rows(rows, as_of=as_of)
 
     def marketdata_front_contracts(self, as_of=None):
         """Return the effective working RFUD contract using the mandatory D-3 rule."""
         return self._working_marketdata_rows(self._load_marketdata_all(), as_of=as_of)
 
     def marketdata_curve_contracts(self, as_of=None):
-        """Return FRONT and NEXT active RFUD contracts for every MOEX family.
-
-        Uses the exact same marketdata source, family parser, expiry ordering,
-        non-expired filter and OI>0 rule as front selection.
-        """
         as_of = as_of or date.today()
         if isinstance(as_of, datetime):
             as_of = as_of.date()
-
-        grouped = {}
-        for row in self._load_marketdata_all():
-            if not isinstance(row, dict):
-                continue
-
-            secid = str(row.get("secid") or row.get("ticker") or "").upper().strip()
-            family = self._marketdata_family(secid)
-            oi = self._number(row.get("openposition"))
-
-            if not secid or not family or oi <= 0:
-                continue
-
-            expiry = self._marketdata_expiry(secid, as_of)
-            if expiry != date.max and expiry < as_of:
-                continue
-
-            grouped.setdefault(family, []).append((expiry, secid, row))
-
         result = {}
-        for family, candidates in grouped.items():
-            candidates.sort(key=lambda item: (item[0], item[1]))
-
+        for family, candidates in self._marketdata_candidates(self._load_marketdata_all(), as_of).items():
             curve = {}
-            for rank, (expiry, secid, row) in enumerate(candidates[:2], start=1):
+            for rank, (expiry, secid, row) in enumerate(candidates[:2], 1):
                 item = dict(row)
-                item["_moex_family"] = family
-                item["_moex_expiry"] = (
-                    None if expiry == date.max else expiry.isoformat()
-                )
-                item["_moex_curve_rank"] = rank
-                item["_moex_curve_role"] = "FRONT" if rank == 1 else "NEXT"
-                curve["front" if rank == 1 else "next"] = item
-
-            if "front" in curve:
+                item.update({'_moex_family': family, '_moex_expiry': expiry.isoformat(), '_moex_curve_rank': rank, '_moex_curve_role': 'FRONT' if rank == 1 else 'NEXT'})
+                curve['front' if rank == 1 else 'next'] = item
+            if curve:
                 result[family] = curve
-
         return result
 
     def _request_marketdata_family(self, root):
-        root = str(root or "").strip().upper()
+        root = str(root or '').strip().upper()
         if not root:
             return None
-        rows = self._load_marketdata_all()
-        selected = self._working_marketdata_rows(rows).get(root)
-        if selected:
-            return selected
-        prefix = self.MOEX_PREFIX_BY_ROOT.get(root, root)
-        candidates = []
-        for row in rows:
-            secid = str(row.get("secid") or row.get("ticker") or "").upper()
-            if secid == prefix or secid.startswith(prefix + "-"):
-                if self._number(row.get("openposition")) > 0:
-                    candidates.append(row)
-        if not candidates:
-            return None
-        candidates.sort(key=lambda row: self._marketdata_expiry(row.get("secid") or row.get("ticker")))
-        return candidates[0]
+        return self._working_marketdata_rows(self._load_marketdata_all(), date.today()).get(root)
 
     @staticmethod
     def _number(value):

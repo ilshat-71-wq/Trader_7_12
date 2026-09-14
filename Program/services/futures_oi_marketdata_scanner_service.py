@@ -568,7 +568,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         if not front_contracts:
             resilient_rows, resilient_error = self._load_marketdata_all_resilient()
             if resilient_rows and hasattr(self.oi, "_front_marketdata_rows"):
-                front_contracts = self.oi._front_marketdata_rows(resilient_rows, as_of=as_of)
+                front_contracts = self.oi._working_marketdata_rows(resilient_rows, as_of=as_of)
                 marketdata_error = None
             elif resilient_error:
                 marketdata_error = resilient_error
@@ -815,10 +815,14 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "base_change_source_counts": base_change_source_counts,
             "oi_source": "MOEX_FUTURES_MARKETDATA_PRIMARY",
             "mapping": "BCS_CANONICAL_UNDERLYING + MOEX_RFUD_SECID_TO_FAMILY",
-            "selection_policy": "MOEX_RFUD_FRONT_NONEXPIRED_NONZERO_OI_PER_FAMILY",
+            "selection_policy": "MOEX_RFUD_EXACT_EXPIRY_D3_ROLLOVER_PER_FAMILY",
             "liquidity_policy": "CURRENT_DAY_TURNOVER_DESC_TOP_20; NO_SYNTHETIC_PRICE_X_VOLUME",
             "marketdata_source": "MOEX_ISS_FUTURES_MARKETDATA",
             "marketdata_error": marketdata_error,
+            "moex_expiry_source": "MOEX_FUTURES_CALENDAR_EXACT_ONLY",
+            "moex_rollover_rule": "D-3_CALENDAR_DAYS",
+            "moex_working_contracts": sum(1 for item in front_contracts.values() if item.get("_moex_working_contract")),
+            "moex_rollover_active": sum(1 for item in front_contracts.values() if item.get("_moex_rollover_active")),
         })
         self._last_diagnostics = diagnostics
         return selected, diagnostics
