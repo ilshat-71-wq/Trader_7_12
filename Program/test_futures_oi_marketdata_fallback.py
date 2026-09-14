@@ -20,7 +20,7 @@ class FakeHTTP:
         ]
         path_parts = [part for part in urlparse(url).path.split("/") if part]
         requested = path_parts[-1].removesuffix(".json").upper() if path_parts else ""
-        if requested:
+        if requested and requested != "SECURITIES":
             rows = [row for row in rows if row[0].upper() == requested]
 
         return {
