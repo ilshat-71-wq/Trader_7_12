@@ -1,4 +1,5 @@
 from datetime import date
+from urllib.parse import urlparse
 
 from services.open_interest_service import OpenInterestService
 
@@ -11,15 +12,22 @@ class FakeHTTP:
         self.urls.append(url)
         if "analyticalproducts/futoi" in url:
             return {"futoi": {"columns": ["ticker", "pos"], "data": []}}
+
+        rows = [
+            ["SBRF-12.26", 1000, 10, "2026-09-08"],
+            ["SBRF-9.26", 2000, -20, "2026-09-08"],
+            ["GAZR-9.26", 3000, 30, "2026-09-08"],
+        ]
+        path_parts = [part for part in urlparse(url).path.split("/") if part]
+        requested = path_parts[-1].removesuffix(".json").upper() if path_parts else ""
+        if requested:
+            rows = [row for row in rows if row[0].upper() == requested]
+
         return {
             "marketdata": {
                 "columns": ["SECID", "OPENPOSITION", "OICHANGE", "TRADEDATE"],
-                "data": [
-                    ["SBRF-12.26", 1000, 10, "2026-09-08"],
-                    ["SBRF-9.26", 2000, -20, "2026-09-08"],
-                    ["GAZR-9.26", 3000, 30, "2026-09-08"],
-                ],
-            }
+                "data": rows,
+            },
         }
 
 
