@@ -14,7 +14,7 @@ class FakeAPI:
         return [
             {"ticker": "AFLT-9.26", "underlyingAsset": "AFLT", "classCode": "SPBFUT"},
             {"ticker": "ALRS-9.26", "underlyingAsset": "ALRS", "classCode": "SPBFUT"},
-            {"ticker": "APPF", "underlyingAsset": "APPF", "classCode": "SPBFUT"},
+            {"ticker": "CHMF-9.26", "underlyingAsset": "CHMF", "classCode": "SPBFUT"},
         ]
 
     def get_instruments_by_tickers(self, tickers):
@@ -51,7 +51,7 @@ def test_active_contracts_group_by_oi_root_not_underlying_ticker():
     service = FuturesOIScannerService(api=FakeAPI(), oi_service=object())
     contracts = service._active_contracts()
     roots = {item["oi_root"] for item in contracts}
-    assert roots == {"AF", "AL", "APPF"}
+    assert roots == {"AF", "AL", "CH"}
     assert len(contracts) == 3
 
 
