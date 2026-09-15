@@ -111,3 +111,11 @@ def preferred_instruments(canonical_underlying: str):
     """Return preferred BCS ticker/classCode pairs for an underlying."""
     key = str(canonical_underlying or "").strip().upper()
     return BCS_UNDERLYING_INSTRUMENTS.get(key, ())
+
+
+# The market-data scanner imports this catalog before resolving its underlying
+# quotes. Install the locked futures-universe boundary at that point so
+# excluded products never reach OI/liquidity/FLOW processing.
+from services.futures_trading_universe_policy import install_guard
+
+install_guard()
