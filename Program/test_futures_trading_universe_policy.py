@@ -43,3 +43,8 @@ def test_unknown_new_product_does_not_enter_automatically():
 
 def test_non_dated_contract_is_rejected_even_for_allowed_root():
     assert not FuturesTradingUniversePolicy.is_allowed("SI", "SI", "USDRUB")
+
+
+def test_guard_is_installed_when_marketdata_scanner_loads():
+    from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
+    assert FuturesOIMarketDataScannerService._trading_universe_guard_installed is True
