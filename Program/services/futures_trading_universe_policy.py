@@ -14,7 +14,7 @@ import re
 
 
 class FuturesTradingUniversePolicy:
-    VERSION = "1.0.0"
+    VERSION = "1.0.1"
 
     SPECIAL_ROOTS = frozenset({"SI", "EU", "CR", "CNY", "BR", "CL", "NG", "GD", "GL"})
     FORBIDDEN_PERPETUAL_ROOTS = frozenset({"USDRUBF", "EURRUBF", "CNYRUBF", "GAZPF", "SBERF"})
@@ -39,8 +39,14 @@ class FuturesTradingUniversePolicy:
 
     @classmethod
     def _is_dated_contract(cls, ticker):
-        # MOEX dated futures have a month code plus year digit at the end.
-        return bool(re.match(r"^[A-Z0-9]+[FGHJKMNQUVXZ]\d$", str(ticker or "").upper().strip()))
+        value = str(ticker or "").upper().strip()
+        # MOEX/BCS can expose the same dated contract as compact RFUD form
+        # (SRU6) or broker display form (SBER-12.26 / Si-9.26).
+        if re.match(r"^[A-Z0-9]+[FGHJKMNQUVXZ]\d$", value):
+            return True
+        if re.match(r"^[A-Z0-9]+-[0-9]{1,2}\.\d{2}$", value):
+            return True
+        return False
 
     @classmethod
     def classify(cls, ticker, oi_root="", underlying_ticker=""):
