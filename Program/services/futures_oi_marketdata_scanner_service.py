@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.15"
+    VERSION = "2.7.16"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -792,21 +792,23 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             if normalized not in base_underlying_keys:
                 continue
 
-            if canonical in self._underlying_mapping_source:
-                source = self._underlying_mapping_source[canonical]
+            mapping_key = str(base_ticker).upper()
+
+            if mapping_key in self._underlying_mapping_source:
+                source = self._underlying_mapping_source[mapping_key]
                 if source == "BCS_SEMANTIC_METADATA":
-                    mapping_semantic.append(str(base_ticker).upper())
+                    mapping_semantic.append(mapping_key)
                 else:
-                    mapping_exact.append(str(base_ticker).upper())
+                    mapping_exact.append(mapping_key)
                 continue
 
             # BCS returned a BASE instrument but could not provide a usable
             # classCode: distinguish this from a genuine NOT_FOUND case.
-            bcs_ticker = self._underlying_bcs_tickers.get(canonical)
+            bcs_ticker = self._underlying_bcs_tickers.get(mapping_key)
             if bcs_ticker:
-                mapping_found_no_classcode.append(str(base_ticker).upper())
+                mapping_found_no_classcode.append(mapping_key)
             else:
-                mapping_not_found.append(str(base_ticker).upper())
+                mapping_not_found.append(mapping_key)
 
         diagnostics.update({
             "status": process_status,
