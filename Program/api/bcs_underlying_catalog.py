@@ -55,6 +55,32 @@ BCS_UNDERLYING_INSTRUMENTS = {
     "SPY": (
         {"ticker": "SPY", "classCode": "QMEBLCK"},
     ),
+
+    # The following MOEX stock underlyings were verified against the live BCS
+    # instrument catalog during the 2026-09-15 audit. Each exists in TQBR.
+    "AFKS": ({"ticker": "AFKS", "classCode": "TQBR"},),
+    "AFLT": ({"ticker": "AFLT", "classCode": "TQBR"},),
+    "ALRS": ({"ticker": "ALRS", "classCode": "TQBR"},),
+    "ASTR": ({"ticker": "ASTR", "classCode": "TQBR"},),
+    "BANE": ({"ticker": "BANE", "classCode": "TQBR"},),
+    "BSPB": ({"ticker": "BSPB", "classCode": "TQBR"},),
+    "CBOM": ({"ticker": "CBOM", "classCode": "TQBR"},),
+    "MAGN": ({"ticker": "MAGN", "classCode": "TQBR"},),
+    "MGNT": ({"ticker": "MGNT", "classCode": "TQBR"},),
+    "MOEX": ({"ticker": "MOEX", "classCode": "TQBR"},),
+    "MVID": ({"ticker": "MVID", "classCode": "TQBR"},),
+    "NLMK": ({"ticker": "NLMK", "classCode": "TQBR"},),
+    "OZON": ({"ticker": "OZON", "classCode": "TQBR"},),
+    "PHOR": ({"ticker": "PHOR", "classCode": "TQBR"},),
+    "POSI": ({"ticker": "POSI", "classCode": "TQBR"},),
+    "RAGR": ({"ticker": "RAGR", "classCode": "TQBR"},),
+    "RASP": ({"ticker": "RASP", "classCode": "TQBR"},),
+    "RNFT": ({"ticker": "RNFT", "classCode": "TQBR"},),
+    "ROSN": ({"ticker": "ROSN", "classCode": "TQBR"},),
+    "RTKM": ({"ticker": "RTKM", "classCode": "TQBR"},),
+    "WUSH": ({"ticker": "WUSH", "classCode": "TQBR"},),
+    "X5": ({"ticker": "X5", "classCode": "TQBR"},),
+    "YDEX": ({"ticker": "YDEX", "classCode": "TQBR"},),
 }
 
 
