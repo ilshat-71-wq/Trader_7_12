@@ -14,7 +14,7 @@ import re
 
 
 class FuturesTradingUniversePolicy:
-    VERSION = "1.0.1"
+    VERSION = "1.0.2"
 
     SPECIAL_ROOTS = frozenset({"SI", "EU", "CR", "CNY", "BR", "CL", "NG", "GD", "GL"})
     FORBIDDEN_PERPETUAL_ROOTS = frozenset({"USDRUBF", "EURRUBF", "CNYRUBF", "GAZPF", "SBERF"})
@@ -89,18 +89,32 @@ class FuturesTradingUniversePolicy:
                 reasons[reason] = reasons.get(reason, 0) + 1
         return allowed, reasons
 
+    @classmethod
+    def marketdata_underlying(cls, root):
+        """Resolve an RFUD family to its economic underlying for hard filtering."""
+        root = str(root or "").upper().strip()
+        if root in cls.SPECIAL_ROOTS:
+            return root
+        from services.futures_oi_scanner_service import FuturesOIScannerService
+        mapping = getattr(FuturesOIScannerService, "MOEX_SHORT_CODE_BY_UNDERLYING", {})
+        for underlying, family in mapping.items():
+            if str(family or "").upper() == root:
+                return str(underlying).upper()
+        return ""
+
 
 def install_guard():
-    """Install the locked universe at the existing scanner boundary."""
+    """Install the locked universe at both futures admission boundaries."""
     from services.futures_oi_scanner_service import FuturesOIScannerService
+    from services.open_interest_service import OpenInterestService
 
     if getattr(FuturesOIScannerService, "_trading_universe_guard_installed", False):
         return
 
-    original = FuturesOIScannerService._active_contracts
+    original_active_contracts = FuturesOIScannerService._active_contracts
 
     def guarded_active_contracts(self):
-        contracts = original(self)
+        contracts = original_active_contracts(self)
         allowed, reasons = FuturesTradingUniversePolicy.filter_contracts(contracts)
         diagnostics = dict(getattr(self, "_last_contract_diagnostics", {}))
         diagnostics["trading_universe_policy"] = FuturesTradingUniversePolicy.VERSION
@@ -114,5 +128,42 @@ def install_guard():
         self._last_contract_diagnostics = diagnostics
         return allowed
 
+    original_working_marketdata_rows = OpenInterestService._working_marketdata_rows
+
+    def guarded_working_marketdata_rows(self, rows, as_of=None):
+        candidates = list(rows or [])
+        allowed_rows = []
+        reasons = {}
+        for row in candidates:
+            if not isinstance(row, dict):
+                continue
+            secid = str(row.get("secid") or row.get("ticker") or "").strip().upper()
+            family = self._marketdata_family(secid)
+            underlying = FuturesTradingUniversePolicy.marketdata_underlying(family)
+            ok, reason = FuturesTradingUniversePolicy.classify(
+                secid,
+                family,
+                underlying,
+            )
+            if ok:
+                allowed_rows.append(row)
+            else:
+                reasons[reason] = reasons.get(reason, 0) + 1
+
+        selected = original_working_marketdata_rows(self, allowed_rows, as_of=as_of)
+        self._trading_universe_marketdata_diagnostics = {
+            "trading_universe_marketdata_policy": FuturesTradingUniversePolicy.VERSION,
+            "trading_universe_marketdata_candidates": len(candidates),
+            "trading_universe_marketdata_allowed": len(allowed_rows),
+            "trading_universe_marketdata_filtered": len(candidates) - len(allowed_rows),
+            "trading_universe_marketdata_filter_reasons": reasons,
+            "trading_universe_marketdata_scope": (
+                "RUSSIAN_STOCKS_USDRUB_EURRUB_CNYRUB_BRENT_CL_NG_GOLD_ONLY"
+            ),
+        }
+        return selected
+
     FuturesOIScannerService._active_contracts = guarded_active_contracts
     FuturesOIScannerService._trading_universe_guard_installed = True
+    OpenInterestService._working_marketdata_rows = guarded_working_marketdata_rows
+    OpenInterestService._trading_universe_marketdata_guard_installed = True
