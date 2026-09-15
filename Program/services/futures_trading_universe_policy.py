@@ -4,7 +4,7 @@ import re
 
 
 class FuturesTradingUniversePolicy:
-    VERSION = "1.0.4"
+    VERSION = "1.0.5"
     SPECIAL_ROOTS = frozenset({"SI", "EU", "CR", "CNY", "BR", "CL", "NG", "GD", "GL"})
     FORBIDDEN_PERPETUAL_ROOTS = frozenset({"USDRUBF", "EURRUBF", "CNYRUBF", "GAZPF", "SBERF"})
     RUSSIAN_STOCK_UNDERLYINGS = frozenset({
@@ -24,7 +24,10 @@ class FuturesTradingUniversePolicy:
     @classmethod
     def _is_dated_contract(cls, ticker):
         value = str(ticker or "").upper().strip()
-        return bool(re.match(r"^[A-Z0-9]+[FGHJKMNQUVXZ]\d$", value) or re.match(r"^[A-Z0-9]+-[0-9]{1,2}\.\d{2}$", value))
+        return bool(
+            re.match(r"^[A-Z0-9]+[FGHJKMNQUVXZ]\d$", value)
+            or re.match(r"^[A-Z0-9]+-[0-9]{1,2}\.\d{2}$", value)
+        )
 
     @classmethod
     def classify(cls, ticker, oi_root="", underlying_ticker=""):
@@ -44,10 +47,20 @@ class FuturesTradingUniversePolicy:
         return False, "OUTSIDE_LOCKED_TRADING_UNIVERSE"
 
     @classmethod
+    def is_allowed(cls, ticker, oi_root="", underlying_ticker=""):
+        """Compatibility/public predicate used by policy regression tests."""
+        allowed, _ = cls.classify(ticker, oi_root, underlying_ticker)
+        return allowed
+
+    @classmethod
     def filter_contracts(cls, contracts):
         allowed, reasons = [], {}
         for contract in contracts or []:
-            ok, reason = cls.classify(contract.get("futures_ticker") or contract.get("ticker"), contract.get("oi_root") or contract.get("futures_root"), contract.get("underlying_ticker") or contract.get("underlying_asset_source"))
+            ok, reason = cls.classify(
+                contract.get("futures_ticker") or contract.get("ticker"),
+                contract.get("oi_root") or contract.get("futures_root"),
+                contract.get("underlying_ticker") or contract.get("underlying_asset_source"),
+            )
             if ok:
                 allowed.append(contract)
             else:
@@ -61,6 +74,7 @@ def install_guard():
     if getattr(FuturesOIScannerService, "_trading_universe_guard_installed", False):
         return
     original = FuturesOIScannerService._active_contracts
+
     def guarded_active_contracts(self):
         contracts = original(self)
         allowed, reasons = FuturesTradingUniversePolicy.filter_contracts(contracts)
@@ -75,5 +89,6 @@ def install_guard():
         })
         self._last_contract_diagnostics = diagnostics
         return allowed
+
     FuturesOIScannerService._active_contracts = guarded_active_contracts
     FuturesOIScannerService._trading_universe_guard_installed = True
