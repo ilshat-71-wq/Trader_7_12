@@ -19,8 +19,6 @@ class FuturesTradingUniversePolicy:
     SPECIAL_ROOTS = frozenset({"SI", "EU", "CR", "CNY", "BR", "CL", "NG", "GD", "GL"})
     FORBIDDEN_PERPETUAL_ROOTS = frozenset({"USDRUBF", "EURRUBF", "CNYRUBF", "GAZPF", "SBERF"})
 
-    # Explicit Russian equity underlyings already represented by the project's
-    # MOEX/BCS mapping. Foreign equities/ETFs and indices are intentionally absent.
     RUSSIAN_STOCK_UNDERLYINGS = frozenset({
         "AFLT", "ALRS", "AFKS", "CHMF", "FEES", "GAZP", "GMKN", "HYDR",
         "LKOH", "MGNT", "MOEX", "NLMK", "NOTK", "ROSN", "RTKM", "SBER",
@@ -32,6 +30,28 @@ class FuturesTradingUniversePolicy:
         "ENPG", "T", "FIXR", "RAGR",
     })
 
+    # Authoritative RFUD family -> economic underlying aliases used at the
+    # marketdata boundary. Keep this explicit: foreign/index/rate/crypto roots
+    # must never become allowed merely because a broad catalog knows their name.
+    MARKETDATA_ROOT_UNDERLYINGS = {
+        "SBRF": "SBER", "SR": "SBER", "SP": "SBERP",
+        "GAZR": "GAZP", "GZ": "GAZP", "LK": "LKOH",
+        "AF": "AFLT", "AL": "ALRS", "AK": "AFKS", "CH": "CHMF",
+        "FS": "FEES", "GK": "GMKN", "HY": "HYDR", "MN": "MGNT",
+        "ME": "MOEX", "NM": "NLMK", "NK": "NOTK", "RN": "ROSN",
+        "RT": "RTKM", "SG": "SNGP", "SN": "SNGS", "TT": "TATN",
+        "TP": "TATP", "TN": "TRNF", "VB": "VTBR", "MG": "MAGN",
+        "PZ": "PLZL", "YD": "YDEX", "SS": "SMLT", "PS": "POSI",
+        "SE": "SPBE", "RL": "RUAL", "PH": "PHOR", "PI": "PIKK",
+        "PO": "POLY", "RE": "RSTI", "SO": "SIBN", "TI": "TCSI",
+        "VK": "VKCO", "WU": "WUSH", "MV": "MVID", "CM": "CBOM",
+        "SZ": "SGZH", "FL": "FLOT", "BS": "BSPB", "BN": "BANE",
+        "KM": "KMAZ", "AS": "ASTR", "S0": "SOFL", "SC": "SVCB",
+        "RA": "RASP", "FE": "FESH", "RU": "RNFT", "LE": "LEAS",
+        "X5": "X5", "ON": "OZON", "DR": "DOMRF", "IV": "IVAT",
+        "EA": "ENPG", "TB": "T", "FI": "FIXR", "RZ": "RAGR",
+    }
+
     @classmethod
     def _root(cls, ticker):
         value = str(ticker or "").upper().strip().split("-", 1)[0]
@@ -40,8 +60,6 @@ class FuturesTradingUniversePolicy:
     @classmethod
     def _is_dated_contract(cls, ticker):
         value = str(ticker or "").upper().strip()
-        # MOEX/BCS can expose the same dated contract as compact RFUD form
-        # (SRU6) or broker display form (SBER-12.26 / Si-9.26).
         if re.match(r"^[A-Z0-9]+[FGHJKMNQUVXZ]\d$", value):
             return True
         if re.match(r"^[A-Z0-9]+-[0-9]{1,2}\.\d{2}$", value):
@@ -53,7 +71,6 @@ class FuturesTradingUniversePolicy:
         ticker = str(ticker or "").upper().strip()
         root = str(oi_root or cls._root(ticker)).upper().strip()
         underlying = str(underlying_ticker or "").upper().strip()
-
         if not ticker:
             return False, "MISSING_TICKER"
         if root in cls.FORBIDDEN_PERPETUAL_ROOTS or ticker in cls.FORBIDDEN_PERPETUAL_ROOTS:
@@ -91,22 +108,36 @@ class FuturesTradingUniversePolicy:
 
     @classmethod
     def marketdata_underlying(cls, root):
-        """Resolve an RFUD family to its economic underlying for hard filtering."""
         root = str(root or "").upper().strip()
         if root in cls.SPECIAL_ROOTS:
             return root
-        from services.futures_oi_scanner_service import FuturesOIScannerService
-        mapping = getattr(FuturesOIScannerService, "MOEX_SHORT_CODE_BY_UNDERLYING", {})
-        for underlying, family in mapping.items():
-            if str(family or "").upper() == root:
-                return str(underlying).upper()
-        return ""
+        return cls.MARKETDATA_ROOT_UNDERLYINGS.get(root, "")
+
+    @classmethod
+    def filter_marketdata(cls, rows):
+        allowed = []
+        reasons = {}
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            secid = str(row.get("secid") or row.get("ticker") or "").strip().upper()
+            family = cls._root(secid)
+            underlying = cls.marketdata_underlying(family)
+            ok, reason = cls.classify(secid, family, underlying)
+            if ok:
+                allowed.append(row)
+            else:
+                reasons[reason] = reasons.get(reason, 0) + 1
+        return allowed, reasons
 
 
 def install_guard():
-    """Install the locked universe at both futures admission boundaries."""
+    """Install the locked universe only at the BCS futures admission boundary.
+
+    MOEX OpenInterestService remains independently testable and reusable. The
+    production marketdata scanner is the authoritative consumer boundary.
+    """
     from services.futures_oi_scanner_service import FuturesOIScannerService
-    from services.open_interest_service import OpenInterestService
 
     if getattr(FuturesOIScannerService, "_trading_universe_guard_installed", False):
         return
@@ -128,42 +159,5 @@ def install_guard():
         self._last_contract_diagnostics = diagnostics
         return allowed
 
-    original_working_marketdata_rows = OpenInterestService._working_marketdata_rows
-
-    def guarded_working_marketdata_rows(self, rows, as_of=None):
-        candidates = list(rows or [])
-        allowed_rows = []
-        reasons = {}
-        for row in candidates:
-            if not isinstance(row, dict):
-                continue
-            secid = str(row.get("secid") or row.get("ticker") or "").strip().upper()
-            family = self._marketdata_family(secid)
-            underlying = FuturesTradingUniversePolicy.marketdata_underlying(family)
-            ok, reason = FuturesTradingUniversePolicy.classify(
-                secid,
-                family,
-                underlying,
-            )
-            if ok:
-                allowed_rows.append(row)
-            else:
-                reasons[reason] = reasons.get(reason, 0) + 1
-
-        selected = original_working_marketdata_rows(self, allowed_rows, as_of=as_of)
-        self._trading_universe_marketdata_diagnostics = {
-            "trading_universe_marketdata_policy": FuturesTradingUniversePolicy.VERSION,
-            "trading_universe_marketdata_candidates": len(candidates),
-            "trading_universe_marketdata_allowed": len(allowed_rows),
-            "trading_universe_marketdata_filtered": len(candidates) - len(allowed_rows),
-            "trading_universe_marketdata_filter_reasons": reasons,
-            "trading_universe_marketdata_scope": (
-                "RUSSIAN_STOCKS_USDRUB_EURRUB_CNYRUB_BRENT_CL_NG_GOLD_ONLY"
-            ),
-        }
-        return selected
-
     FuturesOIScannerService._active_contracts = guarded_active_contracts
     FuturesOIScannerService._trading_universe_guard_installed = True
-    OpenInterestService._working_marketdata_rows = guarded_working_marketdata_rows
-    OpenInterestService._trading_universe_marketdata_guard_installed = True
