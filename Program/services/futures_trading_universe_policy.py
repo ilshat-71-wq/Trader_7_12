@@ -53,6 +53,12 @@ class FuturesTradingUniversePolicy:
         return allowed
 
     @classmethod
+    def reason(cls, ticker, oi_root="", underlying_ticker=""):
+        """Return the stable policy classification reason for a contract."""
+        _, reason = cls.classify(ticker, oi_root, underlying_ticker)
+        return reason
+
+    @classmethod
     def filter_contracts(cls, contracts):
         allowed, reasons = [], {}
         for contract in contracts or []:
