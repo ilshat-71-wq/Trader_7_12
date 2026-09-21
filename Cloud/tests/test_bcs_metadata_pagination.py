@@ -68,3 +68,26 @@ def test_get_instruments_cache_avoids_reloading_metadata(monkeypatch):
     assert len(first) == 1
     assert len(second) == 1
     assert calls == [0]
+
+
+def test_get_instruments_continues_when_server_returns_100_for_200_request(monkeypatch):
+    api = BCSAPI()
+    api._instrument_metadata_cache.clear()
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        page = kwargs["params"]["page"]
+        calls.append(page)
+        if page == 0:
+            return FakeResponse(200, _records(0, 100))
+        if page == 1:
+            return FakeResponse(200, _records(100, 100))
+        return FakeResponse(200, [])
+
+    monkeypatch.setattr("api.bcs_api.RequestHelper.get", fake_get)
+
+    records = api.get_instruments("FUTURES")
+
+    assert len(records) == 200
+    assert calls == [0, 1, 2]
