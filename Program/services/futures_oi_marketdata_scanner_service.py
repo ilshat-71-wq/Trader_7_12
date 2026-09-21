@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.20"
+    VERSION = "2.7.21"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -263,7 +263,44 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 base = self._base_asset_reference(record)
                 if base and base.get("ticker"):
                     resolved.setdefault(family, base)
-        return resolved, {"futures_base_metadata_requested": len(futures_tickers), "futures_base_metadata_resolved": len(resolved)}
+
+        # BCS's complete FUTURES directory is the authoritative fallback table
+        # when /instruments/by-tickers does not return a dated contract card.
+        # This is required for cases such as SIZ6, whose direct ticker lookup
+        # can be empty while the futures directory still contains the real
+        # contract and its base-asset security fields. Do not synthesize a
+        # mapping: accept only the actual BCS futures card.
+        unresolved_tickers = [
+            ticker for ticker in futures_tickers
+            if family_by_ticker.get(ticker) not in resolved
+        ]
+        if unresolved_tickers:
+            try:
+                directory_records = self.api.get_instruments("FUTURES")
+            except Exception as exc:
+                print("⚠️ Futures directory lookup failed:", type(exc).__name__)
+                directory_records = []
+            directory_by_ticker = {}
+            for record in directory_records if isinstance(directory_records, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                futures_ticker = self._text(record, "ticker", "secCode", "securityCode").upper()
+                if futures_ticker:
+                    directory_by_ticker.setdefault(futures_ticker, record)
+            for futures_ticker in unresolved_tickers:
+                record = directory_by_ticker.get(futures_ticker)
+                if not record:
+                    continue
+                family = family_by_ticker.get(futures_ticker)
+                base = self._base_asset_reference(record)
+                if family and base and base.get("ticker"):
+                    resolved.setdefault(family, base)
+
+        return resolved, {
+            "futures_base_metadata_requested": len(futures_tickers),
+            "futures_base_metadata_resolved": len(resolved),
+            "futures_base_metadata_directory_fallback": len(unresolved_tickers),
+        }
 
     def _underlying_quotes(self, contracts):
         """Resolve futures to a real BCS economic underlying and real quote only.
