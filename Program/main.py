@@ -210,7 +210,7 @@ class ScanVisualTraderWindow(ProfessionalTraderWindow):
 
 
 def main():
-    print("🚀 Запуск Trader_7_12 Pro — Market Information Radar")
+    print("🚀 Launching Trader_7_12 Pro — Market Information Radar")
 
     app = QApplication(sys.argv)
     app.setApplicationName("Trader_7_12 Pro")

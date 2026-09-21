@@ -21,18 +21,18 @@ from ui_table import MarketTableWidget, numeric
 
 
 ROLE_LABELS = {
-    "LONG_CANDIDATE": "ЛИДЕР",
-    "SHORT_CANDIDATE": "АУТСАЙДЕР",
-    "ATTENTION_WATCH": "НАБЛЮДЕНИЕ",
-    "MARKET_CONTEXT": "КОНТЕКСТ",
+    "LONG_CANDIDATE": "LEADER",
+    "SHORT_CANDIDATE": "LAGGARD",
+    "ATTENTION_WATCH": "WATCH",
+    "MARKET_CONTEXT": "CONTEXT",
 }
 SESSION_LABELS = {
-    "PRE_OPEN": "ПРЕ-ОТКРЫТИЕ",
-    "MORNING": "УТРЕННЯЯ СЕССИЯ",
-    "MAIN": "ОСНОВНАЯ СЕССИЯ",
-    "EVENING": "ВЕЧЕРНЯЯ СЕССИЯ",
-    "WEEKEND_SESSION": "ДСВД",
-    "CLOSED": "РЫНОК ЗАКРЫТ",
+    "PRE_OPEN": "PRE-OPEN",
+    "MORNING": "MORNING SESSION",
+    "MAIN": "MAIN SESSION",
+    "EVENING": "EVENING SESSION",
+    "WEEKEND_SESSION": "WEEKEND",
+    "CLOSED": "MARKET CLOSED",
 }
 SCAN_COLORS = ("#9fba5d", "#b7d96b", "#d0e58a", "#b7d96b")
 NEUTRAL_COLOR = "#c9d0d6"
@@ -253,12 +253,12 @@ class TraderWindow(QWidget):
 
         if self.scanner_enabled:
             self.result_box.setPlainText(
-                "БКС ПОДКЛЮЧЁН • Готово к сканированию. "
-                "Выберите MARKET RADAR и нажмите «СКАНИРОВАТЬ». "
-                "Заголовки колонок поддерживают сортировку."
+                "BCS CONNECTED • Ready to scan. "
+                "Select MARKET RADAR and press SCAN MARKET. "
+                "Column headers support sorting."
             )
         else:
-            self.result_box.setPlainText("РЕЖИМ ПРОСМОТРА • БКС временно недоступен.")
+            self.result_box.setPlainText("VIEW-ONLY MODE • BCS temporarily unavailable.")
 
     def _build_header(self):
         self.top_bar = QFrame()
@@ -287,17 +287,17 @@ class TraderWindow(QWidget):
         top.addWidget(self.session_status)
         top.addWidget(self.coverage_status)
 
-        self.scan_button = QPushButton("●  СКАНИРОВАТЬ")
+        self.scan_button = QPushButton("●  SCAN MARKET")
         self.scan_button.setObjectName("primaryAction")
         self.scan_button.clicked.connect(self.run_market_scan)
         self._set_scan_button_style()
         top.addWidget(self.scan_button)
 
-        self.copy_button = QPushButton("КОПИРОВАТЬ")
+        self.copy_button = QPushButton("COPY")
         self.copy_button.setObjectName("secondaryAction")
         self.copy_button.clicked.connect(self.copy_active_table)
         self.copy_button.setToolTip(
-            "⌘C / Ctrl+C — выбранные строки; без выделения — вся таблица"
+            "⌘C / Ctrl+C — selected rows; without selection — entire table"
         )
         top.addWidget(self.copy_button)
 
@@ -344,13 +344,13 @@ class TraderWindow(QWidget):
         self.diagnostics_box.setReadOnly(True)
         self.diagnostics_box.setFont(QFont("Menlo", 11))
         self.diagnostics_box.setPlainText(
-            "После сканирования здесь будет технический статус источников данных, "
-            "coverage, пропуски и причины исключения инструментов.\n\n"
-            "Правило проекта: отсутствие данных показывается как отсутствие данных; "
-            "синтетические значения не используются."
+            "After scanning, technical data-source status will appear here, "
+            "coverage, skips, and exclusion reasons.\n\n"
+            "Project rule: missing data is shown as missing data; "
+            "synthetic values are never used."
         )
 
-        self.copy_diagnostics_button = QPushButton("КОПИРОВАТЬ ДИАГНОСТИКУ")
+        self.copy_diagnostics_button = QPushButton("COPY DIAGNOSTICS")
         self.copy_diagnostics_button.clicked.connect(
             lambda: QApplication.clipboard().setText(self.diagnostics_box.toPlainText())
         )
@@ -368,20 +368,20 @@ class TraderWindow(QWidget):
     def _update_session_header(self):
         info = self.session_service.get_session_info()
         session = info.get("session", "CLOSED")
-        state = "ОТКРЫТ" if info.get("market_open") else "ЗАКРЫТ"
+        state = "OPEN" if info.get("market_open") else "CLOSED"
         self.session_status.value_label.setText(
             f"{state} • {info.get('time', '—')}"
         )
         if self._last_diagnostics is None:
             self.result_box.setPlainText(
                 f"{SESSION_LABELS.get(session, session)} • "
-                f"{info.get('date', '—')} • МСК {info.get('time', '—')} • "
-                f"РЫНОК {state}"
+                f"{info.get('date', '—')} • MSK {info.get('time', '—')} • "
+                f"MARKET {state}"
             )
 
     def _animate_scan(self):
         self.animation_step = (self.animation_step + 1) % len(SCAN_COLORS)
-        self.scan_button.setText("●  АНАЛИЗ D1 + M5 + RS")
+        self.scan_button.setText("●  ANALYZING D1 + M5 + RS")
         self._set_scan_button_style(SCAN_COLORS[self.animation_step])
 
     def _start_scan_animation(self):
@@ -393,7 +393,7 @@ class TraderWindow(QWidget):
     def _stop_scan_animation(self):
         self.scan_animation_timer.stop()
         self.scan_visual.stop()
-        self.scan_button.setText("●  СКАНИРОВАТЬ")
+        self.scan_button.setText("●  SCAN MARKET")
         self._set_scan_button_style()
         self.result_stack.setCurrentWidget(self.result_panel)
 
@@ -401,7 +401,7 @@ class TraderWindow(QWidget):
     def _skip_summary(diagnostics):
         reasons = diagnostics.get("skip_reasons") or {}
         if not reasons:
-            return "нет"
+            return "none"
         labels = {
             "INSUFFICIENT_M5": "M5",
             "LOW_LIQUIDITY": "LOW LIQUIDITY",
@@ -419,16 +419,16 @@ class TraderWindow(QWidget):
         coverage = diagnostics.get("coverage_percent")
         if regime == "NEUTRAL":
             return (
-                "РЫНОК NEUTRAL — строгий Long/Short по контракту не формируется; "
-                "ниже показан объективный контекст рынка."
+                "MARKET NEUTRAL — no strict Long/Short setup is generated; "
+                "the objective market context is shown below."
             )
         if coverage is not None and float(coverage) < 80.0:
-            return "Недостаточное M5-покрытие для строгой directional-оценки."
+            return "Insufficient M5 coverage for a strict directional assessment."
         if diagnostics.get("daily_profiles_qualified", 0) == 0:
-            return "Нет достаточного D1 quality для строгих кандидатов."
+            return "Insufficient D1 quality for strict candidates."
         if diagnostics.get("liquidity_passed", 0) == 0:
-            return "Нет инструментов, прошедших оба абсолютных liquidity-gate."
-        return "Нет инструмента, одновременно прошедшего все strict-gates."
+            return "No instruments passed both absolute liquidity gates."
+        return "No instrument passed all strict gates."
 
     @staticmethod
     def _apply_relative_strength_tint(table, row_index, relative_strength):
@@ -484,13 +484,13 @@ class TraderWindow(QWidget):
 
         info = self.session_service.get_session_info()
         session_name = SESSION_LABELS.get(
-            info.get("session", "CLOSED"), "РЫНОК"
+            info.get("session", "CLOSED"), "MARKET"
         )
         benchmark = str(diagnostics.get("benchmark") or "—")
 
         line1 = (
             f"{session_name} • {info.get('date', '—')} • "
-            f"МСК {info.get('time', '—')} • INTRADAY 07:00→NOW"
+            f"MSK {info.get('time', '—')} • INTRADAY 07:00→NOW"
         )
         line2 = (
             f"{diagnostics.get('status') or '—'} • {benchmark} • "
@@ -513,10 +513,10 @@ class TraderWindow(QWidget):
         for idx, item in enumerate(results or [], 1):
             role = ROLE_LABELS.get(
                 str(item.get("selection_role") or "").upper(),
-                "КОНТЕКСТ",
+                "CONTEXT",
             )
             if item.get("qualification_status") == "WATCH_ONLY":
-                role = "НАБЛЮДЕНИЕ"
+                role = "WATCH"
 
             rs = item.get("relative_strength")
             rs_values.append(rs)
@@ -561,9 +561,9 @@ class TraderWindow(QWidget):
                     cell.setForeground(signal_color)
 
         self.result_table.setToolTip(
-            "Зелёный оттенок — инструмент сильнее IMOEX2; красный — слабее IMOEX2. "
-            "DAY ₽ — накопленный денежный оборот с 07:00 МСК. "
-            "⌘C / Ctrl+C — копирование."
+            "Green tint — instrument stronger than IMOEX2; red — weaker than IMOEX2. "
+            "DAY ₽ — accumulated monetary turnover since 07:00 MSK. "
+            "⌘C / Ctrl+C — copy."
         )
         self.result_table.setVisible(bool(rows))
         self.coverage_status.value_label.setText(
@@ -580,7 +580,7 @@ class TraderWindow(QWidget):
                         line2,
                         line3,
                         self._empty_reason(diagnostics),
-                        f"ПРОПУСКИ: {self._skip_summary(diagnostics)}",
+                        f"SKIPS: {self._skip_summary(diagnostics)}",
                     )
                 )
             )
@@ -591,7 +591,7 @@ class TraderWindow(QWidget):
     @staticmethod
     def _format_diagnostics(diagnostics):
         if not diagnostics:
-            return "Диагностика отсутствует."
+            return "No diagnostics available."
         lines = ["=== SPOT / MARKET RADAR ==="]
         lines.extend(f"{key}: {value}" for key, value in diagnostics.items())
         return "\n".join(lines)
@@ -606,7 +606,7 @@ class TraderWindow(QWidget):
         self.scan_button.setEnabled(True)
         self._stop_scan_animation()
         self.result_table.hide()
-        self.result_box.setPlainText(f"ОШИБКА СКАНИРОВАНИЯ\n\n{error}")
+        self.result_box.setPlainText(f"SCAN ERROR\n\n{error}")
         self.diagnostics_box.setPlainText(f"SPOT SCAN ERROR\n\n{error}")
 
     def _scan_thread_finished(self):

@@ -59,9 +59,9 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.market_tabs.addTab(self.oi_panel, "FUTURES OI")
         self.market_tabs.tabBar().moveTab(2, 1)
         self.oi_meta.setText(
-            "После сканирования появятся front-контракты с реальным OI/VALTODAY "
-            "и анализом реального денежного потока BCS."
-            if scanner_enabled else "BCS временно недоступен."
+            "After scanning, front contracts with real OI/VALTODAY "
+            "and real BCS money-flow analysis will appear here."
+            if scanner_enabled else "BCS temporarily unavailable."
         )
         self.oi_table.hide()
 
@@ -81,12 +81,12 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         hint = QLabel(
-            "🟢 LIQ NOW = где сейчас больше всего денег • "
-            "FLOW = кто активнее • ACTION = что вероятно происходит • ZONE = где"
+            "🟢 LIQ NOW = where current money activity is highest • "
+            "FLOW = 30m money flow • ACTION = price + OI structure • ZONE = VWAP / flow"
         )
         hint.setStyleSheet("color:#7f8a94;font-size:10px;padding-left:3px;")
         toolbar.addWidget(hint, 1)
-        self.oi_copy_button = QPushButton("КОПИРОВАТЬ")
+        self.oi_copy_button = QPushButton("COPY")
         self.oi_copy_button.clicked.connect(self.copy_oi_table)
         toolbar.addWidget(self.oi_copy_button)
         layout.addLayout(toolbar)
@@ -106,7 +106,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _start_oi_scan(self):
         if self.oi_thread is not None and self.oi_thread.isRunning():
             return
-        self.oi_meta.setText("ЗАГРУЗКА • OI + VALTODAY • деньги 5/30 мин • стакан…")
+        self.oi_meta.setText("LOADING • OI + VALTODAY • 5/30m money flow • order book…")
         self.oi_table.hide()
         self.oi_thread = QThread(self)
         self.oi_worker = FuturesOIWorker(FuturesOIMarketDataScannerService())
@@ -137,9 +137,9 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _money(value):
         try:
             value = float(value)
-            if value >= 1_000_000_000: return f"{value / 1_000_000_000:.2f} млрд"
-            if value >= 1_000_000: return f"{value / 1_000_000:.2f} млн"
-            if value >= 1_000: return f"{value / 1_000:.1f} тыс"
+            if value >= 1_000_000_000: return f"{value / 1_000_000_000:.2f}B"
+            if value >= 1_000_000: return f"{value / 1_000_000:.2f}M"
+            if value >= 1_000: return f"{value / 1_000:.1f}K"
             return f"{value:.0f}"
         except (TypeError, ValueError):
             return "—"
@@ -246,8 +246,8 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"FUTURES OI • {diagnostics.get('status') or '—'} • "
             f"{diagnostics.get('oi_available', 0)} OI • "
             f"{diagnostics.get('money_flow_hot_liquidity', 0)} HOT\n"
-            f"🟢 LIQ NOW = реальный поток за 5 мин • FLOW = 30 мин + стакан • "
-            f"ACTION = цена + ΔOI • ZONE = поток / VWAP"
+            f"🟢 LIQ NOW = real 5m trade flow • FLOW = 30m flow + order book • "
+            f"ACTION = price + ΔOI • ZONE = flow / VWAP"
         )
         rows = []
         prepared_results = []
@@ -305,14 +305,14 @@ class OIWatchlistTraderWindow(TraderWindow):
                 if cell:
                     cell.setForeground(brush)
         self.oi_table.setToolTip(
-            "LIQ NOW — где сейчас максимальная реальная денежная активность по сделкам BCS за 5 минут. "
-            "FLOW — наблюдаемое направление потока за 30 минут с учётом текущего стакана. "
-            "ACTION — вероятная структура позиции по цене и ΔOI; конкретный участник не идентифицируется. "
-            "ZONE — диапазон доминирующего потока / VWAP. DAY ₽ = реальный VALTODAY."
+            "LIQ NOW — highest real BCS trade activity over the last 5 minutes. "
+            "FLOW — observed 30-minute money flow with the current order book. "
+            "ACTION — inferred position structure from price and ΔOI; no specific participant is identified. "
+            "ZONE — dominant flow / VWAP range. DAY ₽ = actual VALTODAY."
         )
         self.oi_table.setVisible(bool(rows))
         if not rows:
-            self.oi_meta.setText(self.oi_meta.text() + "\nНет доступных данных.")
+            self.oi_meta.setText(self.oi_meta.text() + "\nNo data available.")
         self._append_oi_diagnostics()
 
     def _append_oi_diagnostics(self):
@@ -329,7 +329,7 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _oi_failed(self, error):
         self.oi_table.hide()
         self._oi_diagnostics = {"error": error}
-        self.oi_meta.setText(f"FUTURES OI\n\nОшибка OI-аналитики: {error}")
+        self.oi_meta.setText(f"FUTURES OI\n\nFutures OI analysis error: {error}")
         self._append_oi_diagnostics()
 
     def _oi_thread_finished(self):

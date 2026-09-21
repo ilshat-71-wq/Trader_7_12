@@ -112,7 +112,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
             self.market_tabs.setTabText(0, "RADAR")
             self.market_tabs.setTabText(1, "FUTURES OI")
             self.market_tabs.setTabText(2, "DIAGNOSTICS")
-        self.market_tabs.setToolTip("Рынок → Futures OI → техническая диагностика → настройки")
+        self.market_tabs.setToolTip("Market → Futures OI → diagnostics → settings")
 
     def _build_settings_tab(self):
         panel = QWidget()
@@ -120,10 +120,10 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("НАСТРОЙКИ ПРИЛОЖЕНИЯ")
+        title = QLabel("APP SETTINGS")
         title.setStyleSheet("font-size:16px;font-weight:800;color:#e8ecef;")
         subtitle = QLabel(
-            "Настройки влияют только на интерфейс и уведомления. Рыночные расчёты не изменяются."
+            "Settings affect only the interface and notifications. Market calculations are unchanged."
         )
         subtitle.setStyleSheet("font-size:11px;color:#7f8a94;")
         layout.addWidget(title)
@@ -137,18 +137,18 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 10, 12, 10)
 
-        self.sound_checkbox = QCheckBox("Звуковая мелодия во время сканирования")
+        self.sound_checkbox = QCheckBox("Scan sound")
         self.sound_checkbox.setChecked(self.sound_enabled)
         self.sound_checkbox.toggled.connect(self._set_sound_enabled)
         card_layout.addWidget(self.sound_checkbox)
 
-        self.finish_sound_checkbox = QCheckBox("Звук успешного завершения сканирования")
+        self.finish_sound_checkbox = QCheckBox("Completion sound")
         self.finish_sound_checkbox.setChecked(self.sound_on_finish)
         self.finish_sound_checkbox.toggled.connect(self._set_finish_sound_enabled)
         card_layout.addWidget(self.finish_sound_checkbox)
 
         test_row = QHBoxLayout()
-        test_button = QPushButton("ПРОВЕРИТЬ МЕЛОДИЮ")
+        test_button = QPushButton("TEST SOUND")
         test_button.clicked.connect(self.sound.play)
         test_row.addWidget(test_button)
         test_row.addStretch(1)
@@ -156,9 +156,9 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         layout.addWidget(card)
 
         help_text = QLabel(
-            "⌘C / Ctrl+C — копирование выбранных строк таблицы.\n"
-            "Контекстное меню таблиц — копировать выбранное / всю таблицу / без заголовков.\n"
-            "Сортировка — кликом по заголовку. Изменение ширины колонок сохраняется в текущем сеансе."
+            "⌘C / Ctrl+C — copy selected table rows.\n"
+            "Table context menu — copy selection / entire table / without headers.\n"
+            "Sort by clicking a header. Column widths are preserved for the current session."
         )
         help_text.setStyleSheet("font-size:11px;color:#aab3bb;line-height:1.4;")
         help_text.setWordWrap(True)
