@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.17"
+    VERSION = "2.7.18"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -478,7 +478,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             result = (None, f"CANDLE_ERROR:{type(exc).__name__}")
             self._underlying_day_change_cache[ticker] = result
             return result
-        rows = bars.get("candles", bars.get("bars", [])) if isinstance(bars, dict) else bars
+        rows = (
+            bars.get("candles", bars.get("bars", bars.get("records", [])))
+            if isinstance(bars, dict)
+            else bars
+        )
         valid = []
         for row in rows if isinstance(rows, list) else []:
             dt = self._candle_datetime(row)
