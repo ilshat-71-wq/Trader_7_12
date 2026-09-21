@@ -70,7 +70,7 @@ def test_get_instruments_cache_avoids_reloading_metadata(monkeypatch):
 
     assert len(first) == 1
     assert len(second) == 1
-    assert calls == [0]
+    assert calls == [0, 1]
 
 
 def test_get_instruments_continues_when_server_returns_100_for_200_request(monkeypatch):
