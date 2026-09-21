@@ -223,6 +223,10 @@ class BCSAPI:
         for ticker in requested:
             key = self._instrument_lookup_key(ticker)
             if key:
+                # Canonicalize real BCS spelling variants before fallback.
+                # Example: USDRUB_TOM -> USDRUB. This lets the live
+                # by-type directory match a currency record even when the
+                # initial by-tickers lookup returned an incomplete card.
                 unresolved.add(key)
         for record in existing:
             if not isinstance(record, dict):
