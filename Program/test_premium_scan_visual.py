@@ -36,3 +36,20 @@ def test_legacy_three_dial_animation_is_not_selected_by_main():
     assert "_draw_clock(p, w * .27" not in main_source
     assert "_draw_clock(p, w * .52" not in main_source
     assert "_draw_clock(p, w * .76" not in main_source
+
+
+def test_premium_scan_visual_uses_current_market_session_windows():
+    visual_source = (Path(__file__).resolve().parent / "premium_scan_visual.py").read_text(encoding="utf-8")
+
+    assert "session=(6, 50, 23, 50)" in visual_source
+    assert "session=(8, 0, 16, 30)" in visual_source
+    assert "session=(9, 30, 16, 0)" in visual_source
+    assert "start_angle = (start_minutes % (12 * 60)) * 0.5 - 90.0" in visual_source
+
+
+def test_settings_tab_is_not_covered_by_scan_visual():
+    main_source = (Path(__file__).resolve().parent / "main.py").read_text(encoding="utf-8")
+
+    assert "self.market_tabs.currentChanged.connect(self._sync_global_scan_visual)" in main_source
+    assert 'return self.market_tabs.tabText(self.market_tabs.currentIndex()).upper() == "SETTINGS"' in main_source
+    assert "if self._global_scan_active and not self._settings_tab_active()" in main_source
