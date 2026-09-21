@@ -143,6 +143,8 @@ class ScanVisualTraderWindow(ProfessionalTraderWindow):
         super().__init__(scanner_enabled=scanner_enabled)
         self.global_scan_visual = PremiumScanVisual(self.market_tabs)
         self.global_scan_visual.hide()
+        self._global_scan_active = False
+        self.market_tabs.currentChanged.connect(self._sync_global_scan_visual)
         self._position_global_scan_visual()
 
     def _position_global_scan_visual(self):
@@ -158,7 +160,19 @@ class ScanVisualTraderWindow(ProfessionalTraderWindow):
         super().resizeEvent(event)
         self._position_global_scan_visual()
 
+    def _settings_tab_active(self):
+        return self.market_tabs.tabText(self.market_tabs.currentIndex()).upper() == "SETTINGS"
+
+    def _sync_global_scan_visual(self, _index=None):
+        if self._global_scan_active and not self._settings_tab_active():
+            self._show_global_scan_visual()
+        else:
+            self._hide_global_scan_visual()
+
     def _show_global_scan_visual(self):
+        if self._settings_tab_active():
+            self._hide_global_scan_visual()
+            return
         self._position_global_scan_visual()
         self.global_scan_visual.show()
         self.global_scan_visual.raise_()
@@ -171,21 +185,26 @@ class ScanVisualTraderWindow(ProfessionalTraderWindow):
     def _start_scan_animation(self):
         super()._start_scan_animation()
         self.result_stack.setCurrentWidget(self.result_panel)
-        self._show_global_scan_visual()
+        self._global_scan_active = True
+        self._sync_global_scan_visual()
 
     def _stop_scan_animation(self):
         super()._stop_scan_animation()
+        self._global_scan_active = False
         self._hide_global_scan_visual()
 
     def _start_oi_scan(self):
-        self._show_global_scan_visual()
+        self._global_scan_active = True
+        self._sync_global_scan_visual()
         super()._start_oi_scan()
 
     def _oi_finished(self, results, diagnostics):
+        self._global_scan_active = False
         self._hide_global_scan_visual()
         super()._oi_finished(results, diagnostics)
 
     def _oi_failed(self, error):
+        self._global_scan_active = False
         self._hide_global_scan_visual()
         super()._oi_failed(error)
 
