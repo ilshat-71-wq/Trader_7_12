@@ -235,7 +235,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
         for start in range(0, len(futures_tickers), self.ENRICH_BATCH_SIZE):
             batch = futures_tickers[start:start + self.ENRICH_BATCH_SIZE]
             try:
-                records = self.api.get_instruments_by_tickers(batch)
+                records = self.api.get_instruments_by_tickers(batch, resolve_underlying=False)
             except Exception as exc:
                 print("⚠️ Futures base-asset metadata lookup failed:", type(exc).__name__)
                 continue
