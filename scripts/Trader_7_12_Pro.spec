@@ -78,5 +78,6 @@ app = BUNDLE(
         "CFBundleVersion": APP_VERSION,
         "CFBundleSourceCommit": BUILD_COMMIT,
         "LSMinimumSystemVersion": "12.0",
+        "NSHumanReadableCopyright": "Copyright © 2026 Trader_7_12",
     },
 )
