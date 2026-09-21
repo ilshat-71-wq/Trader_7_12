@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.19"
+    VERSION = "2.7.20"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -214,6 +214,18 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             class_code = str(value.get("classCode") or value.get("class_code") or value.get("classcode") or value.get("baseAssetClassCode") or value.get("base_asset_class_code") or "").strip()
             if ticker:
                 return {"ticker": ticker, "classCode": class_code, "source": field}
+        # BCS futures cards can expose the authoritative BASE/SPOT reference
+        # as flat security fields even when baseAsset is only a display name.
+        # Example verified 2026-09-21:
+        # NGU6/NGZ6 -> FEG / NGas1026.
+        security_ticker = str(record.get("baseAssetSecuritySecCode") or "").strip().upper()
+        security_class = str(record.get("baseAssetSecurityClassCode") or "").strip()
+        if security_ticker and security_class:
+            return {
+                "ticker": security_ticker,
+                "classCode": security_class,
+                "source": "futures_card_base_asset_security",
+            }
         ticker = str(record.get("baseAssetTicker") or record.get("base_asset_ticker") or record.get("baseTicker") or record.get("base_ticker") or record.get("underlyingTicker") or record.get("underlying_ticker") or "").strip().upper()
         class_code = str(record.get("baseAssetClassCode") or record.get("base_asset_class_code") or record.get("underlyingClassCode") or record.get("underlying_class_code") or "").strip()
         if ticker:
