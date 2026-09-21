@@ -8,7 +8,7 @@ Already implemented in `Program/config.py`.
 
 Development builds keep the legacy token path. When a QApplication exists, the app uses Qt's `QStandardPaths.AppDataLocation`, which is appropriate for application data inside the sandbox container.
 
-Apple requires App Sandbox for Mac App Store distribution and gives the sandboxed app full read/write access to its own container. citeturn4search0turn4search10
+Apple requires App Sandbox for Mac App Store distribution and gives the sandboxed app full read/write access to its own container.
 
 No token is committed to Git.
 
@@ -40,7 +40,7 @@ or, if the installed universal2 Python/PyInstaller environment supports it:
 ```export TRADER_TARGET_ARCH=universal2
 ```
 
-PyInstaller supports real macOS signing identities and an entitlements file during collection. citeturn3search0
+PyInstaller supports real macOS signing identities and an entitlements file during collection.
 
 The script:
 - runs tests;
@@ -51,7 +51,7 @@ The script:
 - signs the outer app;
 - verifies recursively with `codesign --verify --deep --strict`.
 
-Apple documents `Contents/embedded.provisionprofile` for macOS provisioning profiles and requires re-signing after the profile is embedded. citeturn6search0turn6search1
+Apple documents `Contents/embedded.provisionprofile` for macOS provisioning profiles and requires re-signing after the profile is embedded.
 
 ## 3. Distribution signing
 
@@ -60,7 +60,7 @@ The account holder must create/select:
 - Mac App Store Connect distribution profile;
 - distribution certificate.
 
-Apple's current workflow allows the account holder to create a Mac App Store Connect provisioning profile tied to the explicit App ID and distribution certificate. citeturn6search3
+Apple's current workflow allows the account holder to create a Mac App Store Connect provisioning profile tied to the explicit App ID and distribution certificate.
 
 Do not send private keys or certificates to the project owner.
 
@@ -74,7 +74,7 @@ codesign -d --entitlements :- "dist/Trader_7_12 Pro.app"
 codesign --verify --deep --strict --verbose=2 "dist/Trader_7_12 Pro.app"
 ```
 
-Apple recommends signing nested code from the inside out and specifically advises against using `codesign --deep` for the signing operation; `--deep` is appropriate for recursive verification. citeturn5search0
+Apple recommends signing nested code from the inside out and specifically advises against using `codesign --deep` for the signing operation; `--deep` is appropriate for recursive verification.
 
 ## 4. Clean Mac test
 
@@ -91,7 +91,7 @@ Before TestFlight:
 - verify the token is stored under the app's sandbox application-data location;
 - inspect Console for sandbox denials.
 
-Apple documents Activity Monitor and `codesign -dvvv --entitlements -` as ways to verify App Sandbox. citeturn4search7
+Apple documents Activity Monitor and `codesign -dvvv --entitlements -` as ways to verify App Sandbox.
 
 ## 5. TestFlight
 
@@ -102,7 +102,7 @@ Create the App Store Connect app record using:
 
 Upload the Store candidate through the supported Apple workflow.
 
-TestFlight builds must have the appropriate provisioning profile. Apple's current provisioning-profile documentation states that TestFlight requires a profile even on macOS. citeturn6search0
+TestFlight builds must have the appropriate provisioning profile. Apple's current provisioning-profile documentation states that TestFlight requires a profile even on macOS.
 
 Test on a clean Mac with no development files or credentials.
 
@@ -130,13 +130,13 @@ Before submission, complete:
 - pricing and availability;
 - EU DSA trader information where applicable.
 
-Apple requires a privacy policy URL for macOS apps. citeturn0search7turn0search8
+Apple requires a privacy policy URL for macOS apps.
 
-Mac screenshots must use Apple's accepted Mac sizes; current App Store Connect documentation lists 1280×800, 1440×900, 2560×1600, or 2880×1800 at 16:10. One to ten screenshots can be uploaded. citeturn0search5turn0search6
+Mac screenshots must use Apple's accepted Mac sizes; current App Store Connect documentation lists 1280×800, 1440×900, 2560×1600, or 2880×1800 at 16:10. One to ten screenshots can be uploaded.
 
 ### Critical financial-app gate
 
-Apple's current App Review Guidelines say apps used for financial trading, investing, or money management should be submitted by the financial institution performing the service and have the necessary licensing and permissions. Apple also says apps facilitating derivatives/FOREX/CFD trading must be properly licensed where available. citeturn1search0
+Apple's current App Review Guidelines say apps used for financial trading, investing, or money management should be submitted by the financial institution performing the service and have the necessary licensing and permissions. Apple also says apps facilitating derivatives/FOREX/CFD trading must be properly licensed where available.
 
 Trader_7_12 Pro is read-only and does not execute orders, but it does present trading-oriented futures intelligence and Long/Short analytical signals. The submitting legal entity must therefore resolve this eligibility question with Apple before submission.
 
