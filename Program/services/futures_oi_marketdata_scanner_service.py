@@ -357,7 +357,20 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             accepted = None
             accepted_kind = "EXACT"
 
+            # If the selected futures card itself carries the authoritative
+            # BCS base-asset ticker/classCode, accept that reference directly.
+            # This is especially important for commodity underlyings that BCS
+            # exposes only through the futures card (for example Natural Gas).
+            futures_base = entry.get("futuresBaseAsset") or {}
+            futures_base_ticker = str(futures_base.get("ticker") or "").strip().upper()
+            futures_base_class = str(futures_base.get("classCode") or "").strip()
+            if futures_base_ticker and futures_base_class:
+                accepted = (futures_base_ticker, futures_base, futures_base_class)
+                accepted_kind = "FUTURES_BASE_METADATA"
+
             for candidate in entry["candidates"]:
+                if accepted:
+                    break
                 wanted_ticker = str(candidate.get("ticker") or "").strip().upper()
                 wanted_class = str(candidate.get("classCode") or "").strip().upper()
                 matches = records_by_ticker.get(
@@ -411,12 +424,16 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             entry["classCode"] = class_code
             entry["bcsTicker"] = actual_ticker
             entry["mappingSource"] = (
-                "BCS_SEMANTIC_METADATA"
-                if accepted_kind == "SEMANTIC"
+                "BCS_FUTURES_BASE_ASSET_METADATA"
+                if accepted_kind == "FUTURES_BASE_METADATA"
                 else (
-                    "BCS_EXACT_CATALOG"
-                    if preferred_instruments(canonical)
-                    else "BCS_EXACT_LOOKUP"
+                    "BCS_SEMANTIC_METADATA"
+                    if accepted_kind == "SEMANTIC"
+                    else (
+                        "BCS_EXACT_CATALOG"
+                        if preferred_instruments(canonical)
+                        else "BCS_EXACT_LOOKUP"
+                    )
                 )
             )
             exact_matches += 1
