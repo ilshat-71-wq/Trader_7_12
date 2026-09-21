@@ -54,3 +54,11 @@ def test_lookup_key_handles_real_currency_ticker_variants():
     assert BCSAPI._instrument_lookup_key("USDRUB_TOM") == "USDRUB"
     assert BCSAPI._instrument_lookup_key("USD/RUB") == "USDRUB"
     assert BCSAPI._instrument_lookup_key("USDRUBF") == "USDRUB"
+
+
+def test_fallback_canonicalizes_requested_currency_alias_before_directory_match():
+    api = FakeBCS()
+    records, diagnostics = api._underlying_metadata_fallback(["USDRUB_TOM"], [])
+    resolved = {record["ticker"]: record.get("classCode") for record in records if isinstance(record, dict) and record.get("classCode")}
+    assert resolved["USDRUB_TOM"] == "CETS"
+    assert diagnostics["fallback_unresolved"] == 0
