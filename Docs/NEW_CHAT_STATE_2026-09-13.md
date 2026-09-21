@@ -3,8 +3,8 @@
 **Дата контрольной точки:** 2026-09-13  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Основная ветка:** `main`  
-**Последний commit:** `fbb6880` — `Fix macOS build script path`  
-**Предыдущий:** `c9f4ba1` — `Add real-time directional signal probability`
+**Последний commit:** `d1946cc5c0b7b5f909c6a1b862b373873b20286b` — `Fix locked futures universe through downstream OI pipeline`  
+**Предыдущие ключевые:** `8b5d160` — `Clarify locked-universe admission diagnostics`; `43e915f` — `Enforce locked futures trading universe before OI pipeline`.
 
 ## 1. РОЛИ И ПРАВИЛА
 
@@ -46,7 +46,7 @@ GitHub:
 Текущая ветка: `main`.
 
 Последний подтверждённый commit:
-`fbb688070713e58ed37177f55897e4ce18d4d17d`
+`d1946cc5c0b7b5f909c6a1b862b373873b20286b`
 
 История последних ключевых изменений:
 
@@ -161,7 +161,7 @@ BCS WebSocket реально предоставляет:
 
 Некоторые futures-only roots остаются без BASE mapping по дизайну; не считать это автоматически ошибкой.
 
-### Последняя подтверждённая диагностика, 2026-09-13, воскресенье
+### Последняя подтверждённая диагностика до locked-universe фикса, 2026-09-13, воскресенье
 
 ```text
 status: OK
@@ -180,7 +180,7 @@ marketdata_source: MOEX_ISS_FUTURES_MARKETDATA
 marketdata_error: None
 ```
 
-Это означает: **Futures OI pipeline работает.**
+Это означало: **Futures OI pipeline работает, но позже был обнаружен критический дефект downstream re-expansion. Он исправлен commit `d1946cc`.**
 
 `liquidity_available=224/233 ≈ 96.1%`.
 
@@ -396,40 +396,54 @@ test ! -e "$HOME/Applications/Trader_7_12 Pro.app"
 - не менять UI ради косметики, пока backend не стабилен;
 - не переписывать рабочий Futures OI pipeline.
 
-## 17. НЕПОСРЕДСТВЕННЫЙ ПЛАН ПОСЛЕ ЭТОЙ ТОЧКИ
+## 17. LOCKED FUTURES UNIVERSE — ЗАФИКСИРОВАНО 2026-09-21
 
-### Шаг 1
-Синхронизировать локальный `main` с GitHub.
+Commit `d1946cc5c0b7b5f909c6a1b862b373873b20286b` протянул locked trading universe до самого downstream OI pipeline.
 
-### Шаг 2
-Проверить чистоту:
+Архитектурный инвариант:
 
-`git status --short`
+`MOEX/BCS raw futures → policy admission → D-3/front selection → LOCKED contracts → OI → liquidity → TOP 20 → UI`
 
-### Шаг 3
-Исправить Signal V1.1 ACTION normalization.
+После admission запрещено повторно использовать широкий MOEX RFUD front set.
 
-### Шаг 4
-Добавить unit tests на:
+`FuturesOIMarketDataScannerService` теперь дополнительно пересекает RFUD `front_contracts` и `curve_contracts` только с `locked_contracts_by_family`.
 
-- COVER + rising price;
-- LONG BUILDUP;
-- SHORT BUILDUP;
-- LIQUIDATE;
-- FLOW_ONLY;
-- отсутствие flow.
+Ожидаемая диагностика после новой сборки:
 
-### Шаг 5
-Сделать полный тест.
+```text
+trading_universe_candidates: 8
+trading_universe_allowed: 8
+trading_universe_filtered: 0
+active_contracts: 8
 
-### Шаг 6
-На следующем открытом рынке снять реальные timings.
+moex_working_contracts: 8
+contracts: 8
+analyzed: 8
+returned: <= 8
+```
 
-### Шаг 7
-Оптимизировать скорость без нарушения BCS limits.
+Запрещённые perpetual/auto-roll и foreign/crypto/index futures не должны попадать в Futures OI UI ни при каких downstream fallback paths.
 
-### Шаг 8
-Build → проверка canonical app → запуск.
+### Следующий этап
+
+После подтверждения новой локальной сборки:
+
+1. `git pull --ff-only origin main`;
+2. `pytest -q`;
+3. `git diff --check`;
+4. build canonical `Trader_7_12 Pro.app`;
+5. live scan и проверка Futures OI + Diagnostics;
+6. затем вернуться к Signal V1.1 ACTION normalization и скорости.
+
+Не создавать новые ветки, приложения или параллельные сканеры.
+
+## 19. КОМАНДА ДЛЯ НОВОГО ЧАТА
+
+В новом чате достаточно написать:
+
+`Продолжаем Trader_7_12 Pro. Прочитай Docs/NEW_CHAT_STATE_2026-09-13.md и продолжай строго с текущей точки. Не начинай проект заново.`
+
+Главная текущая точка: **locked Futures universe → downstream OI pipeline уже исправлен; подтвердить новой локальной сборкой → затем Signal V1.1 ACTION normalization → speed measurement.**
 
 ## 18. КОМАНДА ДЛЯ НОВОГО ЧАТА
 
