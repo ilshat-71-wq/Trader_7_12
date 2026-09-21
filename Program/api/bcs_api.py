@@ -295,8 +295,8 @@ class BCSAPI:
             "fallback_unresolved": len(unresolved),
         }
 
-    def get_instruments_by_tickers(self, tickers):
-        """Load BCS instrument cards and fill missing classCode from real spot/base metadata."""
+    def get_instruments_by_tickers(self, tickers, resolve_underlying=True):
+        """Load BCS instrument cards, optionally enriching missing underlying metadata."""
         if not isinstance(tickers, (list, tuple)):
             return []
         requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
@@ -338,9 +338,10 @@ class BCSAPI:
             if len(records) < page_size:
                 break
             page += 1
-        all_records, fallback_diag = self._underlying_metadata_fallback(requested, all_records)
-        if fallback_diag.get("fallback_matches"):
-            print("Underlying metadata fallback:", fallback_diag)
+        if resolve_underlying:
+            all_records, fallback_diag = self._underlying_metadata_fallback(requested, all_records)
+            if fallback_diag.get("fallback_matches"):
+                print("Underlying metadata fallback:", fallback_diag)
         return all_records
 
     def get_quotes(self, instruments):
