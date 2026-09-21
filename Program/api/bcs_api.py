@@ -36,6 +36,9 @@ class BCSAPI:
     CANDLE_MAX_CONCURRENCY = 4
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
+    INSTRUMENT_METADATA_PAGE_SIZE = 200
+    INSTRUMENT_METADATA_MAX_PAGES = 100
+    INSTRUMENT_METADATA_CACHE_TTL = 300.0
     UNDERLYING_LOOKUP_TYPES = (
         "CURRENCY", "STOCK", "FOREIGN_STOCK", "ETF", "GOODS", "INDICES",
     )
@@ -57,6 +60,7 @@ class BCSAPI:
         self.info_url = "https://be.broker.ru/trade-api-information-service/api/v1"
         self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         self._candle_cache = {}
+        self._instrument_metadata_cache = {}
         self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
 
@@ -123,28 +127,85 @@ class BCSAPI:
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def get_instruments(self, instrument_type="FUTURES"):
-        """Load instrument metadata with a bounded, metadata-specific retry policy."""
+        """Load instrument metadata with bounded pagination, loop protection and a short cache."""
+        instrument_type = str(instrument_type or "FUTURES").strip().upper()
+        if not instrument_type:
+            return []
+
+        now = time.time()
+        cached = self._instrument_metadata_cache.get(instrument_type)
+        if cached is not None:
+            cached_at, cached_records = cached
+            if now - cached_at < self.INSTRUMENT_METADATA_CACHE_TTL:
+                return list(cached_records)
+
         url = f"{self.info_url}/instruments/by-type"
         result = []
-        page = 0
-        while True:
-            params = {"type": instrument_type, "page": page, "size": 100}
-            r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.METADATA_TIMEOUT, max_retries=self.METADATA_RETRIES)
+        seen_page_signatures = set()
+
+        for page in range(self.INSTRUMENT_METADATA_MAX_PAGES):
+            params = {
+                "type": instrument_type,
+                "page": page,
+                "size": self.INSTRUMENT_METADATA_PAGE_SIZE,
+            }
+            r = RequestHelper.get(
+                url,
+                headers=self.headers(),
+                params=params,
+                timeout=self.METADATA_TIMEOUT,
+                max_retries=self.METADATA_RETRIES,
+            )
             print(f"Instruments page {page}:", r.status_code)
             if r.status_code != 200:
                 break
-            data = r.json()
+
+            try:
+                data = r.json()
+            except ValueError:
+                print("⚠️ Instruments JSON parse failed:", instrument_type, page)
+                break
+
             records = (
                 data
                 if isinstance(data, list)
                 else data.get("instruments", data.get("records", []))
             )
-            if not records:
+            if not isinstance(records, list) or not records:
                 break
-            result.extend(records)
-            if len(records) < 100:
+
+            signature = tuple(
+                (
+                    str(
+                        record.get("ticker")
+                        or record.get("secCode")
+                        or record.get("securityCode")
+                        or ""
+                    ).upper(),
+                    str(record.get("isin") or "").upper(),
+                    str(record.get("classCode") or record.get("class_code") or ""),
+                )
+                for record in records
+                if isinstance(record, dict)
+            )
+            if signature in seen_page_signatures:
+                print("⚠️ Instruments pagination repeated page:", instrument_type, page)
                 break
-            page += 1
+            seen_page_signatures.add(signature)
+
+            result.extend(record for record in records if isinstance(record, dict))
+
+            if len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
+                break
+
+        else:
+            print(
+                "⚠️ Instruments pagination reached safety limit:",
+                instrument_type,
+                self.INSTRUMENT_METADATA_MAX_PAGES,
+            )
+
+        self._instrument_metadata_cache[instrument_type] = (now, list(result))
         print("Всего загружено:", len(result))
         return result
 
