@@ -142,6 +142,7 @@ class BCSAPI:
         url = f"{self.info_url}/instruments/by-type"
         result = []
         seen_page_signatures = set()
+        server_page_size = None
 
         for page in range(self.INSTRUMENT_METADATA_MAX_PAGES):
             params = {
@@ -195,19 +196,13 @@ class BCSAPI:
 
             result.extend(record for record in records if isinstance(record, dict))
 
-            # A short page is normally the final page. BCS can also return
-            # its own fixed page size, so this must be checked against the
-            # actual number requested from the server, not only our default.
-            if len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
-                # If this was a non-empty first page, treat it as complete.
-                # For the common BCS response size (100), the caller's
-                # configured page size is intentionally not used as a hard
-                # completeness signal; the repeated-page guard below remains
-                # the final safety net.
-                if page == 0 and len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
-                    # Continue once to verify whether the server has another
-                    # page when its page size is smaller than requested.
-                    pass
+            # BCS may return a fixed server-side page size different
+            # from the requested size. Learn that size from the first
+            # non-empty page, then use it to detect the final page.
+            if server_page_size is None:
+                server_page_size = len(records)
+            if len(records) < server_page_size:
+                break
 
         else:
             print(
