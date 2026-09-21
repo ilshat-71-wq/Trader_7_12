@@ -62,3 +62,19 @@ def test_fallback_canonicalizes_requested_currency_alias_before_directory_match(
     resolved = {record["ticker"]: record.get("classCode") for record in records if isinstance(record, dict) and record.get("classCode")}
     assert resolved["USDRUB_TOM"] == "CETS"
     assert diagnostics["fallback_unresolved"] == 0
+
+
+
+def test_futures_card_base_asset_reference_prefers_real_bcs_metadata():
+    from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
+    record = {"ticker": "NGU6", "instrumentType": "FUTURES", "baseAssetTicker": "NG", "baseAssetClassCode": "SPBFUT"}
+    resolved = FuturesOIMarketDataScannerService._base_asset_reference(record)
+    assert resolved == {"ticker": "NG", "classCode": "SPBFUT", "source": "futures_card"}
+
+
+def test_futures_card_nested_base_asset_is_supported():
+    from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
+    record = {"ticker": "SIZ6", "instrumentType": "FUTURES", "baseAsset": {"ticker": "USDRUB_TOM", "classCode": "CETS"}}
+    resolved = FuturesOIMarketDataScannerService._base_asset_reference(record)
+    assert resolved["ticker"] == "USDRUB_TOM"
+    assert resolved["classCode"] == "CETS"
