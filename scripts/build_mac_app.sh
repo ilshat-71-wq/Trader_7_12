@@ -10,6 +10,19 @@ BUILD_DIR="build"
 SPEC="scripts/Trader_7_12_Pro.spec"
 APP_VERSION="2.4.3"
 PUBLISHED_APP="${ROOT_DIR}/${DIST_DIR}/${APP_NAME}"
+BUILD_MODE="${TRADER_BUILD_MODE:-adhoc}"
+APPLE_CODESIGN_IDENTITY="${APPLE_CODESIGN_IDENTITY:-}"
+APP_STORE_PROVISIONING_PROFILE="${APP_STORE_PROVISIONING_PROFILE:-}"
+STORE_ENTITLEMENTS="${ROOT_DIR}/AppStore/Trader_7_12_Pro.entitlements"
+
+if [[ "${BUILD_MODE}" == "store" ]]; then
+    [[ -n "${APPLE_CODESIGN_IDENTITY}" ]] || { echo "ERROR: APPLE_CODESIGN_IDENTITY is required for Store build."; exit 1; }
+    [[ -f "${APP_STORE_PROVISIONING_PROFILE}" ]] || { echo "ERROR: APP_STORE_PROVISIONING_PROFILE is required for Store/TestFlight build."; exit 1; }
+    [[ -f "${STORE_ENTITLEMENTS}" ]] || { echo "ERROR: Store entitlements are missing."; exit 1; }
+elif [[ "${BUILD_MODE}" != "adhoc" ]]; then
+    echo "ERROR: TRADER_BUILD_MODE must be adhoc or store."
+    exit 1
+fi
 
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/null || echo unknown)" "Commit: $(git rev-parse HEAD)"
@@ -97,11 +110,18 @@ STAGE_DIST="${STAGE_DIR}/dist"
 STAGE_WORK="${STAGE_DIR}/build"
 mkdir -p "${STAGE_DIST}" "${STAGE_WORK}"
 
+PYINSTALLER_SIGN_ARGS=()
+if [[ "${BUILD_MODE}" == "store" ]]; then
+    PYINSTALLER_SIGN_ARGS+=(--codesign-identity "${APPLE_CODESIGN_IDENTITY}")
+    PYINSTALLER_SIGN_ARGS+=(--osx-entitlements-file "${STORE_ENTITLEMENTS}")
+fi
+
 "${PYTHON_BIN}" -m PyInstaller \
     --noconfirm \
     --clean \
     --distpath "${STAGE_DIST}" \
     --workpath "${STAGE_WORK}" \
+    "${PYINSTALLER_SIGN_ARGS[@]}" \
     "${SPEC}"
 
 STAGE_APP="${STAGE_DIST}/${APP_NAME}"
@@ -120,7 +140,17 @@ if xattr -lr "${STAGE_APP}" 2>/dev/null | grep -E 'com\.apple\.(FinderInfo|Resou
     exit 1
 fi
 
-codesign --force --deep --sign - --timestamp=none "${STAGE_APP}"
+if [[ "${BUILD_MODE}" == "store" ]]; then
+    # Embed the Mac App Store distribution profile before the final outer signature.
+    ditto "${APP_STORE_PROVISIONING_PROFILE}" "${STAGE_APP}/Contents/embedded.provisionprofile"
+    # PyInstaller has already signed nested Mach-O code with the distribution identity.
+    # Sign the outer app last; Apple recommends signing inside-out rather than using --deep.
+    codesign --force --options runtime --timestamp \
+        --entitlements "${STORE_ENTITLEMENTS}" \
+        --sign "${APPLE_CODESIGN_IDENTITY}" "${STAGE_APP}"
+else
+    codesign --force --deep --sign - --timestamp=none "${STAGE_APP}"
+fi
 codesign --verify --deep --strict --verbose=2 "${STAGE_APP}"
 
 # The repository lives under Documents, where macOS/File Provider can attach
@@ -143,4 +173,4 @@ xattr -cr "${INSTALLED_APP}" 2>/dev/null || true
 # for the final codesign verification.
 codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
 
-printf '%s\n' ""     "=== APP BUILD OK ==="     "Build artifact: ${PUBLISHED_APP}"     "Signed install: ${INSTALLED_APP}"     "Bundle version: ${BUNDLE_VERSION}"     "Bundle source commit: ${BUNDLE_COMMIT}"     "Bundle icon: turquoise-gold watch dial"     "Code signing: ad-hoc verified on installed app"     "Packaging: PyInstaller onedir + macOS .app"     "Single-window dashboard: SPOT + Futures OI"
+printf '%s\n' ""     "=== APP BUILD OK ==="     "Build artifact: ${PUBLISHED_APP}"     "Signed install: ${INSTALLED_APP}"     "Bundle version: ${BUNDLE_VERSION}"     "Bundle source commit: ${BUNDLE_COMMIT}"     "Bundle icon: turquoise-gold watch dial"     "Code signing: ${BUILD_MODE}"     "Packaging: PyInstaller onedir + macOS .app"     "Single-window dashboard: SPOT + Futures OI"
