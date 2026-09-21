@@ -1,12 +1,13 @@
 from datetime import date, datetime
 
 from services.open_interest_service import OpenInterestService
+from services.futures_trading_universe_policy import FuturesTradingUniversePolicy
 
 
 class FuturesOIScannerService:
     """Read-only futures OI scanner with explicit MOEX root mapping."""
 
-    VERSION = "2.4.2"
+    VERSION = "2.4.3"
     ENRICH_BATCH_SIZE = 100
     DEFAULT_FUTURES_CLASS_CODE = "SPBFUT"
 
@@ -262,6 +263,12 @@ class FuturesOIScannerService:
             "class_code_fallback": 0, "expiry_available": 0, "oi_root_mapping": 0,
             "oi_root_fallback": 0,
             "front_contract_source": "MOEX_RFUD",
+            "trading_universe_policy": FuturesTradingUniversePolicy.VERSION,
+            "trading_universe_candidates": 0,
+            "trading_universe_allowed": 0,
+            "trading_universe_filtered": 0,
+            "trading_universe_filter_reasons": {},
+            "trading_universe_scope": "RUSSIAN_STOCKS_USDRUB_EURRUB_CNYRUB_BRENT_CL_NG_GOLD_ONLY",
             **metadata_diag,
         }
         for raw in rows:
@@ -307,6 +314,19 @@ class FuturesOIScannerService:
                 "underlying_class_code": self._text(raw, "underlyingClassCode", "underlying_class_code", "underlyingClass"),
                 "_expiry": expiry,
             })
+            # LOCKED TRADING UNIVERSE is the authoritative admission boundary.
+            # Nothing outside policy reaches grouping, RFUD front selection,
+            # OI analysis, liquidity ranking, or TOP 20.
+            policy_allowed, policy_reason = FuturesTradingUniversePolicy.classify(
+                ticker=item["futures_ticker"],
+                oi_root=item["oi_root"],
+                underlying_ticker=item["underlying_ticker"],
+            )
+            if not policy_allowed:
+                diagnostics["trading_universe_filtered"] = diagnostics.get("trading_universe_filtered", 0) + 1
+                reasons = diagnostics.setdefault("trading_universe_filter_reasons", {})
+                reasons[policy_reason] = reasons.get(policy_reason, 0) + 1
+                continue
             grouped.setdefault(oi_root, []).append(item)
 
         rfud_fronts = {}
@@ -330,6 +350,7 @@ class FuturesOIScannerService:
                 selected = next((item for item in ordered if str(item.get("futures_ticker") or "").upper() == rfud_ticker), None)
             result.append(selected or ordered[0])
         diagnostics["active_contracts"] = len(result)
+        diagnostics["trading_universe_allowed"] = len(result)
         diagnostics["active_roots"] = len(grouped)
         self._last_contract_diagnostics = diagnostics
         print("Futures OI metadata:", diagnostics)
