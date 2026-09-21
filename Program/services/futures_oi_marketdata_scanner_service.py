@@ -201,6 +201,58 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             return tuple(item["ticker"] for item in preferred if item.get("ticker"))
         return aliases.get(normalized, (str(ticker).upper(),))
 
+    @classmethod
+    def _base_asset_reference(cls, record):
+        """Extract the real BCS base asset attached to a futures instrument card."""
+        if not isinstance(record, dict):
+            return None
+        for field in ("baseAsset", "base_asset", "underlyingAsset", "underlying_asset", "underlying", "baseInstrument", "base_instrument"):
+            value = record.get(field)
+            if not isinstance(value, dict):
+                continue
+            ticker = str(value.get("ticker") or value.get("secCode") or value.get("securityCode") or value.get("baseAssetTicker") or value.get("base_asset_ticker") or value.get("underlyingTicker") or value.get("underlying_ticker") or "").strip().upper()
+            class_code = str(value.get("classCode") or value.get("class_code") or value.get("classcode") or value.get("baseAssetClassCode") or value.get("base_asset_class_code") or "").strip()
+            if ticker:
+                return {"ticker": ticker, "classCode": class_code, "source": field}
+        ticker = str(record.get("baseAssetTicker") or record.get("base_asset_ticker") or record.get("baseTicker") or record.get("base_ticker") or record.get("underlyingTicker") or record.get("underlying_ticker") or "").strip().upper()
+        class_code = str(record.get("baseAssetClassCode") or record.get("base_asset_class_code") or record.get("underlyingClassCode") or record.get("underlying_class_code") or "").strip()
+        if ticker:
+            return {"ticker": ticker, "classCode": class_code, "source": "futures_card"}
+        return None
+
+    def _futures_base_asset_metadata(self, contracts):
+        """Read base-asset references from the real BCS futures cards."""
+        futures_tickers = []
+        family_by_ticker = {}
+        for item in contracts:
+            family = self._text(item, "oi_root", "futures_root").upper()
+            ticker = self._text(item, "futures_ticker", "secid", "ticker").upper()
+            if family and ticker:
+                family_by_ticker[ticker] = family
+                if ticker not in futures_tickers:
+                    futures_tickers.append(ticker)
+        resolved = {}
+        for start in range(0, len(futures_tickers), self.ENRICH_BATCH_SIZE):
+            batch = futures_tickers[start:start + self.ENRICH_BATCH_SIZE]
+            try:
+                records = self.api.get_instruments_by_tickers(batch)
+            except Exception as exc:
+                print("⚠️ Futures base-asset metadata lookup failed:", type(exc).__name__)
+                continue
+            if not isinstance(records, list):
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                futures_ticker = self._text(record, "ticker", "secCode", "securityCode").upper()
+                family = family_by_ticker.get(futures_ticker)
+                if not family:
+                    continue
+                base = self._base_asset_reference(record)
+                if base and base.get("ticker"):
+                    resolved.setdefault(family, base)
+        return resolved, {"futures_base_metadata_requested": len(futures_tickers), "futures_base_metadata_resolved": len(resolved)}
+
     def _underlying_quotes(self, contracts):
         """Resolve futures to a real BCS economic underlying and real quote only.
 
@@ -230,13 +282,27 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             if item_class and not entry["classCode"]:
                 entry["classCode"] = item_class
 
+        futures_base_metadata, futures_base_diag = self._futures_base_asset_metadata(contracts)
+        for family, base in futures_base_metadata.items():
+            canonical = family_tickers.get(family)
+            if canonical and canonical in requested:
+                requested[canonical]["futuresBaseAsset"] = dict(base)
+                if base.get("classCode") and not requested[canonical].get("classCode"):
+                    requested[canonical]["classCode"] = str(base["classCode"]).strip()
+
         lookup_tickers = []
         for canonical, entry in requested.items():
-            candidates = preferred_instruments(canonical)
+            candidates = []
+            base = entry.get("futuresBaseAsset") or {}
+            if base.get("ticker"):
+                candidates.append({"ticker": str(base["ticker"]).upper(), "classCode": str(base.get("classCode") or "")})
+            for candidate in preferred_instruments(canonical) or ():
+                if candidate not in candidates:
+                    candidates.append(candidate)
             if not candidates and entry.get("classCode"):
-                candidates = ({"ticker": canonical, "classCode": entry["classCode"]},)
+                candidates = [{"ticker": canonical, "classCode": entry["classCode"]}]
             if not candidates:
-                candidates = tuple({"ticker": ticker} for ticker in self._underlying_lookup_aliases(canonical))
+                candidates = [{"ticker": ticker} for ticker in self._underlying_lookup_aliases(canonical)]
             entry["candidates"] = tuple(candidates)
             for candidate in entry["candidates"]:
                 ticker = str(candidate.get("ticker") or "").strip().upper()
@@ -370,6 +436,7 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "underlying_metadata_lookup_records": lookup_records,
             "underlying_exact_matches": exact_matches,
             "underlying_semantic_matches": semantic_matches,
+            **futures_base_diag,
         }
         if not instruments:
             return {}
