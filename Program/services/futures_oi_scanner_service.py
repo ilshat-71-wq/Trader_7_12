@@ -293,6 +293,7 @@ class FuturesOIScannerService:
             else:
                 diagnostics["oi_root_fallback"] += 1
                 oi_root = futures_root
+            diagnostics["trading_universe_candidates"] += 1
             class_code = self._metadata_class_code(raw)
             if class_code:
                 diagnostics["class_code_available"] += 1
@@ -327,6 +328,7 @@ class FuturesOIScannerService:
                 reasons = diagnostics.setdefault("trading_universe_filter_reasons", {})
                 reasons[policy_reason] = reasons.get(policy_reason, 0) + 1
                 continue
+            diagnostics["trading_universe_allowed"] += 1
             grouped.setdefault(oi_root, []).append(item)
 
         rfud_fronts = {}
@@ -350,7 +352,6 @@ class FuturesOIScannerService:
                 selected = next((item for item in ordered if str(item.get("futures_ticker") or "").upper() == rfud_ticker), None)
             result.append(selected or ordered[0])
         diagnostics["active_contracts"] = len(result)
-        diagnostics["trading_universe_allowed"] = len(result)
         diagnostics["active_roots"] = len(grouped)
         self._last_contract_diagnostics = diagnostics
         print("Futures OI metadata:", diagnostics)
