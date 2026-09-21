@@ -1,11 +1,11 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 13.09.2026  
+**Дата актуализации:** 21.09.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
-**Futures OI scanner:** 2.7.14  
+**Futures OI scanner:** 2.7.19  
 **Последний функциональный commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`
 
@@ -230,6 +230,45 @@ SPY         → SPY / QMEBLCK
 ```
 
 Catalog is lookup preference only; live BCS metadata is source of truth.
+
+### 10.1 Authoritative BCS base-asset metadata evidence — 21.09.2026
+
+Для dated futures связь с BASE/SPOT должна в первую очередь браться из реальной карточки futures, возвращённой BCS POST /api/v1/instruments/by-tickers в режиме raw (resolve_underlying=False). В карточке BCS для commodity futures может отсутствовать вложенный объект baseAsset, но присутствуют поля:
+
+    baseAssetSecurityClassCode
+    baseAssetSecuritySecCode
+
+Фактически проверено через авторизованный BCS API 21.09.2026:
+
+    NGU6 → baseAssetSecurityClassCode = FEG
+           baseAssetSecuritySecCode   = NGas1026
+           baseAsset = "Природный газ"
+
+    NGZ6 → baseAssetSecurityClassCode = FEG
+           baseAssetSecuritySecCode   = NGas1026
+           baseAsset = "Природный газ"
+
+    SIZ6 → BCS /instruments/by-tickers не возвращает карточку SIZ6.
+    USDRUBF → baseAssetSecurityClassCode = CETS_FX
+              baseAssetSecuritySecCode   = USD000SMALL
+
+    USD000SMALL → реальная BCS карточка:
+                  ticker = USD000SMALL
+                  instrumentType = CURRENCY
+                  primaryBoard = CETS_FX
+                  boards.classCode = CETS_FX
+                  displayName = "Доллар США"
+                  type = "Валютная пара"
+                  settleCode = T+1
+                  tradingCurrency = RUB
+
+    USD000SMALLF / USD000SMALL_TOM / USD000SMALL_TOD → BCS records: 0
+
+Зафиксированное правило: USD000SMALL / CETS_FX — реальный BCS BASE/SPOT-инструмент USD/RUB и может использоваться как источник market data для USD/RUB после успешного получения его реальных candles/quote. USDRUBF — perpetual FUTURES и никогда не является заменой BASE/SPOT; его карточка используется только как источник доказательства связи USD000SMALL.
+
+Зафиксированное правило для commodities: если BCS futures card содержит baseAssetSecuritySecCode + baseAssetSecurityClassCode, эта пара является authoritative base-asset reference. Нельзя заменять её ручным тикером, perpetual futures или синтетическим classCode.
+
+Следующий обязательный технический шаг: parser _base_asset_reference() должен читать baseAssetSecuritySecCode + baseAssetSecurityClassCode напрямую из futures card. Для NGU6/NGZ6 это должно давать FEG / NGas1026. Для SIZ6 нельзя делать вывод о market-data candles до отдельной проверки реальных USD000SMALL candles через BCS.
 
 ## 11. Mapping status — CURRENT P0
 
