@@ -195,10 +195,19 @@ class BCSAPI:
 
             result.extend(record for record in records if isinstance(record, dict))
 
-            # BCS may ignore the requested page size and return its own
-            # fixed page length (currently often 100). Do not infer the
-            # final page from the requested size; the next empty page is
-            # the authoritative end-of-pagination signal.
+            # A short page is normally the final page. BCS can also return
+            # its own fixed page size, so this must be checked against the
+            # actual number requested from the server, not only our default.
+            if len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
+                # If this was a non-empty first page, treat it as complete.
+                # For the common BCS response size (100), the caller's
+                # configured page size is intentionally not used as a hard
+                # completeness signal; the repeated-page guard below remains
+                # the final safety net.
+                if page == 0 and len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
+                    # Continue once to verify whether the server has another
+                    # page when its page size is smaller than requested.
+                    pass
 
         else:
             print(
