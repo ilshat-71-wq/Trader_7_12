@@ -1,6 +1,16 @@
 """HTTP/WebSocket API for the shared Trader_7_12 Cloud Market Data Engine."""
 
 from __future__ import annotations
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROGRAM_ROOT = PROJECT_ROOT / "Program"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROGRAM_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROGRAM_ROOT))
+
 
 import asyncio
 import os
@@ -8,7 +18,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 
-from cloud.market_data_engine import CloudMarketDataEngine, ENGINE_VERSION
+from Cloud.market_data_engine import CloudMarketDataEngine, ENGINE_VERSION
 
 
 engine = CloudMarketDataEngine()

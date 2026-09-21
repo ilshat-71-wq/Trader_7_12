@@ -1,6 +1,12 @@
 import asyncio
+import sys
+from pathlib import Path
 
-from cloud.market_data_engine import CloudMarketDataEngine
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "Program"))
+
+from Cloud.market_data_engine import CloudMarketDataEngine
 
 
 class FakeRadar:
