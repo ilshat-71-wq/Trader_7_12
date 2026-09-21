@@ -70,3 +70,14 @@ if __name__ == "__main__":
     test_request_helper_has_connection_pool_and_rate_limit()
     print("PASS test_request_helper_has_connection_pool_and_rate_limit")
     print("ALL TESTS PASSED")
+
+
+def test_candle_payload_records_are_supported_by_futures_base_change_reader():
+    from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
+    rows = [{"dateTime": "2026-09-21T07:00:00+03:00", "open": 100.0, "close": 101.5}]
+    payload = {"records": rows}
+    extracted = payload.get("candles", payload.get("bars", payload.get("records", [])))
+    assert extracted == rows
+    dt = FuturesOIMarketDataScannerService._candle_datetime(rows[0])
+    assert dt is not None
+    assert FuturesOIMarketDataScannerService._candle_value(rows[0], "open") == 100.0
