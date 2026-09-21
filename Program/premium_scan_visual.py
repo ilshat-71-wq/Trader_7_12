@@ -62,27 +62,74 @@ class PremiumScanVisual(QWidget):
         progress = max(0.0, min(1.0, (probe - start) / (end - start)))
         return progress, active
 
-    def _draw_session_ring(self, p, cx, cy, r, color, progress, active, width):
-        # Thin metallic outer ring: the current trading-session position.
+    def _draw_session_ring(
+        self, p, cx, cy, r, color, now, start_hour, start_minute,
+        end_hour, end_minute, width
+    ):
+        # Session markers are mapped to the same 12-hour geometry as the dial.
+        # This keeps the trading-time indicator visually locked to the clock.
+        start_minutes = start_hour * 60 + start_minute
+        end_minutes = end_hour * 60 + end_minute
+        current_minutes = now.hour * 60 + now.minute + now.second / 60.0
+
+        duration = end_minutes - start_minutes
+        if duration <= 0:
+            duration += 24 * 60
+
+        probe = current_minutes
+        if probe < start_minutes:
+            probe += 24 * 60
+
+        elapsed = max(0.0, min(float(duration), probe - start_minutes))
+        active = 0.0 <= (probe - start_minutes) <= duration
+
+        start_angle = (start_minutes % (12 * 60)) * 0.5 - 90.0
+        sweep_degrees = duration * 0.5
+        current_angle = start_angle + elapsed * 0.5
+
+        # Thin metallic outer ring: the full trading window.
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 58), width * 0.48))
         p.drawEllipse(QPointF(cx, cy), r * 1.045, r * 1.045)
 
+        arc_rect = (
+            int(cx - r * 1.045), int(cy - r * 1.045),
+            int(r * 2.09), int(r * 2.09)
+        )
         if active:
             glow = QColor(color.red(), color.green(), color.blue(), 42)
             p.setPen(QPen(glow, width * 1.55))
             p.drawArc(
-                int(cx - r * 1.045), int(cy - r * 1.045),
-                int(r * 2.09), int(r * 2.09),
-                90 * 16, -int(360 * progress * 16),
+                *arc_rect, int(-start_angle * 16), int(-elapsed * 0.5 * 16)
             )
 
         p.setPen(QPen(color, width))
         p.drawArc(
-            int(cx - r * 1.045), int(cy - r * 1.045),
-            int(r * 2.09), int(r * 2.09),
-            90 * 16, -int(360 * progress * 16),
+            *arc_rect, int(-start_angle * 16), int(-sweep_degrees * 16)
         )
+
+        # Radial start/end markers make the trading window line up with the
+        # actual hour marks on the dial instead of an arbitrary 12 o'clock start.
+        for angle, alpha in (
+            (start_angle, 150),
+            (start_angle + sweep_degrees, 150),
+        ):
+            a = math.radians(angle)
+            p.setPen(QPen(QColor(color.red(), color.green(), color.blue(), alpha),
+                          max(1.2, width * 0.7)))
+            p.drawLine(
+                QPointF(cx + math.cos(a) * r * 0.89, cy + math.sin(a) * r * 0.89),
+                QPointF(cx + math.cos(a) * r * 1.06, cy + math.sin(a) * r * 1.06),
+            )
+
+        # Current-time radial marker follows the real wall clock.
+        if active:
+            a = math.radians(current_angle)
+            p.setPen(QPen(color, max(1.2, width * 0.72)))
+            p.drawLine(
+                QPointF(cx + math.cos(a) * r * 0.89, cy + math.sin(a) * r * 0.89),
+                QPointF(cx + math.cos(a) * r * 1.08, cy + math.sin(a) * r * 1.08),
+            )
 
     def _draw_dial(self, p, cx, cy, r, *, name, tz, palette, session):
         bezel, face0, face1, face2, marker, hand, second, halo = palette
@@ -114,8 +161,9 @@ class PremiumScanVisual(QWidget):
 
         # Trading-session radius.
         now = self._now(tz)
-        progress, active = self._session_state(now, *session)
-        self._draw_session_ring(p, cx, cy, r, marker, progress, active, max(2.0, r * 0.012))
+        self._draw_session_ring(
+            p, cx, cy, r, marker, now, *session, max(2.0, r * 0.012)
+        )
 
         # Refined hour markers.
         for i in range(12):
@@ -252,7 +300,7 @@ class PremiumScanVisual(QWidget):
         moscow_now = self._draw_dial(
             p, w * 0.50, center_y, center_r,
             name="Moscow", tz=MOSCOW_TZ, palette=moscow_palette,
-            session=(7, 0, 23, 50),
+            session=(6, 50, 23, 50),
         )
         new_york_now = self._draw_dial(
             p, w * 0.75, side_y, side_r,
