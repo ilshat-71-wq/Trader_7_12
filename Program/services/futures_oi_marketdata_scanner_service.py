@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.18"
+    VERSION = "2.7.19"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
