@@ -5,7 +5,7 @@
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
-**Futures OI scanner:** 2.7.19  
+**Futures OI scanner:** 2.7.20  
 **Последний функциональный commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`
 
@@ -268,7 +268,7 @@ Catalog is lookup preference only; live BCS metadata is source of truth.
 
 Зафиксированное правило для commodities: если BCS futures card содержит baseAssetSecuritySecCode + baseAssetSecurityClassCode, эта пара является authoritative base-asset reference. Нельзя заменять её ручным тикером, perpetual futures или синтетическим classCode.
 
-Следующий обязательный технический шаг: parser _base_asset_reference() должен читать baseAssetSecuritySecCode + baseAssetSecurityClassCode напрямую из futures card. Для NGU6/NGZ6 это должно давать FEG / NGas1026. Для SIZ6 нельзя делать вывод о market-data candles до отдельной проверки реальных USD000SMALL candles через BCS.
+Реализовано в scanner v2.7.20: parser _base_asset_reference() читает baseAssetSecuritySecCode + baseAssetSecurityClassCode напрямую из futures card. Для NGU6/NGZ6 это даёт FEG / NGas1026. Для SIZ6/USDRUB связь теперь может быть подтверждена через реальный USD000SMALL / CETS_FX; USDRUBF остаётся запрещённым как BASE/SPOT source. Следующий live-шаг — проверить реальные USD000SMALL M5 candles 07:00→NOW и повторить Futures OI diagnostics.
 
 ## 11. Mapping status — CURRENT P0
 
