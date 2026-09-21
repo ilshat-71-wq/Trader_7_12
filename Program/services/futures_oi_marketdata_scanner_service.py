@@ -11,7 +11,7 @@ from services.market_session_service import MarketSessionService
 class FuturesOIMarketDataScannerService(FuturesOIScannerService):
     """MOEX RFUD futures OI scanner with current-day liquidity TOP."""
 
-    VERSION = "2.7.16"
+    VERSION = "2.7.17"
     LIQUIDITY_TOP_LIMIT = 20
     LIQUIDITY_PROBE_ROOTS = ("BR", "SI", "USDRUBF", "RI", "MX", "MM", "GD", "GL", "NG", "CL", "EU", "CR", "CNY")
     ECONOMIC_EXPOSURE_GROUPS = {
@@ -572,6 +572,40 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 marketdata_error = None
             elif resilient_error:
                 marketdata_error = resilient_error
+
+        # LOCKED UNIVERSE IS THE SINGLE DOWNSTREAM ADMISSION BOUNDARY.
+        # _active_contracts() has already applied FuturesTradingUniversePolicy
+        # and D-3 rollover. Never re-expand to the broad MOEX RFUD front set.
+        locked_contracts_by_family = {}
+        for item in bcs_contracts:
+            family = str(item.get("oi_root") or item.get("futures_root") or "").strip().upper()
+            secid = str(item.get("futures_ticker") or "").strip().upper()
+            if family and secid:
+                locked_contracts_by_family.setdefault(family, set()).add(secid)
+
+        locked_front_contracts = {}
+        for family, marketdata in front_contracts.items():
+            family_key = str(family or "").strip().upper()
+            secid = self._text(marketdata, "secid", "ticker", "securityCode").upper()
+            allowed_secids = locked_contracts_by_family.get(family_key, set())
+            if family_key in locked_contracts_by_family and secid in allowed_secids:
+                locked_front_contracts[family_key] = marketdata
+        front_contracts = locked_front_contracts
+
+        locked_curve_contracts = {}
+        for family, curve in curve_contracts.items():
+            family_key = str(family or "").strip().upper()
+            allowed_secids = locked_contracts_by_family.get(family_key, set())
+            if family_key not in locked_contracts_by_family:
+                continue
+            if not isinstance(curve, dict):
+                continue
+            front_row = curve.get("front")
+            front_secid = self._text(front_row, "secid", "ticker", "securityCode").upper()
+            if front_secid not in allowed_secids:
+                continue
+            locked_curve_contracts[family_key] = curve
+        curve_contracts = locked_curve_contracts
         candidates, skipped, oi_available = [], 0, 0
         liquidity_available = 0
         base_change_available = 0
@@ -859,8 +893,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
             "marketdata_error": marketdata_error,
             "moex_expiry_source": "MOEX_RFUD_LASTDELDATE",
             "moex_rollover_rule": "D-3_CALENDAR_DAYS",
-            "moex_working_contracts": sum(1 for item in front_contracts.values() if item.get("_moex_working_contract")),
+            "moex_working_contracts": len(front_contracts),
             "moex_rollover_active": sum(1 for item in front_contracts.values() if item.get("_moex_rollover_active")),
+            "locked_universe_contracts": sum(len(secids) for secids in locked_contracts_by_family.values()),
+            "locked_universe_families": len(locked_contracts_by_family),
+            "locked_universe_front_contracts": len(front_contracts),
             "underlying_unresolved_base_tickers": sorted({
                 str(row.get("underlying_ticker") or "").upper()
                 for row in candidates
