@@ -470,3 +470,31 @@ returned: <= 8
 - Добавлены regression checks для UI-поведения и торговых окон.
 
 Архитектура и data pipeline не менялись.
+
+
+## 21. BCS TRUE FUTURES BASE ASSET RESOLUTION — 2026-09-21
+
+После live Diagnostics было установлено, что предыдущий spot-directory fallback не закрывал два случая: NG и USDRUB оставались unresolved, поэтому Base Δ coverage была 50%.
+
+Исправление сделано точечно, без изменения locked universe или торговой логики:
+
+- Futures OI теперь дополнительно запрашивает реальные BCS instrument cards выбранных dated futures.
+- Из карточки фьючерса извлекается authoritative base asset metadata: baseAsset/baseAssetTicker/underlying* и classCode, если BCS его отдаёт.
+- Для такого случая этот BCS metadata reference имеет приоритет над обычным spot-directory lookup.
+- Для Natural Gas это позволяет работать даже если BCS предоставляет экономический base только через карточку фьючерса.
+- Для USD/RUB используется реальный BCS base instrument, а не синтетический ticker/classCode.
+- Добавлен raw lookup режим BCS instrument directory, чтобы запрос карточек futures не запускал лишний underlying fallback по всему каталогу.
+- Добавлены regression tests для flat и nested BCS base-asset metadata.
+
+Futures OI scanner version: 2.7.19.
+
+После live scan проверить:
+
+underlying_mapping_not_found: []
+underlying_mapping_coverage_percent: 100.0
+base_change_available: максимально 8/8 при наличии реальных BCS M5 07:00→NOW
+base_change_missing: только если BCS реально не отдаёт свечи
+
+Если BCS не предоставляет свечи по конкретному реальному base asset, статус должен остаться INCOMPLETE; synthetic data запрещены.
+
+Следующий обязательный шаг после pull — pytest -q, build, затем live Futures OI + Diagnostics. Только после live подтверждения считать проблему закрытой.
