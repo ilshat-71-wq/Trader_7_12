@@ -58,7 +58,7 @@ def test_get_instruments_cache_avoids_reloading_metadata(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append(kwargs["params"]["page"])
-        return FakeResponse(200, _records(0, 1))
+        return FakeResponse(200, [])
 
     monkeypatch.setattr("api.bcs_api.RequestHelper.get", fake_get)
 
