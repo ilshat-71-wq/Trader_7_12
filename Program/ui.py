@@ -281,6 +281,7 @@ class TraderWindow(QWidget):
 
         self.bcs_status = self._status_card("DATA", "BCS • READY")
         self.session_status = self._status_card("SESSION", "—")
+        self.session_status.setFixedWidth(150)
         self.coverage_status = self._status_card("COVERAGE", "—")
         top.addWidget(self.bcs_status)
         top.addWidget(self.session_status)
