@@ -41,3 +41,36 @@ def test_missing_authoritative_security_fields_stays_on_existing_metadata_path()
     }
 
     assert FuturesOIMarketDataScannerService._base_asset_reference(record) is None
+
+def test_futures_base_metadata_uses_complete_bcs_futures_directory_when_direct_lookup_is_empty(monkeypatch):
+    scanner = FuturesOIMarketDataScannerService()
+
+    monkeypatch.setattr(
+        scanner.api,
+        "get_instruments_by_tickers",
+        lambda tickers, resolve_underlying=False: [],
+    )
+    monkeypatch.setattr(
+        scanner.api,
+        "get_instruments",
+        lambda instrument_type="FUTURES": [
+            {
+                "ticker": "SIZ6",
+                "instrumentType": "FUTURES",
+                "baseAsset": "USD/RUB",
+                "baseAssetSecurityClassCode": "CETS_FX",
+                "baseAssetSecuritySecCode": "USD000SMALL",
+            }
+        ],
+    )
+
+    resolved, diagnostics = scanner._futures_base_asset_metadata(
+        [{"oi_root": "SI", "futures_ticker": "SIZ6"}]
+    )
+
+    assert resolved["SI"] == {
+        "ticker": "USD000SMALL",
+        "classCode": "CETS_FX",
+        "source": "futures_card_base_asset_security",
+    }
+    assert diagnostics["futures_base_metadata_directory_fallback"] == 1
