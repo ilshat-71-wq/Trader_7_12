@@ -195,8 +195,10 @@ class BCSAPI:
 
             result.extend(record for record in records if isinstance(record, dict))
 
-            if len(records) < self.INSTRUMENT_METADATA_PAGE_SIZE:
-                break
+            # BCS may ignore the requested page size and return its own
+            # fixed page length (currently often 100). Do not infer the
+            # final page from the requested size; the next empty page is
+            # the authoritative end-of-pagination signal.
 
         else:
             print(
