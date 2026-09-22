@@ -33,7 +33,7 @@ class BCSAPI:
     CANDLE_CACHE_TTL = 30.0
     CANDLE_TIMEOUT = 8.0
     CANDLE_RETRIES = 1
-    CANDLE_MAX_CONCURRENCY = 4
+    # Six in-flight candle requests lets the client use the existing\n    # ~9.1 RPS global throttle without making request starts faster.\n    CANDLE_MAX_CONCURRENCY = 6
     CANDLE_DIAGNOSTICS = True
     CANDLE_DIAGNOSTIC_EVERY = 50
     METADATA_TIMEOUT = 5.0
