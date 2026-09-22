@@ -78,3 +78,34 @@ def test_futures_card_nested_base_asset_is_supported():
     resolved = FuturesOIMarketDataScannerService._base_asset_reference(record)
     assert resolved["ticker"] == "USDRUB_TOM"
     assert resolved["classCode"] == "CETS"
+
+
+def test_get_instruments_by_tickers_reuses_overlapping_ticker_cards(monkeypatch):
+    from types import SimpleNamespace
+    from api.request_helper import RequestHelper
+
+    class FakeTickerBCS(BCSAPI):
+        def __init__(self):
+            self._ticker_metadata_cache = {}
+            self._ticker_metadata_record_cache = {}
+            self._underlying_metadata_index_cache = {}
+
+        def headers(self):
+            return {}
+
+    api = FakeTickerBCS()
+    calls = []
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        calls.append(list(json["tickers"]))
+        records = [{"ticker": ticker, "classCode": "TQBR"} for ticker in json["tickers"]]
+        return SimpleNamespace(status_code=200, text="", json=lambda: {"instruments": records})
+
+    monkeypatch.setattr(RequestHelper, "post", fake_post)
+
+    first = api.get_instruments_by_tickers(["SBER", "GAZP"], resolve_underlying=False)
+    second = api.get_instruments_by_tickers(["GAZP", "LKOH"], resolve_underlying=False)
+
+    assert {record["ticker"] for record in first} == {"SBER", "GAZP"}
+    assert {record["ticker"] for record in second} == {"GAZP", "LKOH"}
+    assert calls == [["GAZP", "SBER"], ["LKOH"]]
