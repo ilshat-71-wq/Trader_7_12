@@ -283,6 +283,17 @@ class CloudMarketDataEngine:
                         if isinstance(value, (int, float))
                     ),
                 )
+                spot_breakdown = timing["universe_breakdown_seconds"].get("spot_load_breakdown") or {}
+                by_type = spot_breakdown.get("by_type") or {}
+                if by_type:
+                    print(
+                        "SPOT METADATA BY TYPE:",
+                        " ".join(
+                            f"{kind}={details.get('seconds', 0):.3f}s/{details.get('records', 0)}"
+                            for kind, details in by_type.items()
+                            if isinstance(details, dict)
+                        ),
+                    )
             if timing["benchmark_breakdown_seconds"]:
                 print(
                     "BENCHMARK BREAKDOWN:",
@@ -292,6 +303,22 @@ class CloudMarketDataEngine:
                         if isinstance(value, (int, float))
                     ),
                 )
+                benchmark_requests = timing["benchmark_breakdown_seconds"].get("requests") or {}
+                if benchmark_requests:
+                    print(
+                        "BENCHMARK REQUESTS:",
+                        " ".join(
+                            f"{ticker}="
+                            f"{details.get('candles_seconds', 0):.3f}s"
+                            f"/{details.get('candle_count', 0)}"
+                            + (
+                                f"+Q{details.get('quote_fallback_seconds', 0):.3f}s"
+                                if "quote_fallback_seconds" in details else ""
+                            )
+                            for ticker, details in benchmark_requests.items()
+                            if isinstance(details, dict)
+                        ),
+                    )
 
             self._publish(snapshot)
             return copy.deepcopy(snapshot)
