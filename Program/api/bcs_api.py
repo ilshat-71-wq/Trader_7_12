@@ -70,8 +70,8 @@ class BCSAPI:
         self._underlying_metadata_index_cache = {}
         self._candle_diag_lock = threading.RLock()
         self._candle_diag = {
-            "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0},
-            "D": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0},
+            "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0, "http_statuses": {}, "exceptions": {}, "first_error": None, "last_error": None},
+            "D": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0, "http_statuses": {}, "exceptions": {}, "first_error": None, "last_error": None},
         }
         self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
@@ -613,7 +613,11 @@ class BCSAPI:
             f"cache_misses={int(diag.get('cache_misses', 0))} "
             f"http_ok={int(diag.get('http_ok', 0))} "
             f"http_errors={int(diag.get('http_errors', 0))} "
-            f"http_seconds={diag.get('http_seconds', 0.0):.3f}"
+            f"http_seconds={diag.get('http_seconds', 0.0):.3f} "
+            f"http_statuses={diag.get('http_statuses', {})} "
+            f"exceptions={diag.get('exceptions', {})} "
+            f"first_error={diag.get('first_error')} "
+            f"last_error={diag.get('last_error')}"
         )
 
     def get_candle_diagnostics(self):
@@ -711,6 +715,12 @@ class BCSAPI:
                     diag["requests"] += 1
                     diag["http_errors"] += 1
                     diag["http_seconds"] += elapsed
+                    exception_name = type(exc).__name__
+                    diag["exceptions"][exception_name] = diag["exceptions"].get(exception_name, 0) + 1
+                    error = {"ticker": str(ticker), "class_code": str(class_code), "interval": interval_key, "type": exception_name, "message": str(exc)[:300]}
+                    if diag["first_error"] is None:
+                        diag["first_error"] = error
+                    diag["last_error"] = error
                     self._print_candle_diagnostic(interval_key, diag)
             print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
             return {}
@@ -724,6 +734,12 @@ class BCSAPI:
                     diag["http_ok"] += 1
                 else:
                     diag["http_errors"] += 1
+                    status = str(r.status_code)
+                    diag["http_statuses"][status] = diag["http_statuses"].get(status, 0) + 1
+                    error = {"ticker": str(ticker), "class_code": str(class_code), "interval": interval_key, "status": r.status_code}
+                    if diag["first_error"] is None:
+                        diag["first_error"] = error
+                    diag["last_error"] = error
                 self._print_candle_diagnostic(interval_key, diag)
         if r.status_code != 200:
             print("⚠️ Candle HTTP:", ticker, interval, r.status_code)
