@@ -181,7 +181,7 @@ class MorningRadarWidget(QWidget):
                 self._fmt(item.get("change_percent")),
                 self._fmt(item.get("relative_strength")),
                 self._fmt(item.get("money_per_minute"), 0),
-                self._fmt(item.get("recent_money_delta_pct")),
+                self._fmt((item.get("interest") or {}).get("recent_pace_delta_pct")),
                 self._fmt(item.get("money_acceleration")),
                 str((item.get("interest") or {}).get("state") or "—"),
                 "● SHORT WATCH" if item.get("short_watch") else "—",
@@ -197,7 +197,7 @@ class MorningRadarWidget(QWidget):
             if item.get("short_watch"):
                 for col in range(self.table.columnCount()):
                     self.table.item(r, col).setBackground(QColor("#3a272b"))
-            elif item.get("interest") == "↑":
+            elif (item.get("interest") or {}).get("state") == "RISING":
                 for col in range(self.table.columnCount()):
                     self.table.item(r, col).setBackground(QColor("#123f2a"))
             if (item.get("interest") or {}).get("state") == "RISING":
