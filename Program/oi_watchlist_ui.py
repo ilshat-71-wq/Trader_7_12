@@ -45,7 +45,8 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """One professional read-only window: SPOT radar + Futures OI + money flow."""
 
-    VERSION = "2.9.1"
+    VERSION = "2.9.2"
+    TURNOVER_HIGHLIGHT_TOP = 5
 
     def __init__(self, scanner_enabled=True):
         super().__init__(scanner_enabled=scanner_enabled)
@@ -200,39 +201,40 @@ class OIWatchlistTraderWindow(TraderWindow):
         return f"{float(low):.4f}–{float(high):.4f}{suffix}"
 
     def _highlight_money_rows(self, results):
+        # Green row highlight has one unambiguous meaning in OI:
+        # top-5 futures by real current-day monetary turnover (VALTODAY),
+        # i.e. the available exchange Price*Volume-style notional. We do not
+        # replace it with the money-flow rank or HOT liquidity score.
+        turnover_values = []
+        for item in results:
+            try:
+                turnover = float(item.get("turnover_rub") or 0.0)
+            except (TypeError, ValueError):
+                turnover = 0.0
+            turnover_values.append(turnover)
+        top_turnovers = sorted(
+            {value for value in turnover_values if value > 0},
+            reverse=True,
+        )[: self.TURNOVER_HIGHLIGHT_TOP]
+        top_turnovers = set(top_turnovers)
+
         for row, item in enumerate(results):
-            rank = item.get("money_flow_rank")
-            liquidity = str(item.get("money_flow_liquidity_state") or "")
-            signal = str(item.get("money_flow_signal") or "")
-            action = str(item.get("money_flow_position_action") or "")
-            confidence = str(item.get("money_flow_confidence") or "")
-            if liquidity == "HOT":
+            try:
+                turnover = float(item.get("turnover_rub") or 0.0)
+            except (TypeError, ValueError):
+                turnover = 0.0
+
+            if turnover > 0 and turnover in top_turnovers:
                 brush = QBrush(QColor("#123f2a"))
-            elif rank is not None and int(rank) <= 5:
-                brush = QBrush(QColor("#163b2f"))
-            else:
-                brush = None
-            if brush:
                 for col in range(self.oi_table.columnCount()):
                     cell = self.oi_table.item(row, col)
                     if cell:
                         cell.setBackground(brush)
-            if signal in {"ACCUMULATION", "BUY_ABSORPTION", "BUYER_ACTIVE"}:
-                cell = self.oi_table.item(row, 9)
-                if cell:
-                    cell.setForeground(QBrush(QColor("#69e59a")))
-            elif signal in {"DISTRIBUTION", "SELL_ABSORPTION", "SELLER_ACTIVE"}:
-                cell = self.oi_table.item(row, 9)
-                if cell:
-                    cell.setForeground(QBrush(QColor("#ff7d7d")))
-            if action in {"LONG_BUILDUP", "SHORT_COVERING"}:
-                cell = self.oi_table.item(row, 10)
-                if cell:
-                    cell.setForeground(QBrush(QColor("#69e59a")))
-            elif action in {"SHORT_BUILDUP", "LONG_LIQUIDATION"}:
-                cell = self.oi_table.item(row, 10)
-                if cell:
-                    cell.setForeground(QBrush(QColor("#ff7d7d")))
+
+            # FLOW/ACTION keep their analytical colors; they are independent
+            # from the row-level monetary-turnover highlight.
+            action = str(item.get("money_flow_position_action") or "")
+            confidence = str(item.get("money_flow_position_confidence") or "")
             if confidence == "HIGH":
                 cell = self.oi_table.item(row, 10)
                 if cell:
@@ -305,6 +307,8 @@ class OIWatchlistTraderWindow(TraderWindow):
                 if cell:
                     cell.setForeground(brush)
         self.oi_table.setToolTip(
+            "GREEN ROW — top 5 futures by real current-day monetary turnover "
+            "(VALTODAY / available Price×Volume-style notional). "
             "LIQ NOW — highest real BCS trade activity over the last 5 minutes. "
             "FLOW — observed 30-minute money flow with the current order book. "
             "ACTION — inferred position structure from price and ΔOI; no specific participant is identified. "
