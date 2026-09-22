@@ -31,10 +31,20 @@ class SpotUniverseService:
         self.api = api or BCSAPI()
 
     def _load_one(self, instrument_type):
+        started = perf_counter()
         try:
             records, _ = BCSMetadataCacheService.get_instruments(self.api, instrument_type)
+            self._last_type_timings[instrument_type] = {
+                "seconds": round(perf_counter() - started, 3),
+                "records": len(records) if isinstance(records, list) else 0,
+            }
             return instrument_type, records
         except Exception as exc:
+            self._last_type_timings[instrument_type] = {
+                "seconds": round(perf_counter() - started, 3),
+                "records": 0,
+                "status": "error",
+            }
             print(f"SPOT metadata unavailable: {instrument_type}: {type(exc).__name__}")
             return instrument_type, []
 
@@ -123,11 +133,10 @@ class SpotUniverseService:
 
         load_started = perf_counter()
         loaded_by_kind = {}
-        load_timings = {}
+        self._last_type_timings = {}
         with ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)), thread_name_prefix="spot-universe") as executor:
             pending = {executor.submit(self._load_one, kind): kind for kind in self.INSTRUMENT_TYPES}
             for future in as_completed(pending):
-                worker_started = perf_counter()
 
                 try:
                     kind, items = future.result()
@@ -170,4 +179,4 @@ class SpotUniverseService:
         unique = {}
         for item in records:
             unique[(item["spot_ticker"], item["spot_class_code"])] = item
-        self._last_load_timing = {\n            "total": round(perf_counter() - load_started, 3),\n            "by_type": load_timings,\n            "records": len(records),\n            "unique_records": len(unique),\n        }\n        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
+        self._last_load_timing = {\n            "total": round(perf_counter() - load_started, 3),\n            "by_type": dict(self._last_type_timings),\n            "records": len(records),\n            "unique_records": len(unique),\n        }\n        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
