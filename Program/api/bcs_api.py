@@ -69,6 +69,7 @@ class BCSAPI:
         self._instrument_metadata_cache = {}
         self._underlying_metadata_index_cache = {}
         self._ticker_metadata_cache = {}
+        self._ticker_metadata_record_cache = {}
         self._candle_diag_lock = threading.RLock()
         self._candle_diag = {
             "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0, "http_statuses": {}, "exceptions": {}, "first_error": None, "last_error": None},
@@ -413,60 +414,133 @@ class BCSAPI:
         }
 
     def get_instruments_by_tickers(self, tickers, resolve_underlying=True):
-        """Load BCS instrument cards, optionally enriching missing underlying metadata."""
+        """Load BCS instrument cards with exact-set and per-ticker metadata caches."""
         if not isinstance(tickers, (list, tuple)):
             return []
         requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
         if not requested:
             return []
-        ticker_cache_key = (tuple(sorted(set(requested))), bool(resolve_underlying))
+
+        resolve_key = bool(resolve_underlying)
+        unique_requested = sorted(set(requested))
+        ticker_cache_key = (tuple(unique_requested), resolve_key)
         now = time.time()
+
+        # Fast path for an exact repeated request.
         cached_tickers = self._ticker_metadata_cache.get(ticker_cache_key)
         if cached_tickers is not None:
             cached_at, cached_records = cached_tickers
             if now - cached_at < self.INSTRUMENT_METADATA_CACHE_TTL:
                 return [dict(record) for record in cached_records]
             self._ticker_metadata_cache.pop(ticker_cache_key, None)
-        url = f"{self.info_url}/instruments/by-tickers"
-        all_records = []
-        seen_page_signatures = set()
-        page = 0
-        page_size = 100
-        max_pages = 20
-        while page < max_pages:
-            payload = {"tickers": requested, "page": page, "size": page_size}
-            try:
-                r = RequestHelper.post(url, headers={**self.headers(), "Content-Type": "application/json"}, json=payload)
-            except Exception as exc:
-                print("Instrument ticker lookup failed:", type(exc).__name__)
-                break
-            print(f"Instrument ticker lookup page {page}:", r.status_code)
-            if r.status_code != 200:
-                break
-            try:
-                data = r.json()
-            except ValueError:
-                break
-            if isinstance(data, list):
-                records = data
-            elif isinstance(data, dict):
-                records = data.get("instruments", data.get("records", []))
-            else:
-                records = []
-            if not isinstance(records, list) or not records:
-                break
-            signature = tuple((str(record.get("ticker") or record.get("secCode") or record.get("securityCode") or "").upper(), str(record.get("isin") or "").upper(), str(record.get("classCode") or ""), str(record.get("class_code") or "")) for record in records if isinstance(record, dict))
-            if signature in seen_page_signatures:
-                break
-            seen_page_signatures.add(signature)
-            all_records.extend(record for record in records if isinstance(record, dict))
-            if len(records) < page_size:
-                break
-            page += 1
+
+        # Main deduplication path: reuse already-known BCS cards even when
+        # the next caller asks for a different, overlapping ticker set.
+        record_cache = getattr(self, "_ticker_metadata_record_cache", None)
+        if record_cache is None:
+            record_cache = {}
+            self._ticker_metadata_record_cache = record_cache
+
+        cached_records = {}
+        missing = []
+        for ticker in unique_requested:
+            key = self._instrument_lookup_key(ticker)
+            cached = record_cache.get((key, resolve_key)) if key else None
+            if cached is not None:
+                cached_at, record = cached
+                if now - cached_at < self.INSTRUMENT_METADATA_CACHE_TTL:
+                    cached_records[ticker] = dict(record)
+                    continue
+                record_cache.pop((key, resolve_key), None)
+            missing.append(ticker)
+
+        fetched_records = []
+        if missing:
+            url = f"{self.info_url}/instruments/by-tickers"
+            seen_page_signatures = set()
+            page = 0
+            page_size = 100
+            max_pages = 20
+            while page < max_pages:
+                payload = {"tickers": missing, "page": page, "size": page_size}
+                try:
+                    r = RequestHelper.post(
+                        url,
+                        headers={**self.headers(), "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                except Exception as exc:
+                    print("Instrument ticker lookup failed:", type(exc).__name__)
+                    break
+                print(f"Instrument ticker lookup page {page}:", r.status_code)
+                if r.status_code != 200:
+                    break
+                try:
+                    data = r.json()
+                except ValueError:
+                    break
+                if isinstance(data, list):
+                    records = data
+                elif isinstance(data, dict):
+                    records = data.get("instruments", data.get("records", []))
+                else:
+                    records = []
+                if not isinstance(records, list) or not records:
+                    break
+                signature = tuple(
+                    (
+                        str(
+                            record.get("ticker")
+                            or record.get("secCode")
+                            or record.get("securityCode")
+                            or ""
+                        ).upper(),
+                        str(record.get("isin") or "").upper(),
+                        str(record.get("classCode") or ""),
+                        str(record.get("class_code") or ""),
+                    )
+                    for record in records
+                    if isinstance(record, dict)
+                )
+                if signature in seen_page_signatures:
+                    break
+                seen_page_signatures.add(signature)
+                fetched_records.extend(
+                    record for record in records if isinstance(record, dict)
+                )
+                if len(records) < page_size:
+                    break
+                page += 1
+
+        all_records = list(cached_records.values()) + fetched_records
+
+        # Underlying fallback is still the single source of enrichment. It
+        # runs only against the requested set, while the per-ticker cache
+        # prevents repeated /by-tickers HTTP calls across overlapping sets.
         if resolve_underlying:
-            all_records, fallback_diag = self._underlying_metadata_fallback(requested, all_records)
+            all_records, fallback_diag = self._underlying_metadata_fallback(
+                unique_requested, all_records
+            )
             if fallback_diag.get("fallback_matches"):
                 print("Underlying metadata fallback:", fallback_diag)
+
+        # Cache each returned real BCS record under every unambiguous alias
+        # that identifies it. This is what makes overlapping requests cheap.
+        for record in all_records:
+            if not isinstance(record, dict):
+                continue
+            aliases = self._record_aliases(record)
+            aliases.add(
+                self._instrument_lookup_key(
+                    record.get("ticker")
+                    or record.get("secCode")
+                    or record.get("securityCode")
+                )
+            )
+            for alias in aliases:
+                if alias:
+                    record_cache[(alias, resolve_key)] = (now, dict(record))
+
         self._ticker_metadata_cache[ticker_cache_key] = (now, list(all_records))
         return [dict(record) for record in all_records]
 
