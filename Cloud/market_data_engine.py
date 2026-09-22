@@ -57,6 +57,7 @@ class EngineSnapshot:
     radar_diagnostics: dict[str, Any]
     futures_oi: list[dict[str, Any]]
     futures_diagnostics: dict[str, Any]
+    timing: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return _json_safe({
@@ -69,6 +70,7 @@ class EngineSnapshot:
             "radar_diagnostics": self.radar_diagnostics,
             "futures_oi": self.futures_oi,
             "futures_diagnostics": self.futures_diagnostics,
+            "timing": self.timing,
         })
 
 
@@ -108,6 +110,7 @@ class CloudMarketDataEngine:
         self._last_scan_started_at: float | None = None
         self._last_scan_finished_at: float | None = None
         self._last_scan_error: str | None = None
+        self._last_scan_timing: dict[str, Any] = {}
 
         self._subscribers: set[asyncio.Queue] = set()
         self._subscriber_lock = threading.Lock()
@@ -135,6 +138,7 @@ class CloudMarketDataEngine:
                 "clients": self.subscriber_count,
                 "data_policy": "REAL_BCS_DATA_ONLY",
                 "decision_policy": "NO_TRADE_EXECUTION",
+                "timing": self._last_scan_timing,
             }
 
     @property
@@ -148,6 +152,10 @@ class CloudMarketDataEngine:
             return None
         return datetime.fromtimestamp(timestamp).astimezone().isoformat()
 
+    @staticmethod
+    def _timing_ms(start: float, end: float) -> float:
+        return round((end - start) * 1000.0, 1)
+
     def scan_once(self) -> EngineSnapshot:
         """Run the production scanners exactly once and publish one snapshot."""
         if not self._scan_lock.acquire(blocking=False):
@@ -156,19 +164,26 @@ class CloudMarketDataEngine:
                 return existing
             raise RuntimeError("A market scan is already running.")
 
+        scan_started = time.perf_counter()
         self._last_scan_started_at = time.time()
         try:
+            radar_started = time.perf_counter()
             radar_rows = self._radar.scan(limit=self.radar_limit)
+            radar_finished = time.perf_counter()
             radar_diagnostics = dict(
                 getattr(self._radar, "_last_scan_diagnostics", {}) or {}
             )
 
+            futures_started = time.perf_counter()
             futures_rows, futures_diagnostics = self._futures.scan()
+            futures_finished = time.perf_counter()
+
+            money_flow_started = time.perf_counter()
             futures_rows = self._money_flow.analyze(
                 futures_rows,
                 api=self._futures.api,
             )
-            futures_diagnostics = dict(futures_diagnostics or {})
+            money_flow_finished = time.perf_counter()
 
             available = [
                 row for row in futures_rows
@@ -178,6 +193,7 @@ class CloudMarketDataEngine:
                 row for row in available
                 if row.get("money_flow_liquidity_state") == "HOT"
             ]
+            futures_diagnostics = dict(futures_diagnostics or {})
             futures_diagnostics.update({
                 "money_flow_status": "AVAILABLE" if available else "NO_DATA",
                 "money_flow_available": len(available),
@@ -189,6 +205,7 @@ class CloudMarketDataEngine:
                 "money_flow_policy": "REAL_BCS_DATA_ONLY; NO_PARTICIPANT_IDENTITY_CLAIM",
             })
 
+            snapshot_started = time.perf_counter()
             with self._snapshot_lock:
                 self._version += 1
                 snapshot = EngineSnapshot(
@@ -199,10 +216,34 @@ class CloudMarketDataEngine:
                     radar_diagnostics=_json_safe(radar_diagnostics),
                     futures_oi=_json_safe(futures_rows),
                     futures_diagnostics=_json_safe(futures_diagnostics),
+                    timing={},
                 )
                 self._snapshot = snapshot
                 self._last_scan_error = None
                 self._last_scan_finished_at = time.time()
+            snapshot_finished = time.perf_counter()
+
+            total_finished = time.perf_counter()
+            timing = {
+                "radar_ms": self._timing_ms(radar_started, radar_finished),
+                "futures_oi_ms": self._timing_ms(futures_started, futures_finished),
+                "money_flow_ms": self._timing_ms(money_flow_started, money_flow_finished),
+                "snapshot_ms": self._timing_ms(snapshot_started, snapshot_finished),
+                "total_ms": self._timing_ms(scan_started, total_finished),
+                "total_seconds": round(total_finished - scan_started, 3),
+            }
+            with self._snapshot_lock:
+                snapshot.timing = timing
+                self._last_scan_timing = timing
+
+            print(
+                "CLOUD SCAN TIMING:",
+                f"RADAR={timing['radar_ms'] / 1000:.3f}s",
+                f"FUTURES_OI={timing['futures_oi_ms'] / 1000:.3f}s",
+                f"MONEY_FLOW={timing['money_flow_ms'] / 1000:.3f}s",
+                f"SNAPSHOT={timing['snapshot_ms'] / 1000:.3f}s",
+                f"TOTAL={timing['total_seconds']:.3f}s",
+            )
 
             self._publish(snapshot)
             return copy.deepcopy(snapshot)
