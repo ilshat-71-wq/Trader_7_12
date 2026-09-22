@@ -434,6 +434,13 @@ class BCSAPI:
                 return [dict(record) for record in cached_records]
             self._ticker_metadata_cache.pop(ticker_cache_key, None)
 
+        # First reuse real BCS cards already loaded by the shared catalog cache.
+        # This avoids a second /instruments/by-tickers request after SPOT metadata
+        # has already loaded the same catalog in this process.
+        catalog_records, catalog_matched = BCSMetadataCacheService.get_cached_instruments_by_tickers(
+            unique_requested
+        )
+
         # Main deduplication path: reuse already-known BCS cards even when
         # the next caller asks for a different, overlapping ticker set.
         record_cache = getattr(self, "_ticker_metadata_record_cache", None)
@@ -442,9 +449,28 @@ class BCSAPI:
             self._ticker_metadata_record_cache = record_cache
 
         cached_records = {}
+        for record in catalog_records:
+            if not isinstance(record, dict):
+                continue
+            aliases = self._record_aliases(record)
+            for alias in aliases:
+                if alias:
+                    record_cache[(alias, resolve_key)] = (now, dict(record))
+
         missing = []
         for ticker in unique_requested:
             key = self._instrument_lookup_key(ticker)
+            if key and key in catalog_matched:
+                for record in catalog_records:
+                    if self._instrument_lookup_key(
+                        record.get("ticker")
+                        or record.get("secCode")
+                        or record.get("securityCode")
+                    ) == key:
+                        cached_records[ticker] = dict(record)
+                        break
+                if ticker in cached_records:
+                    continue
             cached = record_cache.get((key, resolve_key)) if key else None
             if cached is not None:
                 cached_at, record = cached
