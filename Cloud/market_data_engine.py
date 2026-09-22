@@ -233,10 +233,6 @@ class CloudMarketDataEngine:
                 "total_seconds": round(total_finished - scan_started, 3),
             }
 
-            with self._snapshot_lock:
-                snapshot.timing = timing
-                self._last_scan_timing = dict(timing)
-
             radar_timing = radar_diagnostics.get("timings_seconds", {})
             timing["radar_breakdown_seconds"] = {
                 key: radar_timing[key]
@@ -251,6 +247,16 @@ class CloudMarketDataEngine:
                 )
                 if key in radar_timing
             }
+            timing["universe_breakdown_seconds"] = dict(
+                radar_timing.get("universe_breakdown", {}) or {}
+            )
+            timing["benchmark_breakdown_seconds"] = dict(
+                radar_timing.get("benchmark_breakdown", {}) or {}
+            )
+
+            with self._snapshot_lock:
+                snapshot.timing = timing
+                self._last_scan_timing = dict(timing)
 
             print(
                 "CLOUD SCAN TIMING:",
@@ -266,6 +272,24 @@ class CloudMarketDataEngine:
                     " ".join(
                         f"{key.upper()}={value:.3f}s"
                         for key, value in timing["radar_breakdown_seconds"].items()
+                    ),
+                )
+            if timing["universe_breakdown_seconds"]:
+                print(
+                    "UNIVERSE BREAKDOWN:",
+                    " ".join(
+                        f"{key.upper()}={value:.3f}s"
+                        for key, value in timing["universe_breakdown_seconds"].items()
+                        if isinstance(value, (int, float))
+                    ),
+                )
+            if timing["benchmark_breakdown_seconds"]:
+                print(
+                    "BENCHMARK BREAKDOWN:",
+                    " ".join(
+                        f"{key.upper()}={value:.3f}s"
+                        for key, value in timing["benchmark_breakdown_seconds"].items()
+                        if isinstance(value, (int, float))
                     ),
                 )
 
