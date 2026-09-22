@@ -90,7 +90,12 @@ class MarketAttentionScannerService:
         return rows if isinstance(rows, list) else []
 
     def build_universe(self):
+        started = perf_counter()
+        spot_started = started
         spots = SpotUniverseService(api=self.api).load()
+        spot_load_seconds = round(perf_counter() - spot_started, 3)
+
+        filter_started = perf_counter()
         universe = []
         seen = set()
         seen_tickers = set()
@@ -103,8 +108,15 @@ class MarketAttentionScannerService:
                     seen.add(key)
                     seen_tickers.add(item["spot_ticker"])
                     universe.append(item)
+        filtering_seconds = perf_counter() - filter_started
+
+        macro_started = perf_counter()
         alias_pool = tuple(dict.fromkeys(x for group in self.MACRO_ALIASES.values() for x in group))
-        for row in self._metadata_by_alias(alias_pool):
+        macro_rows = self._metadata_by_alias(alias_pool)
+        macro_metadata_seconds = perf_counter() - macro_started
+
+        assembly_started = perf_counter()
+        for row in macro_rows:
             if not isinstance(row, dict):
                 continue
             ticker = self._metadata_ticker(row)
@@ -127,6 +139,19 @@ class MarketAttentionScannerService:
                         "spot_name": str(row.get("name") or row.get("displayName") or ticker),
                     })
                     break
+        assembly_seconds = perf_counter() - assembly_started
+
+        total_seconds = round(perf_counter() - started, 3)
+        self._last_universe_timing = {
+            "spot_load": round(spot_load_seconds, 3),
+            "macro_metadata": round(macro_metadata_seconds, 3),
+            "filtering": round(filtering_seconds, 3),
+            "assembly": round(assembly_seconds, 3),
+            "total": total_seconds,
+            "spot_records": len(spots),
+            "macro_records": len(macro_rows),
+            "universe_records": len(universe),
+        }
         return universe
 
     def _candles(self, ticker, class_code, start, end):
@@ -262,38 +287,86 @@ class MarketAttentionScannerService:
         return (last / opening - 1.0) * 100.0
 
     def _benchmark(self, trading_date, now, session_start):
+        started = perf_counter()
+        metadata_started = started
         rows = self._metadata_by_alias(self.BENCHMARKS)
+        metadata_seconds = perf_counter() - metadata_started
+
         by_ticker = {}
         for row in rows:
             ticker, code = self._metadata_ticker(row), self._metadata_class_code(row)
             if ticker and code:
                 by_ticker[ticker] = (ticker, code)
+
+        fallback_seconds = 0.0
+        fallback_records = 0
         if any(t not in by_ticker for t in self.BENCHMARKS):
+            fallback_started = perf_counter()
             try:
                 index_rows = self.api.get_instruments("INDICES")
             except Exception:
                 index_rows = []
+            fallback_seconds = perf_counter() - fallback_started
+            fallback_records = len(index_rows) if isinstance(index_rows, list) else 0
             for row in index_rows if isinstance(index_rows, list) else []:
                 ticker, code = self._metadata_ticker(row), self._metadata_class_code(row)
                 if ticker in self.BENCHMARKS and code:
                     by_ticker[ticker] = (ticker, code)
+
         start = datetime.combine(trading_date, session_start, tzinfo=self.session.TIMEZONE).astimezone(timezone.utc)
         end = now.astimezone(timezone.utc)
+        candles_seconds = 0.0
+        quote_fallback_seconds = 0.0
         for requested in self.BENCHMARKS:
             instrument = by_ticker.get(requested)
             if not instrument:
                 continue
             ticker, code = instrument
+            candles_started = perf_counter()
             candles = self._candles(ticker, code, start, end)
+            candles_seconds += perf_counter() - candles_started
             if len(candles) >= 2:
                 candles.sort(key=lambda x: str(x.get("time") or ""))
                 first = self._f(candles[0].get("close"))
                 last = self._f(candles[-1].get("close"))
                 if first > 0 and last > 0:
+                    self._last_benchmark_timing = {
+                        "metadata": round(metadata_seconds, 3),
+                        "indices_fallback": round(fallback_seconds, 3),
+                        "candles": round(candles_seconds, 3),
+                        "quote_fallback": round(quote_fallback_seconds, 3),
+                        "total": round(perf_counter() - started, 3),
+                        "metadata_records": len(rows),
+                        "indices_fallback_records": fallback_records,
+                        "resolved_benchmarks": list(by_ticker),
+                    }
                     return ticker, code, (last / first - 1.0) * 100.0
+            quote_started = perf_counter()
             quote_return = self._quote_session_return(ticker, code, now)
+            quote_fallback_seconds += perf_counter() - quote_started
             if quote_return is not None:
+                self._last_benchmark_timing = {
+                    "metadata": round(metadata_seconds, 3),
+                    "indices_fallback": round(fallback_seconds, 3),
+                    "candles": round(candles_seconds, 3),
+                    "quote_fallback": round(quote_fallback_seconds, 3),
+                    "total": round(perf_counter() - started, 3),
+                    "metadata_records": len(rows),
+                    "indices_fallback_records": fallback_records,
+                    "resolved_benchmarks": list(by_ticker),
+                }
                 return ticker, code, quote_return
+
+        self._last_benchmark_timing = {
+            "metadata": round(metadata_seconds, 3),
+            "indices_fallback": round(fallback_seconds, 3),
+            "candles": round(candles_seconds, 3),
+            "quote_fallback": round(quote_fallback_seconds, 3),
+            "total": round(perf_counter() - started, 3),
+            "metadata_records": len(rows),
+            "indices_fallback_records": fallback_records,
+            "resolved_benchmarks": list(by_ticker),
+        }
         return None, None, None
 
     def _benchmark_daily(self, ticker, class_code, trading_date):
@@ -361,10 +434,12 @@ class MarketAttentionScannerService:
         scan_window = f"{session_start.strftime('%H:%M')}-до закрытия MSK"
         universe = self.build_universe()
         timings["universe"] = round(perf_counter() - phase_started, 3)
+        timings["universe_breakdown"] = dict(getattr(self, "_last_universe_timing", {}) or {})
 
         phase_started = perf_counter()
         benchmark_ticker, benchmark_code, benchmark_change = self._benchmark(trading_date, now, session_start)
         timings["benchmark"] = round(perf_counter() - phase_started, 3)
+        timings["benchmark_breakdown"] = dict(getattr(self, "_last_benchmark_timing", {}) or {})
         if benchmark_change is None:
             self._last_scan_diagnostics = {
                 "status": "BENCHMARK_UNAVAILABLE", "session": session_name, "trading_date": str(trading_date),
