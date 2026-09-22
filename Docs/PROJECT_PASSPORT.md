@@ -1,12 +1,13 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 21.09.2026  
+**Дата актуализации:** 22.09.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `89d63cd807afcbb28d0ca35d9e5f2022ce498532`  
+**Последний функциональный commit:** `272a9c1943a78bb9216fd4be7bc48498c89c9ab7`  
+**Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`
 
 ## 1. Назначение
@@ -304,9 +305,13 @@ Next mapping milestone: honest classification of all unresolved entries and prod
 - global candle concurrency currently 4;
 - shared process-wide metadata cache;
 - SPOT universe uses shared metadata cache;
-- futures/index mapping partially reuses shared metadata.
+- futures/index mapping partially reuses shared metadata;
+- exact ticker-set cache plus per-ticker BCS metadata cache with the same 300s TTL;
+- overlapping ticker requests reuse already-known real BCS cards instead of repeating `/instruments/by-tickers`;
+- returned records are cached under their real, unambiguous BCS aliases;
+- no change to BCS network concurrency or market-data semantics.
 
-Remaining performance architecture task: eliminate duplicated metadata requests through one cache/in-flight deduplication point without blindly increasing network concurrency.
+Remaining performance architecture task: add in-flight deduplication only if measured concurrent overlap still justifies it; do not increase network concurrency blindly.
 
 ## 13. Performance
 
@@ -343,6 +348,20 @@ Workflow:
 ```
 
 Do not weaken market criteria for speed.
+
+## 13.1 Latest measured Cloud scan — 22.09.2026
+
+Before the per-ticker metadata cache optimization:
+
+```text
+CLOUD SCAN TIMING: RADAR=92.187s FUTURES_OI=2.696s MONEY_FLOW=1.866s SNAPSHOT=0.002s TOTAL=96.751s
+
+RADAR BREAKDOWN: UNIVERSE=34.266s BENCHMARK=0.185s BENCHMARK_D1=0.118s M5=29.367s D1=28.181s CALCULATION=0.013s TOTAL=92.186s
+
+UNIVERSE BREAKDOWN: SPOT_LOAD=4.798s MACRO_METADATA=29.467s FILTERING=0.001s ASSEMBLY=0.000s TOTAL=34.265s
+```
+
+The measured bottleneck was repeated BCS instrument metadata lookup, not candle HTTP failures. M5 and D1 diagnostics reported zero HTTP errors in that run. This measurement is the baseline for validating commit `272a9c1`.
 
 ## 14. HTTP / resilience
 
@@ -482,7 +501,7 @@ NO PORTFOLIO MANAGEMENT
 
 ### P1 — Scan speed
 - use `timings_seconds` to identify bottleneck;
-- centralize metadata cache + in-flight dedupe;
+- validate the new overlapping per-ticker metadata cache against a complete live scan; add in-flight dedupe only if concurrent overlap remains measurable;
 - eliminate repeated full instrument metadata downloads;
 - add safe history/session candle cache where justified;
 - keep bounded concurrency and BCS network safety;
@@ -507,7 +526,7 @@ Before calling the project production-ready:
 - unresolved mappings honestly classified;
 - no synthetic fallback;
 - full scan speed measured and predictable;
-- repeated metadata requests deduplicated;
+- repeated overlapping metadata requests deduplicated; in-flight dedupe remains optional and measurement-driven;
 - M5/D1 access cached safely;
 - coverage/diagnostics truthful;
 - Futures OI uses real RFUD/OI/VALTODAY;
