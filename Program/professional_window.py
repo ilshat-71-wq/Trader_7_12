@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from oi_watchlist_ui import OIWatchlistTraderWindow
+from morning_radar_ui import MorningRadarWidget
 
 
 class ScanSound:
@@ -105,14 +106,24 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_enabled = self.settings.value("sound/enabled", True, type=bool)
         self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
         self._configure_professional_tabs()
+        self._build_morning_radar_tab()
         self._build_settings_tab()
+        self.morning_radar_refresh_timer = QTimer(self)
+        self.morning_radar_refresh_timer.timeout.connect(self.morning_radar.refresh)
+        self.morning_radar_refresh_timer.start(60_000)
+        QTimer.singleShot(1200, self.morning_radar.refresh)
 
     def _configure_professional_tabs(self):
         if self.market_tabs.count() >= 3:
             self.market_tabs.setTabText(0, "RADAR")
             self.market_tabs.setTabText(1, "FUTURES OI")
             self.market_tabs.setTabText(2, "DIAGNOSTICS")
-        self.market_tabs.setToolTip("Market → Futures OI → diagnostics → settings")
+        self.market_tabs.setToolTip("Market → Morning Radar → Futures OI → diagnostics → settings")
+
+    def _build_morning_radar_tab(self):
+        self.morning_radar = MorningRadarWidget()
+        self.market_tabs.addTab(self.morning_radar, "MORNING RADAR")
+        self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 1)
 
     def _build_settings_tab(self):
         panel = QWidget()
