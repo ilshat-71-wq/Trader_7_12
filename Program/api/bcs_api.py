@@ -67,6 +67,7 @@ class BCSAPI:
         self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         self._candle_cache = {}
         self._instrument_metadata_cache = {}
+        self._underlying_metadata_index_cache = {}
         self._candle_diag_lock = threading.RLock()
         self._candle_diag = {
             "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0},
@@ -312,9 +313,7 @@ class BCSAPI:
             if self._record_class_code(record):
                 unresolved.difference_update(self._record_aliases(record))
         if not unresolved:
-            return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0, "fallback_unresolved": 0}
-
-        result = list(existing)
+            return existing, {"fallback_types": [], "fallback_records": 0,        result = list(existing)
         seen = {
             (
                 self._instrument_lookup_key(record.get("ticker") or record.get("secCode") or record.get("securityCode")),
@@ -325,51 +324,84 @@ class BCSAPI:
         fallback_types = []
         fallback_records = 0
         fallback_matches = 0
+        fallback_index_hits = 0
+        now = time.time()
+
         for instrument_type in self.UNDERLYING_LOOKUP_TYPES:
+            if not unresolved:
+                break
+
             try:
-                records = self.get_instruments(instrument_type)
+                cached_index = self._underlying_metadata_index_cache.get(instrument_type)
+                if (
+                    cached_index is not None
+                    and now - cached_index[0] < self.INSTRUMENT_METADATA_CACHE_TTL
+                ):
+                    index, record_count = cached_index[1], cached_index[2]
+                    fallback_index_hits += 1
+                else:
+                    records = self.get_instruments(instrument_type)
+                    if not isinstance(records, list):
+                        records = []
+                    index = {}
+                    for record in records:
+                        if not isinstance(record, dict):
+                            continue
+                        for alias in self._record_aliases(record):
+                            index.setdefault(alias, []).append(record)
+                    self._underlying_metadata_index_cache[instrument_type] = (
+                        now,
+                        index,
+                        len(records),
+                    )
+                    record_count = len(records)
+                fallback_types.append(instrument_type)
+                fallback_records += record_count
+
             except Exception as exc:
                 print("⚠️ Underlying by-type lookup failed:", instrument_type, type(exc).__name__)
                 continue
-            fallback_types.append(instrument_type)
-            fallback_records += len(records) if isinstance(records, list) else 0
-            for record in records if isinstance(records, list) else []:
-                if not isinstance(record, dict):
-                    continue
 
-                aliases = self._record_aliases(record)
-                matched = sorted(aliases.intersection(unresolved))
-                if not matched:
-                    continue
+            for requested_key in list(unresolved):
+                for record in index.get(requested_key, []):
+                    if not isinstance(record, dict):
+                        continue
 
-                class_code = self._record_class_code(record)
-                if not class_code:
-                    continue
+                    class_code = self._record_class_code(record)
+                    if not class_code:
+                        continue
 
-                actual_ticker = str(
-                    record.get("ticker") or record.get("secCode") or record.get("securityCode") or ""
-                ).strip().upper()
+                    actual_ticker = str(
+                        record.get("ticker") or record.get("secCode") or record.get("securityCode") or ""
+                    ).strip().upper()
 
-                enriched = dict(record)
-                enriched["_underlying_requested_aliases"] = matched
-                enriched["_underlying_bcs_ticker"] = actual_ticker
-                enriched["_underlying_bcs_class_code"] = class_code
-                enriched["_underlying_mapping_source"] = "BCS_BY_TYPE_METADATA"
+                    matched_aliases = sorted(
+                        self._record_aliases(record).intersection(unresolved)
+                    )
+                    if requested_key not in matched_aliases:
+                        matched_aliases.append(requested_key)
+                        matched_aliases = sorted(set(matched_aliases))
 
-                dedupe_key = (actual_ticker or "|".join(matched), class_code.upper())
-                if dedupe_key not in seen:
-                    result.append(enriched)
-                    seen.add(dedupe_key)
-                    fallback_matches += 1
+                    enriched = dict(record)
+                    enriched["_underlying_requested_aliases"] = matched_aliases
+                    enriched["_underlying_bcs_ticker"] = actual_ticker
+                    enriched["_underlying_bcs_class_code"] = class_code
+                    enriched["_underlying_mapping_source"] = "BCS_BY_TYPE_METADATA"
 
-                for key in matched:
-                    unresolved.discard(key)
-            if not unresolved:
-                break
+                    dedupe_key = (actual_ticker or "|".join(matched_aliases), class_code.upper())
+                    if dedupe_key not in seen:
+                        result.append(enriched)
+                        seen.add(dedupe_key)
+                        fallback_matches += 1
+
+                    for key in matched_aliases:
+                        unresolved.discard(key)
+
         return result, {
             "fallback_types": fallback_types,
             "fallback_records": fallback_records,
             "fallback_matches": fallback_matches,
+            "fallback_index_hits": fallback_index_hits,
             "fallback_unresolved": len(unresolved),
         }
 
