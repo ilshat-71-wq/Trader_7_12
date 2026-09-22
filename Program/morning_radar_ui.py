@@ -134,8 +134,8 @@ class MorningRadarWidget(QWidget):
 
     def _finished(self, payload):
         self._payload = payload or {}
-        captured = self._payload.get("captured_slots") or []
-        complete = bool(self._payload.get("complete"))
+        captured = self._payload.get("completed_slots") or []
+        complete = "09:50" in captured
         self.state.setText("COMPLETE • 09:50" if complete else f"{len(captured)}/7 SLOTS")
         self.state.setStyleSheet(
             "font-size:12px;font-weight:800;color:" +
@@ -148,12 +148,15 @@ class MorningRadarWidget(QWidget):
         )
         history = self._payload.get("history") or []
         latest = self._payload.get("latest") or {}
-        stocks = latest.get("stocks") or []
+        radar_rows = list(latest.get("radar") or [])
+        countertrend = list(latest.get("countertrend_watch") or [])
+        stocks = [dict(x, short_watch=False) for x in radar_rows]
+        stocks.extend(dict(x, short_watch=True) for x in countertrend)
         regime = str(latest.get("market_regime") or "—")
         benchmark = latest.get("benchmark_change_percent")
-        short_count = sum(1 for x in stocks if x.get("short_watch"))
-        persistent_short = sum(1 for x in stocks if x.get("short_watch") and int(x.get("short_watch_persistence") or 0) >= 2)
-        rising_interest = sum(1 for x in stocks if x.get("interest") == "↑")
+        short_count = len(countertrend)
+        persistent_short = sum(1 for x in countertrend if int(x.get("short_watch_persistence") or 0) >= 2)
+        rising_interest = sum(1 for x in radar_rows if (x.get("interest") or {}).get("state") == "RISING")
         self.summary.setText(
             f"REGIME {regime} • IMOEX2 {benchmark if benchmark is not None else '—'}% • "
             f"INTEREST ↑ {rising_interest} • SHORT WATCH {short_count} • "
@@ -167,7 +170,7 @@ class MorningRadarWidget(QWidget):
             stocks,
             key=lambda x: (
                 0 if x.get("short_watch") else 1,
-                0 if x.get("interest") == "↑" else 1,
+                0 if (x.get("interest") or {}).get("state") == "RISING" else 1,
                 -(float(x.get("relative_strength") or 0.0)),
             ),
         )
@@ -180,9 +183,9 @@ class MorningRadarWidget(QWidget):
                 self._fmt(item.get("money_per_minute"), 0),
                 self._fmt(item.get("recent_money_delta_pct")),
                 self._fmt(item.get("money_acceleration")),
-                str(item.get("interest") or "—"),
+                str((item.get("interest") or {}).get("state") or "—"),
                 "● SHORT WATCH" if item.get("short_watch") else "—",
-                f"{int(item.get('short_watch_persistence') or 0)}/7" if item.get("short_watch") else "—",
+                f"{int(item.get('short_watch_persistence') or 0)}/{len(captured)}" if item.get("short_watch") else "—",
                 str(item.get("signal") or "—"),
                 self._fmt(item.get("signal_probability")),
             ]
@@ -197,7 +200,7 @@ class MorningRadarWidget(QWidget):
             elif item.get("interest") == "↑":
                 for col in range(self.table.columnCount()):
                     self.table.item(r, col).setBackground(QColor("#123f2a"))
-            if item.get("interest") == "↑":
+            if (item.get("interest") or {}).get("state") == "RISING":
                 self.table.item(r, 6).setForeground(QColor("#69e59a"))
             if item.get("short_watch"):
                 self.table.item(r, 7).setForeground(QColor("#ff7d7d"))
