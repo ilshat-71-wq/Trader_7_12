@@ -285,7 +285,7 @@ class TraderWindow(QWidget):
         self.title = QLabel("TRADER_7_12 PRO")
         self.title.setObjectName("brand")
         self.subtitle = QLabel(
-            "READ-ONLY MARKET RADAR  •  SPOT  •  D1 / M5  •  RS  •  MONEY FLOW  •  FUTURES OI"
+            "READ-ONLY MARKET RADAR  •  SPOT  •  D1 / M5  •  RS  •  MONEY FLOW  •  FUTURES OI  •  LIVE BOOK / TAPE"
         )
         self.subtitle.setObjectName("subtitle")
         brand_box.addWidget(self.title)
