@@ -14,7 +14,7 @@ from services.signal_probability_service import SignalProbabilityService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.5.2"
+    VERSION = "2.5.3"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     D1_MAX_WORKERS = 6
