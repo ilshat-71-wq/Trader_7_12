@@ -34,6 +34,7 @@ PYTHON_BIN="$(command -v python3)"
 [[ -n "${PYTHON_BIN}" ]] || { echo "ERROR: python3 not found."; exit 1; }
 "${PYTHON_BIN}" -c 'import PyInstaller' >/dev/null 2>&1 || { echo "ERROR: PyInstaller is not installed."; exit 1; }
 command -v codesign >/dev/null 2>&1 || { echo "ERROR: codesign is required."; exit 1; }
+${PYTHON_BIN} -c 'import websocket' >/dev/null 2>&1 || { echo "ERROR: websocket-client is required for BCS realtime BOOK/TAPE. Install with: ${PYTHON_BIN} -m pip install websocket-client"; exit 1; }
 
 "${PYTHON_BIN}" -m compileall -q Program
 PYTHONPATH=Program "${PYTHON_BIN}" -m pytest -q Program
