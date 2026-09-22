@@ -214,12 +214,24 @@ class TraderWindow(QWidget):
             "border:0;padding:7px 10px;"
         )
 
-        self.result_table = MarketTableWidget(
-            ["#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%",
-             "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
-             "SIGNAL", "PROB", "ΔPROB"],
-            [42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72,
-             78, 72, 72],
+        columns = [
+            "#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%",
+            "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
+            "SIGNAL", "PROB", "ΔPROB",
+        ]
+        widths = [
+            42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72,
+            78, 72, 72,
+        ]
+        self.result_table = MarketTableWidget(columns, widths)
+        self.weak_result_table = MarketTableWidget(columns, widths)
+
+        self.spot_tabs = QTabWidget()
+        self.spot_tabs.setDocumentMode(True)
+        self.spot_tabs.addTab(self.result_table, "STRONGER THAN IMOEX2")
+        self.spot_tabs.addTab(self.weak_result_table, "WEAKER THAN IMOEX2")
+        self.spot_tabs.setToolTip(
+            "SPOT split by relative strength versus IMOEX2"
         )
 
         self.result_panel = QWidget()
@@ -227,8 +239,9 @@ class TraderWindow(QWidget):
         result_layout.setContentsMargins(8, 8, 8, 8)
         result_layout.setSpacing(7)
         result_layout.addWidget(self.result_box)
-        result_layout.addWidget(self.result_table, 1)
+        result_layout.addWidget(self.spot_tabs, 1)
         self.result_table.hide()
+        self.weak_result_table.hide()
 
         self.scan_visual = MeltingClocksWidget()
         self.result_stack = QStackedWidget()
@@ -238,7 +251,7 @@ class TraderWindow(QWidget):
 
         self.market_tabs = QTabWidget()
         self.market_tabs.setDocumentMode(True)
-        self.market_tabs.addTab(self.result_stack, "MARKET RADAR")
+        self.market_tabs.addTab(self.result_stack, "SPOT")
         self.market_tabs.addTab(self._build_diagnostics_panel(), "DIAGNOSTICS")
 
         self.footer = self._build_footer()
@@ -254,7 +267,7 @@ class TraderWindow(QWidget):
         if self.scanner_enabled:
             self.result_box.setPlainText(
                 "BCS CONNECTED • Ready to scan. "
-                "Select MARKET RADAR and press SCAN MARKET. "
+                "Select SPOT and press SCAN MARKET. "
                 "Column headers support sorting."
             )
         else:
@@ -431,26 +444,75 @@ class TraderWindow(QWidget):
         return "No instrument passed all strict gates."
 
     @staticmethod
-    def _apply_relative_strength_tint(table, row_index, relative_strength):
-        try:
-            rs = float(relative_strength)
-        except (TypeError, ValueError):
-            return
+    def _signal_color(signal):
+        return (
+            QColor("#69e59a") if signal == "LONG"
+            else QColor("#ff7d7d") if signal == "SHORT"
+            else QColor("#c9d0d6")
+        )
 
-        if rs > 0.01:
-            background = QColor("#20382b")
-            foreground = QColor("#bfe8c8")
-        elif rs < -0.01:
-            background = QColor("#3a272b")
-            foreground = QColor("#f0b9bf")
-        else:
-            return
+    @classmethod
+    def _apply_signal_colors(cls, table, prepared_results):
+        for row_index, item in enumerate(prepared_results):
+            signal_color = cls._signal_color(str(item.get("signal") or ""))
+            for col in (13, 14, 15):
+                cell = table.item(row_index, col)
+                if cell:
+                    cell.setForeground(signal_color)
 
-        for column in range(table.columnCount()):
-            item = table.item(row_index, column)
-            if item is not None:
-                item.setBackground(background)
-                item.setForeground(foreground)
+    def _rows_for_results(self, results):
+        rows = []
+        for idx, item in enumerate(results or [], 1):
+            role = ROLE_LABELS.get(
+                str(item.get("selection_role") or "").upper(),
+                "CONTEXT",
+            )
+            if item.get("qualification_status") == "WATCH_ONLY":
+                role = "WATCH"
+
+            rs = item.get("relative_strength")
+            rows.append((
+                float(rs) if rs is not None else 0.0,
+                [
+                    numeric(idx),
+                    str(item.get("spot_ticker") or "—"),
+                    role,
+                    str(item.get("daily_structure") or "NEUTRAL")[:10],
+                    numeric(_number(item.get("daily_relative_mean_pp"), 2)),
+                    numeric(_number(item.get("benchmark_change_percent"), 2)),
+                    numeric(_number(item.get("change_percent"), 2)),
+                    numeric(_number(rs, 2)),
+                    numeric(_money(item.get("money_per_minute"))),
+                    numeric(_money(item.get("day_money", item.get("session_money")))),
+                    numeric(_money(item.get("recent_money"))),
+                    numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
+                    numeric(_number(item.get("directional_score"), 1)),
+                    str(item.get("signal") or "—"),
+                    numeric(
+                        f"{_number(item.get('signal_probability'), 1)}%"
+                        if item.get("signal_probability") is not None else "—"
+                    ),
+                    numeric(
+                        f"{_number(item.get('signal_probability_delta'), 1)}%"
+                        if item.get("signal_probability_delta") is not None else "NEW"
+                    ),
+                ],
+                item,
+            ))
+        return rows
+
+    def _populate_spot_table(self, table, entries):
+        rows = []
+        items = []
+        for index, (_rs, row, item) in enumerate(entries, 1):
+            row = list(row)
+            row[0] = numeric(index)
+            rows.append(row)
+            items.append(item)
+        table.set_rows(rows)
+        self._apply_signal_colors(table, items)
+        table.setVisible(bool(rows))
+        return len(rows)
 
     def run_market_scan(self):
         if not self.scanner_enabled or (
@@ -508,85 +570,40 @@ class TraderWindow(QWidget):
             f"REGIME {diagnostics.get('market_regime') or '—'}"
         )
 
-        rows = []
-        rs_values = []
-        for idx, item in enumerate(results or [], 1):
-            role = ROLE_LABELS.get(
-                str(item.get("selection_role") or "").upper(),
-                "CONTEXT",
-            )
-            if item.get("qualification_status") == "WATCH_ONLY":
-                role = "WATCH"
+        entries = self._rows_for_results(results)
+        strong = [entry for entry in entries if entry[0] > 0.01]
+        weak = [entry for entry in entries if entry[0] < -0.01]
+        neutral = len(entries) - len(strong) - len(weak)
 
-            rs = item.get("relative_strength")
-            rs_values.append(rs)
-            rows.append([
-                numeric(idx),
-                str(item.get("spot_ticker") or "—"),
-                role,
-                str(item.get("daily_structure") or "NEUTRAL")[:10],
-                numeric(_number(item.get("daily_relative_mean_pp"), 2)),
-                numeric(_number(item.get("benchmark_change_percent"), 2)),
-                numeric(_number(item.get("change_percent"), 2)),
-                numeric(_number(rs, 2)),
-                numeric(_money(item.get("money_per_minute"))),
-                numeric(_money(item.get("day_money", item.get("session_money")))),
-                numeric(_money(item.get("recent_money"))),
-                numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
-                numeric(_number(item.get("directional_score"), 1)),
-                str(item.get("signal") or "—"),
-                numeric(
-                    f"{_number(item.get('signal_probability'), 1)}%"
-                    if item.get("signal_probability") is not None else "—"
-                ),
-                numeric(
-                    f"{_number(item.get('signal_probability_delta'), 1)}%"
-                    if item.get("signal_probability_delta") is not None else "NEW"
-                ),
-            ])
-
-        self.result_table.set_rows(rows)
-        for row_index, rs in enumerate(rs_values):
-            self._apply_relative_strength_tint(self.result_table, row_index, rs)
-            item = (results or [])[row_index]
-            signal = str(item.get("signal") or "")
-            signal_color = (
-                QColor("#69e59a") if signal == "LONG"
-                else QColor("#ff7d7d") if signal == "SHORT"
-                else QColor("#c9d0d6")
-            )
-            for col in (13, 14, 15):
-                cell = self.result_table.item(row_index, col)
-                if cell:
-                    cell.setForeground(signal_color)
+        strong_count = self._populate_spot_table(self.result_table, strong)
+        weak_count = self._populate_spot_table(self.weak_result_table, weak)
 
         self.result_table.setToolTip(
-            "Green tint — instrument stronger than IMOEX2; red — weaker than IMOEX2. "
-            "DAY ₽ — accumulated monetary turnover since 07:00 MSK. "
-            "⌘C / Ctrl+C — copy."
+            "SPOT STRONGER THAN IMOEX2 — relative strength RS > +0.01. "
+            "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
+            "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
-        self.result_table.setVisible(bool(rows))
+        self.weak_result_table.setToolTip(
+            "SPOT WEAKER THAN IMOEX2 — relative strength RS < -0.01. "
+            "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
+            "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
+        )
+
         self.coverage_status.value_label.setText(
             f"{_number(diagnostics.get('coverage_percent'), 0)}%"
         )
 
-        if rows:
-            self.result_box.setPlainText("\n".join((line1, line2, line3)))
-        else:
-            self.result_box.setPlainText(
-                "\n".join(
-                    (
-                        line1,
-                        line2,
-                        line3,
-                        self._empty_reason(diagnostics),
-                        f"SKIPS: {self._skip_summary(diagnostics)}",
-                    )
-                )
-            )
+        split_note = (
+            f"SPOT SPLIT • STRONGER {strong_count} • WEAKER {weak_count} • "
+            f"NEUTRAL/FLAT {neutral}"
+        )
+        self.result_box.setPlainText(
+            "\n".join((line1, line2, line3, split_note))
+        )
 
         self.diagnostics_box.setPlainText(self._format_diagnostics(diagnostics))
         self.market_tabs.setCurrentIndex(0)
+        self.spot_tabs.setCurrentIndex(0 if strong_count else 1)
 
     @staticmethod
     def _format_diagnostics(diagnostics):
@@ -598,6 +615,9 @@ class TraderWindow(QWidget):
 
     def copy_active_table(self):
         widget = self.market_tabs.currentWidget()
+        if widget is self.result_stack:
+            self.spot_tabs.currentWidget().copy_selection()
+            return
         table = widget.findChild(MarketTableWidget)
         if table is not None:
             table.copy_selection()
@@ -606,6 +626,7 @@ class TraderWindow(QWidget):
         self.scan_button.setEnabled(True)
         self._stop_scan_animation()
         self.result_table.hide()
+        self.weak_result_table.hide()
         self.result_box.setPlainText(f"SCAN ERROR\n\n{error}")
         self.diagnostics_box.setPlainText(f"SPOT SCAN ERROR\n\n{error}")
 
