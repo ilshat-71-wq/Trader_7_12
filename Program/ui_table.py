@@ -126,16 +126,33 @@ class MarketTableWidget(QTableWidget):
             self._sort_column = column
             self._sort_order = Qt.SortOrder.AscendingOrder
 
-        header = self.horizontalHeader()
-        header.setSortIndicator(column, self._sort_order)
+        self.horizontalHeader().setSortIndicator(column, self._sort_order)
 
-        # QTableWidget can ignore a user sort when sorting has been disabled
-        # during refresh. Temporarily enable its native sorter for the actual
-        # click, then disable it again so row insertion never auto-reorders.
+        # Do not toggle QTableWidget's native sorting here. In PySide6 it can
+        # re-enter row insertion/movement while custom QTableWidgetItems are
+        # present and, in the OI table, may terminate the whole macOS app.
+        # Sort complete rows ourselves so every cell (including backgrounds,
+        # fonts and the signal dots) moves together.
+        rows = []
+        for row in range(self.rowCount()):
+            cells = [self.takeItem(row, col) for col in range(self.columnCount())]
+            item = cells[column] if column < len(cells) else None
+            numeric_value = item.data(Qt.ItemDataRole.UserRole) if item else None
+            if isinstance(numeric_value, (int, float)):
+                key = (0, numeric_value)
+            else:
+                key = (1, item.text().casefold() if item else "")
+            rows.append((key, cells))
+
+        rows.sort(
+            key=lambda entry: entry[0],
+            reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
+        )
+
         self.setUpdatesEnabled(False)
-        self.setSortingEnabled(True)
-        self.sortItems(column, self._sort_order)
-        self.setSortingEnabled(False)
+        for row, (_, cells) in enumerate(rows):
+            for col, item in enumerate(cells):
+                self.setItem(row, col, item)
         self.setUpdatesEnabled(True)
 
     def set_rows(self, rows):
