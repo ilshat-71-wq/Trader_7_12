@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO="$HOME/Documents/Trader_7_12"
 PLIST="$HOME/Library/LaunchAgents/com.ilshat.trader712.cloud.plist"
+PYTHON_BIN="$(command -v python3)"
+if [ -z "$PYTHON_BIN" ]; then echo "python3 not found"; exit 1; fi
 LOG_DIR="$REPO/Cloud/logs"
 
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
@@ -17,8 +19,7 @@ cat > "$PLIST" <<EOF
     <string>com.ilshat.trader712.cloud</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>python3</string>
+        <string>$PYTHON_BIN</string>
         <string>-m</string>
         <string>uvicorn</string>
         <string>Cloud.app:app</string>
