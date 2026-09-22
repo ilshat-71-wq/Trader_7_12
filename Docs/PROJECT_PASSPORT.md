@@ -8,7 +8,8 @@
 **Futures OI scanner:** 2.7.20  
 **Последний функциональный commit:** `272a9c1943a78bb9216fd4be7bc48498c89c9ab7`  
 **Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
-**Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`
+**Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
+**Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
 
 ## 1. Назначение
 
@@ -399,7 +400,7 @@ Latest sound commit:
 
 This is a UI/audio issue, not a market-data calculation issue.
 
-## 17. macOS build / signing — UPDATED 13.09.2026
+## 17. macOS build / signing — UPDATED 22.09.2026
 
 Build script:
 
@@ -407,45 +408,19 @@ Build script:
 scripts/build_mac_app.sh
 ```
 
-Application:
+Production client:
 
 ```text
 dist/Trader_7_12 Pro.app
 ```
 
+There is exactly **one desktop application**. We do not create separate applications for Radar, Futures OI, Diagnostics, Cloud, or any other subsystem. These are functional areas of the same `Trader_7_12 Pro.app`.
+
+The Cloud Market Data Engine is a backend service, not a second desktop application.
+
 PyInstaller: onedir + macOS `.app` BUNDLE. Local production signing is ad-hoc.
 
-### Signing incident and root cause
-
-A PyInstaller build completed packaging but BUNDLE signing failed with:
-
-```text
-resource fork, Finder information, or similar detritus not allowed
-```
-
-Diagnostics proved:
-
-```text
-source Python.framework → no relevant xattr output
-source PySide6 → no relevant xattr output
-build/ → clean
-
-dist/ → contaminated
-```
-
-The generated `dist` tree contained `com.apple.FinderInfo` and `com.apple.fileprovider.fpfs#P` on nested Python/PySide6 frameworks. No `._*` AppleDouble files and no `com.apple.ResourceFork` were found.
-
-Conclusion: metadata is introduced in the generated distribution tree during/around PyInstaller BUNDLE construction under the project filesystem. Cleaning the finished `.app` after PyInstaller is too late because PyInstaller itself attempts BUNDLE signing before post-build cleanup.
-
-### Build fix
-
-Commit:
-
-```text
-f2e0aff5bf5034aa483cb81b3834640735feb382
-```
-
-The build script was changed to stage PyInstaller output outside the affected project/File Provider metadata tree, perform controlled final signing/verification, and only then place the production `.app` in `dist`.
+The build script was changed in commit `f2e0aff5bf5034aa483cb81b3834640735feb382` to stage PyInstaller output outside the affected project/File Provider metadata tree, perform controlled final signing/verification, and then place the single production application in `dist`.
 
 Required final verification:
 
@@ -454,7 +429,7 @@ Required final verification:
 Code signing: ad-hoc verified
 ```
 
-**Important:** the new build has NOT yet been confirmed successful by a real local build as of this passport update. Do not claim build green until the user runs the updated script and receives `=== APP BUILD OK ===`.
+The current source checkpoint is ready for local iMac synchronization. A successful build/open on the iMac is the acceptance step; do not claim it is green until the local command actually returns the verification line.
 
 ## 18. Tests
 
@@ -491,32 +466,43 @@ NO PORTFOLIO MANAGEMENT
 
 ## 20. Current priorities — STRICT ORDER
 
-### P0 — Mapping correctness
-- classify all unresolved underlying mappings;
-- distinguish BASE-required from futures-only;
-- verify real BCS ticker/classCode pairs;
-- improve supported BASE coverage;
-- preserve `UNAVAILABLE` when real source is absent;
-- add regression tests for repaired mapping families.
+### P0 — iMac application synchronization
+- pull the current `main`;
+- build the single `Trader_7_12 Pro.app`;
+- open that same application;
+- inspect the complete single-window client: Radar, Futures OI, Diagnostics, Settings;
+- verify Cloud status and data refresh presentation.
 
-### P1 — Scan speed
-- use `timings_seconds` to identify bottleneck;
-- validate the new overlapping per-ticker metadata cache against a complete live scan; add in-flight dedupe only if concurrent overlap remains measurable;
-- eliminate repeated full instrument metadata downloads;
-- add safe history/session candle cache where justified;
-- keep bounded concurrency and BCS network safety;
+### P1 — Cloud API / multi-client validation
+- `/health`;
+- `/v1/status`;
+- `/v1/snapshot`;
+- `/v1/stream`;
+- snapshot version increments;
+- last-good snapshot survives failed refresh;
+- concurrent `POST /v1/scan` is serialized;
+- multiple WebSocket clients receive the same snapshot;
+- clients do not create additional BCS scans.
+
+### P2 — UI semantics / polish
+Before changing calculations, verify the meaning and presentation of:
+- `D1-RS`;
+- `Score`;
+- `Role`;
+- `SIGNAL`;
+- `PROB`;
+- `FLOW`;
+- `ACTION`;
+- `ZONE`.
+
+Keep strict candidates and WATCH candidates visually distinct. Keep FLOW, ACTION and final SIGNAL as separate concepts.
+
+### P3 — Measured performance / mapping only where evidence requires it
+- do not change stable M5/D1 candle settings without measured evidence;
+- preserve the working metadata cache;
+- preserve real-data-only mapping;
+- classify remaining unavailable BASE mappings honestly;
 - measure every optimization before/after.
-
-### P2 — Diagnostics / acceptance
-- make mapping coverage honest and explicit;
-- expose timing phases clearly;
-- preserve truthful missing-data states;
-- keep Futures OI and money-flow sources explicit.
-
-### P3 — UI / audio polish
-- confirm/fix start scan melody;
-- keep visualization light, clear and fast;
-- preserve one coherent single-window application.
 
 ## 21. Definition of professional completion
 
@@ -533,7 +519,7 @@ Before calling the project production-ready:
 - Radar uses true relative strength vs market;
 - regression suite green;
 - macOS build green and ad-hoc signature verified;
-- UI remains one coherent professional application.
+- UI remains one coherent professional application; there is exactly one desktop application and all functional areas live inside it.
 
 ## 22. Non-negotiable rules
 
@@ -550,4 +536,6 @@ NO PORTFOLIO MANAGEMENT
 NEVER RESTART THE PROJECT
 NEVER SPLIT INTO MINI-SCANNERS
 NEVER CREATE EXTRA APPLICATIONS OR UNNECESSARY ARCHITECTURE LAYERS
+
+ONE MACOS APP ONLY — `Trader_7_12 Pro.app`
 ```
