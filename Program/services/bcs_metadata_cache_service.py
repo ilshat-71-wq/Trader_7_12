@@ -97,6 +97,49 @@ class BCSMetadataCacheService:
                     event.set()
 
     @classmethod
+    def get_cached_instruments_by_tickers(cls, tickers):
+        """Return already-cached real BCS cards and the requested aliases they satisfy."""
+        wanted = {
+            cls._lookup_key(ticker)
+            for ticker in tickers
+            if cls._lookup_key(ticker)
+        }
+        if not wanted:
+            return [], set()
+
+        records = []
+        matched = set()
+        seen = set()
+        with cls._lock:
+            entries = [
+                entry for entry in cls._by_type.values()
+                if cls._fresh(entry)
+            ]
+            for entry in entries:
+                for record in entry["records"]:
+                    aliases = cls._record_aliases(record)
+                    hit = aliases.intersection(wanted)
+                    if not hit:
+                        continue
+                    ticker = str(
+                        record.get("ticker")
+                        or record.get("secCode")
+                        or record.get("securityCode")
+                        or ""
+                    ).strip().upper()
+                    class_code = str(
+                        record.get("classCode")
+                        or record.get("class_code")
+                        or ""
+                    ).strip().upper()
+                    key = (ticker, class_code)
+                    if key not in seen:
+                        records.append(dict(record))
+                        seen.add(key)
+                    matched.update(hit)
+        return records, matched
+
+    @classmethod
     def get_instruments_by_tickers(cls, api, tickers):
         """Resolve real BCS metadata, reusing cached catalogs and deduplicating misses."""
         normalized = tuple(sorted({str(x or "").strip().upper() for x in tickers if str(x or "").strip()}))
