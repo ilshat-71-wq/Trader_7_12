@@ -96,10 +96,10 @@ class MorningRadarWidget(QWidget):
         )
         root.addWidget(self.summary)
 
-        self.table = QTableWidget(0, 10)
+        self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels([
             "Ticker", "Price Δ%", "RS", "₽/min", "15m Δ%",
-            "Accel", "Interest", "SHORT WATCH", "SIGNAL", "PROB",
+            "Accel", "Interest", "SHORT WATCH", "PERSIST", "SIGNAL", "PROB",
         ])
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -152,10 +152,12 @@ class MorningRadarWidget(QWidget):
         regime = str(latest.get("market_regime") or "—")
         benchmark = latest.get("benchmark_change_percent")
         short_count = sum(1 for x in stocks if x.get("short_watch"))
+        persistent_short = sum(1 for x in stocks if x.get("short_watch") and int(x.get("short_watch_persistence") or 0) >= 2)
         rising_interest = sum(1 for x in stocks if x.get("interest") == "↑")
         self.summary.setText(
             f"REGIME {regime} • IMOEX2 {benchmark if benchmark is not None else '—'}% • "
             f"INTEREST ↑ {rising_interest} • SHORT WATCH {short_count} • "
+            f"PERSISTENT SHORT {persistent_short} • "
             f"SNAPSHOTS {len(history)}.  "
             "Interest uses changes in existing 15m/rate/acceleration fields; "
             "SHORT WATCH is a separate weakness lane, not a trade order."
@@ -180,12 +182,13 @@ class MorningRadarWidget(QWidget):
                 self._fmt(item.get("money_acceleration")),
                 str(item.get("interest") or "—"),
                 "● SHORT WATCH" if item.get("short_watch") else "—",
+                f"{int(item.get('short_watch_persistence') or 0)}/7" if item.get("short_watch") else "—",
                 str(item.get("signal") or "—"),
                 self._fmt(item.get("signal_probability")),
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if col in (1, 2, 3, 4, 5, 9):
+                if col in (1, 2, 3, 4, 5, 10):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, col, cell)
             if item.get("short_watch"):
@@ -198,6 +201,7 @@ class MorningRadarWidget(QWidget):
                 self.table.item(r, 6).setForeground(QColor("#69e59a"))
             if item.get("short_watch"):
                 self.table.item(r, 7).setForeground(QColor("#ff7d7d"))
+                self.table.item(r, 8).setForeground(QColor("#ff7d7d"))
 
         oi = latest.get("futures_oi") or []
         oi_hot = sum(
