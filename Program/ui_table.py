@@ -128,7 +128,15 @@ class MarketTableWidget(QTableWidget):
 
         header = self.horizontalHeader()
         header.setSortIndicator(column, self._sort_order)
+
+        # QTableWidget can ignore a user sort when sorting has been disabled
+        # during refresh. Temporarily enable its native sorter for the actual
+        # click, then disable it again so row insertion never auto-reorders.
+        self.setUpdatesEnabled(False)
+        self.setSortingEnabled(True)
         self.sortItems(column, self._sort_order)
+        self.setSortingEnabled(False)
+        self.setUpdatesEnabled(True)
 
     def set_rows(self, rows):
         self.setUpdatesEnabled(False)
