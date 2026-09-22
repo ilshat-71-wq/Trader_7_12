@@ -382,7 +382,9 @@ class CloudMarketDataEngine:
                 try:
                     await asyncio.to_thread(self.scan_once)
                 except Exception:
-                    pass
+                    # Leave the slot unmarked so the next scheduler poll retries it.
+                    await asyncio.sleep(10.0)
+                    continue
                 last_slot_key = slot_key
                 last_regular_scan = time.monotonic()
                 await asyncio.sleep(3.0)
