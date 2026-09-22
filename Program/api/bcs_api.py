@@ -334,7 +334,11 @@ class BCSAPI:
                 break
 
             try:
-                cached_index = self._underlying_metadata_index_cache.get(instrument_type)
+                index_cache = getattr(self, "_underlying_metadata_index_cache", None)
+                if index_cache is None:
+                    index_cache = {}
+                    self._underlying_metadata_index_cache = index_cache
+                cached_index = index_cache.get(instrument_type)
                 if (
                     cached_index is not None
                     and now - cached_index[0] < self.INSTRUMENT_METADATA_CACHE_TTL
@@ -351,7 +355,7 @@ class BCSAPI:
                             continue
                         for alias in self._record_aliases(record):
                             index.setdefault(alias, []).append(record)
-                    self._underlying_metadata_index_cache[instrument_type] = (
+                    index_cache[instrument_type] = (
                         now,
                         index,
                         len(records),
