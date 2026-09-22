@@ -217,11 +217,11 @@ class TraderWindow(QWidget):
         columns = [
             "#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%",
             "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
-            "SIGNAL", "PROB", "ΔPROB",
+            "SIGNAL", "PROB", "ΔPROB", "BOOK", "TAPE", "FLOW RT",
         ]
         widths = [
             42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72,
-            78, 72, 72,
+            78, 72, 72, 82, 82, 82,
         ]
         self.result_table = MarketTableWidget(columns, widths)
         self.weak_result_table = MarketTableWidget(columns, widths)
@@ -526,6 +526,9 @@ class TraderWindow(QWidget):
                         f"{_number(item.get('signal_probability_delta'), 1)}%"
                         if item.get("signal_probability_delta") is not None else "NEW"
                     ),
+                    "—",
+                    "—",
+                    "—",
                 ],
                 item,
             ))
@@ -601,6 +604,7 @@ class TraderWindow(QWidget):
             f"REGIME {diagnostics.get('market_regime') or '—'}"
         )
 
+        self._spot_results_for_realtime = list(results or [])
         entries = self._rows_for_results(results)
 
         # The passport definition is relative performance against the live
@@ -636,6 +640,7 @@ class TraderWindow(QWidget):
             f"SPOT STRONGER THAN IMOEX2 — {regime_note} "
             "Green row = stock is rising; red row = stock is falling. "
             "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
+            "BOOK/TAPE/FLOW RT — live BCS WebSocket observed pressure scores; not probabilities. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
         self.weak_result_table.setToolTip(
