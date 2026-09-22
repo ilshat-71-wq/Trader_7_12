@@ -136,10 +136,12 @@ class MorningRadarService:
             previous = ordered[-1][1]
 
         previous_rows = {
-            str(item.get("spot_ticker")): item
+            str(item.get("ticker") or item.get("spot_ticker")): item
             for item in (previous or {}).get("stocks", [])
         }
         regime = (snapshot.get("radar_diagnostics") or {}).get("market_regime", "NEUTRAL")
+        diagnostics = snapshot.get("radar_diagnostics") or {}
+        countertrend = list(diagnostics.get("countertrend_watch") or [])
         stocks = []
         for rank, row in enumerate(radar, 1):
             ticker = str(row.get("spot_ticker") or "")
@@ -163,7 +165,44 @@ class MorningRadarService:
                     row.get("money_per_minute"), (old or {}).get("money_per_minute")
                 ),
                 "short_watch": _short_watch(regime, row),
+                "short_watch_persistence": (
+                    int((old or {}).get("short_watch_persistence") or 0) + 1
+                    if (old or {}).get("short_watch") else 0
+                ),
             })
+
+        existing_tickers = {str(x.get("ticker")) for x in stocks}
+        for candidate in countertrend:
+            ticker = str(candidate.get("ticker") or "")
+            if not ticker or ticker in existing_tickers:
+                continue
+            old = previous_rows.get(ticker)
+            stocks.append({
+                "rank": len(stocks) + 1,
+                "ticker": ticker,
+                "change_percent": candidate.get("change_percent"),
+                "relative_strength": candidate.get("relative_strength"),
+                "money_per_minute": candidate.get("money_per_minute"),
+                "recent_money": candidate.get("recent_money"),
+                "money_acceleration": candidate.get("money_acceleration"),
+                "directional_score": candidate.get("directional_score"),
+                "signal": candidate.get("signal"),
+                "signal_probability": candidate.get("signal_probability"),
+                "interest": _interest_state(candidate, old),
+                "recent_money_delta_pct": _pct_delta(
+                    candidate.get("recent_money"), (old or {}).get("recent_money")
+                ),
+                "rpm_delta_pct": _pct_delta(
+                    candidate.get("money_per_minute"), (old or {}).get("money_per_minute")
+                ),
+                "short_watch": True,
+                "short_watch_persistence": (
+                    int((old or {}).get("short_watch_persistence") or 0) + 1
+                    if (old or {}).get("short_watch") else 1
+                ),
+                "countertrend_reason": candidate.get("reason"),
+            })
+            existing_tickers.add(ticker)
 
         entry = {
             "slot": slot,
@@ -177,6 +216,7 @@ class MorningRadarService:
                 "coverage_percent"
             ),
             "stocks": stocks,
+            "countertrend_watch": countertrend,
             "futures_oi": list(snapshot.get("futures_oi") or []),
             "futures_diagnostics": dict(snapshot.get("futures_diagnostics") or {}),
             "timing": dict(snapshot.get("timing") or {}),
