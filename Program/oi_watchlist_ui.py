@@ -302,10 +302,19 @@ class OIWatchlistTraderWindow(TraderWindow):
         for row_index, item in enumerate(prepared_results):
             signal = str(item.get('signal') or '')
             brush = QBrush(QColor('#69e59a' if signal == 'LONG' else '#ff7d7d' if signal == 'SHORT' else '#c9d0d6'))
-            for col in (12, 13, 14):
+            signal_cell = self.oi_table.item(row_index, 12)
+            if signal_cell:
+                signal = str(item.get("signal") or "").upper()
+                signal_cell.setText({
+                    "LONG": "🟢 LONG",
+                    "SHORT": "🔴 SHORT",
+                    "NEUTRAL": "⚪ NEUTRAL",
+                }.get(signal, "⚪ —"))
+                signal_cell.setForeground(QColor("#e6e9ed"))
+            for col in (13, 14):
                 cell = self.oi_table.item(row_index, col)
                 if cell:
-                    cell.setForeground(brush)
+                    cell.setForeground(QColor("#c9d0d6"))
         self.oi_table.setToolTip(
             "GREEN ROW — top 5 futures by real current-day monetary turnover "
             "(VALTODAY / available Price×Volume-style notional). "
