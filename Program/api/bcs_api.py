@@ -313,7 +313,9 @@ class BCSAPI:
             if self._record_class_code(record):
                 unresolved.difference_update(self._record_aliases(record))
         if not unresolved:
-            return existing, {"fallback_types": [], "fallback_records": 0,        result = list(existing)
+            return existing, {"fallback_types": [], "fallback_records": 0, "fallback_matches": 0, "fallback_unresolved": 0}
+
+        result = list(existing)
         seen = {
             (
                 self._instrument_lookup_key(record.get("ticker") or record.get("secCode") or record.get("securityCode")),
