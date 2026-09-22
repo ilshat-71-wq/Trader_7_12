@@ -50,6 +50,7 @@ def test_engine_publishes_shared_snapshot():
     assert payload["timing"]["radar_ms"] >= 0
     assert payload["timing"]["futures_oi_ms"] >= 0
     assert payload["timing"]["money_flow_ms"] >= 0
+    assert "radar_breakdown_seconds" in payload["timing"]
     assert engine.status["status"] == "READY"
     assert engine.status["timing"]["total_ms"] == payload["timing"]["total_ms"]
 
