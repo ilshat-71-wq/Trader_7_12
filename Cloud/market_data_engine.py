@@ -371,7 +371,19 @@ class CloudMarketDataEngine:
         last_slot_key = None
         while True:
             now = datetime.now(self.morning_radar.TIMEZONE)
-            slot = self.morning_radar.slot_for(now)
+            today = self.morning_radar.load(now.date().isoformat())
+            captured_today = {
+                str(item.get("slot"))
+                for item in (today.get("snapshots") or [])
+                if item.get("slot")
+            }
+            slot = None
+            for candidate in self.morning_radar.SLOTS:
+                candidate_dt = datetime.combine(now.date(), candidate, tzinfo=self.morning_radar.TIMEZONE)
+                age_seconds = (now - candidate_dt).total_seconds()
+                if 0 <= age_seconds <= 300 and candidate.strftime("%H:%M") not in captured_today:
+                    slot = candidate.strftime("%H:%M")
+                    break
             slot_key = f"{now.date().isoformat()}:{slot}" if slot else None
 
             if slot and slot_key != last_slot_key:
