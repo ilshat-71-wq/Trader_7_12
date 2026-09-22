@@ -22,6 +22,8 @@ hiddenimports = [
     "services.spot_universe_service",
     "services.history_candle_service",
     "services.market_session_service",
+    "services.realtime_microstructure_service",
+    "websocket",
 ]
 hiddenimports += collect_submodules("api")
 hiddenimports += collect_submodules("services")
