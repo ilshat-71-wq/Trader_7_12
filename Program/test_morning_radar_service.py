@@ -56,6 +56,7 @@ def test_history_derives_interest_and_up_market_short_watch(tmp_path: Path):
     )
     assert second["stocks"][0]["interest"] == "↑"
     assert second["stocks"][0]["recent_money_delta_pct"] == 20.0
+    assert second["stocks"][0]["short_watch_persistence"] == 2
 
 
 def test_persistence_round_trip(tmp_path: Path):
