@@ -89,6 +89,8 @@ def test_get_instruments_by_tickers_reuses_overlapping_ticker_cards(monkeypatch)
             self._ticker_metadata_cache = {}
             self._ticker_metadata_record_cache = {}
             self._underlying_metadata_index_cache = {}
+            self.info_url = "https://test.local"
+            self.INSTRUMENT_METADATA_CACHE_TTL = 300.0
 
         def headers(self):
             return {}
