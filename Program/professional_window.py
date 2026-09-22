@@ -118,7 +118,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
             self.market_tabs.setTabText(0, "RADAR")
             self.market_tabs.setTabText(1, "FUTURES OI")
             self.market_tabs.setTabText(2, "DIAGNOSTICS")
-        self.market_tabs.setToolTip("Market → Morning Radar → Futures OI → diagnostics → settings")
+        self.market_tabs.setToolTip("Market → Futures OI → diagnostics → settings")
 
     def _build_morning_radar_tab(self):
         self.morning_radar = MorningRadarWidget()
