@@ -651,6 +651,45 @@ class MarketAttentionScannerService:
             row["preferred_window_active"] = preferred
             row.setdefault("qualification_status", "QUALIFIED")
 
+        # Countertrend weakness is informational only and deliberately kept
+        # separate from the existing directional selection. This preserves the
+        # production LONG/SHORT gates while exposing weak names even when the
+        # benchmark itself is rising.
+        countertrend_pool = [
+            x for x in results
+            if x.get("liquidity_gate")
+            and x.get("relative_strength_quality") == "MEANINGFUL"
+            and (
+                (market_regime == "UP" and self._f(x.get("relative_strength")) < -self.MIN_MEANINGFUL_RS_PP)
+                or (market_regime == "DOWN" and self._f(x.get("relative_strength")) > self.MIN_MEANINGFUL_RS_PP)
+            )
+        ]
+        countertrend_pool.sort(
+            key=lambda x: (
+                self._f(x.get("attention_score")),
+                abs(self._f(x.get("relative_strength"))),
+                self._f(x.get("recent_money_per_minute")),
+            ),
+            reverse=True,
+        )
+        countertrend_watch = []
+        for rank, row in enumerate(countertrend_pool[: max(10, int(limit or 0))], 1):
+            countertrend_watch.append({
+                "ticker": row.get("spot_ticker"),
+                "change_percent": row.get("change_percent"),
+                "relative_strength": row.get("relative_strength"),
+                "money_per_minute": row.get("money_per_minute"),
+                "recent_money": row.get("recent_money"),
+                "money_acceleration": row.get("money_acceleration"),
+                "attention_score": row.get("attention_score"),
+                "directional_score": row.get("directional_score"),
+                "signal": row.get("signal"),
+                "signal_probability": row.get("signal_probability"),
+                "market_regime": market_regime,
+                "reason": "UP_MARKET_WEAKNESS" if market_regime == "UP" else "DOWN_MARKET_STRENGTH",
+                "rank": rank,
+            })
+
         timings["calculation"] = round(perf_counter() - phase_started, 3)
         total_seconds = round(perf_counter() - scan_started, 3)
         timings["total"] = total_seconds
@@ -690,6 +729,7 @@ class MarketAttentionScannerService:
             "radar_capacity": int(limit or 0),
             "long_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"],
             "short_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"],
+            "countertrend_watch": countertrend_watch,
             "long_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"), None),
             "group_status": {g: ("AVAILABLE" if any(x.get("market_group") == g for x in universe) else "UNAVAILABLE") for g in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
