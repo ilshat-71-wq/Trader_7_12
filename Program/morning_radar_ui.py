@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -101,8 +101,8 @@ class MorningRadarWidget(QWidget):
             "Ticker", "Price Δ%", "RS", "₽/min", "15m Δ%",
             "Accel", "Interest", "SHORT WATCH", "PERSIST", "SIGNAL", "PROB",
         ])
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(False)
