@@ -221,6 +221,26 @@ Known previous successful build:
 
 The single application UI has NOT been remotely inspected in this checkpoint because this ChatGPT session does not have a terminal/GUI-control channel into the user's Mac. Do not claim that the app was opened or visually inspected. The next local step is to build/open the current app and inspect the actual UI.
 
+### 13A. UI clarification update — 22.09.2026
+- SPOT is now split into exactly two live relative-strength tabs:
+- `STRONGER THAN IMOEX2`: positive RS versus the live benchmark.
+- `WEAKER THAN IMOEX2`: negative RS versus the live benchmark.
+- The split uses the actual current RS sign, not the previous ±0.01 UI threshold, so small real differences are not hidden.
+- Row background color now represents the stock's own current price direction:
+- green = stock rising;
+- red = stock falling.
+- Therefore, when IMOEX2 rises: stronger stocks are green; weaker-but-still-rising stocks are green; falling stocks are red.
+- When IMOEX2 falls: rising stocks and stocks falling less than IMOEX2 are green; stocks falling more than IMOEX2 are red.
+- RS remains the strong/weak classification; row color is only price direction.
+- Futures OI green row highlight now means only top-5 current-day monetary turnover (`VALTODAY` / real exchange notional), not HOT liquidity or money-flow rank.
+- FLOW/ACTION analytical colors and SIGNAL colors remain separate layers.
+- Removed the green LIQ NOW emoji from OI explanatory text to avoid confusing liquidity with the monetary-turnover highlight.
+- `MarketTableWidget` header sorting was hardened by temporarily enabling native sorting during an explicit header-click sort, then disabling it again after sorting. This addresses the observed OI header sorting failure after refresh.
+- Current UI commits:
+- `5632fde` Fix reliable table header sorting
+- `680a0f0` Split SPOT by live relative strength and color by price direction
+- `b0d7667` Highlight top monetary-turnover futures in OI
+- `358050b` Clarify OI green highlight semantics
 ### 13. Immediate next step
 
 Synchronize the iMac with current `main` and build/open the single application.
