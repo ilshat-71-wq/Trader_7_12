@@ -13,7 +13,7 @@ class RequestHelper:
 
     # BCS documents a 10 RPS market-data limit. Keep request starts below it
     # across scanner worker threads and across GET/POST calls.
-    REQUEST_INTERVAL = 0.15
+    REQUEST_INTERVAL = 0.11
     _rate_lock = threading.Lock()
     _last_request_at = 0.0
     _session_local = threading.local()
