@@ -49,7 +49,11 @@ class BCSAPI:
     _initialized = False
 
     def __new__(cls):
-        if cls._shared_instance is None:
+        # Keep the production BCSAPI process-wide singleton, but allow
+        # subclasses (including test fakes) to have their own instance.
+        # Looking up an inherited _shared_instance would otherwise return
+        # the real BCSAPI object and bypass subclass overrides.
+        if "_shared_instance" not in cls.__dict__ or cls._shared_instance is None:
             cls._shared_instance = super().__new__(cls)
         return cls._shared_instance
 
