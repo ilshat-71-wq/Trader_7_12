@@ -48,7 +48,7 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-@dataclass(frozen=True)
+@dataclass
 class EngineSnapshot:
     version: int
     generated_at: str
@@ -232,9 +232,10 @@ class CloudMarketDataEngine:
                 "total_ms": self._timing_ms(scan_started, total_finished),
                 "total_seconds": round(total_finished - scan_started, 3),
             }
+
             with self._snapshot_lock:
                 snapshot.timing = timing
-                self._last_scan_timing = timing
+                self._last_scan_timing = dict(timing)
 
             print(
                 "CLOUD SCAN TIMING:",
