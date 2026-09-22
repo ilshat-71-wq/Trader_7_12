@@ -167,7 +167,7 @@ class MorningRadarService:
                 "short_watch": _short_watch(regime, row),
                 "short_watch_persistence": (
                     int((old or {}).get("short_watch_persistence") or 0) + 1
-                    if (old or {}).get("short_watch") else 0
+                    if (old or {}).get("short_watch") else (1 if _short_watch(regime, row) else 0)
                 ),
             })
 
