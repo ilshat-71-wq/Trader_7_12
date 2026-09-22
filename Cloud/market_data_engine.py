@@ -26,9 +26,10 @@ from typing import Any
 from services.market_information_scanner_service import MarketInformationScannerService
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.money_flow_service import MoneyFlowService
+from Cloud.morning_radar import MorningRadarService, MSK
 
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 DEFAULT_SCAN_INTERVAL_SECONDS = 300
 DEFAULT_RADAR_LIMIT = 10
 
@@ -101,6 +102,7 @@ class CloudMarketDataEngine:
         self._radar = MarketInformationScannerService()
         self._futures = FuturesOIMarketDataScannerService()
         self._money_flow = MoneyFlowService()
+        self.morning_radar = MorningRadarService()
 
         self._scan_lock = threading.Lock()
         self._snapshot_lock = threading.RLock()
@@ -139,6 +141,7 @@ class CloudMarketDataEngine:
                 "data_policy": "REAL_BCS_DATA_ONLY",
                 "decision_policy": "NO_TRADE_EXECUTION",
                 "timing": self._last_scan_timing,
+                "morning_radar": self.morning_radar.as_dict(),
             }
 
     @property
@@ -258,6 +261,10 @@ class CloudMarketDataEngine:
                 snapshot.timing = timing
                 self._last_scan_timing = dict(timing)
 
+            # Morning Radar records only scheduled Moscow slots. It reuses the
+            # exact production snapshot just generated; no second market scan.
+            self.morning_radar.record_if_due(snapshot.as_dict())
+
             print(
                 "CLOUD SCAN TIMING:",
                 f"RADAR={timing['radar_ms'] / 1000:.3f}s",
@@ -363,8 +370,21 @@ class CloudMarketDataEngine:
                     pass
 
     async def run_forever(self) -> None:
-        """Continuously refresh the shared snapshot without overlapping scans."""
+        """Run normal refreshes and the exact Moscow Morning Radar slots."""
+        last_slot_key = None
         while True:
+            now = datetime.now(MSK)
+            slot = self.morning_radar.due_slot(now)
+            slot_key = f"{now.date().isoformat()}:{slot}" if slot else None
+            if slot and slot_key != last_slot_key:
+                try:
+                    await asyncio.to_thread(self.scan_once)
+                except Exception:
+                    pass
+                last_slot_key = slot_key
+                await asyncio.sleep(3.0)
+                continue
+
             started = time.monotonic()
             try:
                 await asyncio.to_thread(self.scan_once)
