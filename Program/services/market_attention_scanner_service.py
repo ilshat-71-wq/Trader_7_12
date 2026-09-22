@@ -123,8 +123,20 @@ class MarketAttentionScannerService:
         for row in spots:
             if not isinstance(row, dict):
                 continue
-            ticker = self._metadata_ticker(row)
-            code = self._metadata_class_code(row)
+            # SpotUniverseService returns normalized SPOT rows using
+            # spot_ticker/spot_class_code. Reuse those real metadata rows
+            # directly instead of falling through to another BCS metadata
+            # lookup.
+            ticker = str(
+                row.get("spot_ticker")
+                or self._metadata_ticker(row)
+                or ""
+            ).strip().upper()
+            code = str(
+                row.get("spot_class_code")
+                or self._metadata_class_code(row)
+                or ""
+            ).strip()
             if not ticker or not code:
                 continue
             key = self.api._instrument_lookup_key(ticker)
