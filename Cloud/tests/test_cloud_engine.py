@@ -11,7 +11,38 @@ from Cloud.market_data_engine import CloudMarketDataEngine
 
 class FakeRadar:
     def __init__(self):
-        self._last_scan_diagnostics = {"radar": "ok"}
+        self._last_scan_diagnostics = {
+            "radar": "ok",
+            "timings_seconds": {
+                "universe": 1.0,
+                "benchmark": 2.0,
+                "benchmark_d1": 0.1,
+                "m5": 0.2,
+                "d1": 0.3,
+                "calculation": 0.4,
+                "total": 4.0,
+                "universe_breakdown": {
+                    "spot_load": 3.0,
+                    "macro_metadata": 0.5,
+                    "filtering": 0.1,
+                    "assembly": 0.1,
+                    "total": 3.7,
+                    "spot_records": 9321,
+                    "macro_records": 4,
+                    "universe_records": 263,
+                },
+                "benchmark_breakdown": {
+                    "metadata": 1.0,
+                    "indices_fallback": 0.0,
+                    "candles": 1.0,
+                    "quote_fallback": 0.0,
+                    "total": 2.0,
+                    "metadata_records": 2,
+                    "indices_fallback_records": 0,
+                    "resolved_benchmarks": ["IMOEX2", "IRUS2"],
+                },
+            },
+        }
 
     def scan(self, limit=10):
         return [{"ticker": "TEST", "selection_role": "MARKET_LEADER"}]
@@ -51,6 +82,9 @@ def test_engine_publishes_shared_snapshot():
     assert payload["timing"]["futures_oi_ms"] >= 0
     assert payload["timing"]["money_flow_ms"] >= 0
     assert "radar_breakdown_seconds" in payload["timing"]
+    assert payload["timing"]["universe_breakdown_seconds"]["spot_load"] == 3.0
+    assert payload["timing"]["benchmark_breakdown_seconds"]["candles"] == 1.0
+    assert engine.status["timing"]["universe_breakdown_seconds"]["spot_records"] == 9321
     assert engine.status["status"] == "READY"
     assert engine.status["timing"]["total_ms"] == payload["timing"]["total_ms"]
 
