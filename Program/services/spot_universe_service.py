@@ -6,6 +6,7 @@ any futures universe, expiry or liquidity lookup is performed.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import perf_counter
 
 from api.bcs_api import BCSAPI
 from services.bcs_metadata_cache_service import BCSMetadataCacheService
@@ -120,20 +121,28 @@ class SpotUniverseService:
             if not self.api.authorize():
                 return []
 
+        load_started = perf_counter()
         loaded_by_kind = {}
+        load_timings = {}
         with ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)), thread_name_prefix="spot-universe") as executor:
-            pending = [executor.submit(self._load_one, kind) for kind in self.INSTRUMENT_TYPES]
+            pending = {executor.submit(self._load_one, kind): kind for kind in self.INSTRUMENT_TYPES}
             for future in as_completed(pending):
+                worker_started = perf_counter()
+
                 try:
                     kind, items = future.result()
                 except Exception as exc:
                     print(f"SPOT metadata worker failed: {type(exc).__name__}")
                     continue
                 loaded_by_kind[kind] = items if isinstance(items, list) else []
-
+                load_timings[kind] = {\n                    "seconds": round(perf_counter() - worker_started, 3),\n                    "records": len(loaded_by_kind[kind]),\n                }\n
         failed_kinds = [kind for kind in self.INSTRUMENT_TYPES if not loaded_by_kind.get(kind)]
         if failed_kinds:
-            loaded_by_kind.update(self._load_sequential_fallback(failed_kinds))
+            fallback_started = perf_counter()
+            recovered = self._load_sequential_fallback(failed_kinds)
+            loaded_by_kind.update(recovered)
+            for kind, items in recovered.items():
+                load_timings[kind] = {\n                    "seconds": round(perf_counter() - fallback_started, 3),\n                    "records": len(items) if isinstance(items, list) else 0,\n                    "mode": "sequential_fallback",\n                }
 
         records = []
         for kind, items in loaded_by_kind.items():
@@ -161,4 +170,4 @@ class SpotUniverseService:
         unique = {}
         for item in records:
             unique[(item["spot_ticker"], item["spot_class_code"])] = item
-        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
+        self._last_load_timing = {\n            "total": round(perf_counter() - load_started, 3),\n            "by_type": load_timings,\n            "records": len(records),\n            "unique_records": len(unique),\n        }\n        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
