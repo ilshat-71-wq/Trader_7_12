@@ -142,7 +142,7 @@ class MorningRadarWidget(QWidget):
             ("#69e59a" if complete else "#d4af55") + ";"
         )
         self.meta.setText(
-            f"{self._payload.get('date','—')} MSK • "
+            f"{self._payload.get('trading_date', self._payload.get('date','—'))} MSK • "
             f"SLOTS {', '.join(captured) if captured else '—'} • "
             f"CLOUD {self.cloud_url()}"
         )
