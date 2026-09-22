@@ -111,3 +111,50 @@ def test_get_instruments_by_tickers_reuses_overlapping_ticker_cards(monkeypatch)
     assert {record["ticker"] for record in first} == {"SBER", "GAZP"}
     assert {record["ticker"] for record in second} == {"GAZP", "LKOH"}
     assert calls == [["GAZP", "SBER"], ["LKOH"]]
+
+
+
+def test_get_instruments_by_tickers_reuses_shared_catalog(monkeypatch):
+    from types import SimpleNamespace
+    from api.request_helper import RequestHelper
+    from services.bcs_metadata_cache_service import BCSMetadataCacheService
+
+    class FakeTickerBCS(BCSAPI):
+        def __init__(self):
+            self._ticker_metadata_cache = {}
+            self._ticker_metadata_record_cache = {}
+            self._underlying_metadata_index_cache = {}
+            self.info_url = "https://test.local"
+            self.INSTRUMENT_METADATA_CACHE_TTL = 300.0
+
+        def headers(self):
+            return {}
+
+    BCSMetadataCacheService.clear()
+    try:
+        now = __import__("time").monotonic()
+        with BCSMetadataCacheService._lock:
+            BCSMetadataCacheService._by_type["STOCK"] = {
+                "at": now,
+                "records": [
+                    {"ticker": "SBER", "classCode": "TQBR"},
+                    {"ticker": "GAZP", "classCode": "TQBR"},
+                ],
+            }
+
+        api = FakeTickerBCS()
+        calls = []
+
+        def fake_post(url, headers=None, json=None, **kwargs):
+            calls.append(list(json["tickers"]))
+            records = [{"ticker": ticker, "classCode": "TQBR"} for ticker in json["tickers"]]
+            return SimpleNamespace(status_code=200, text="", json=lambda: {"instruments": records})
+
+        monkeypatch.setattr(RequestHelper, "post", fake_post)
+
+        records = api.get_instruments_by_tickers(["SBER", "GAZP"], resolve_underlying=False)
+
+        assert {record["ticker"] for record in records} == {"SBER", "GAZP"}
+        assert calls == []
+    finally:
+        BCSMetadataCacheService.clear()
