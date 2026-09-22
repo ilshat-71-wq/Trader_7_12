@@ -14,7 +14,7 @@ from services.signal_probability_service import SignalProbabilityService
 class MarketAttentionScannerService:
     """Read-only scanner for real BASE/SPOT instruments only."""
 
-    VERSION = "2.5.1"
+    VERSION = "2.5.2"
     RECENT_MINUTES = 15
     MAX_WORKERS = 6
     D1_MAX_WORKERS = 6
@@ -450,6 +450,7 @@ class MarketAttentionScannerService:
                 skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
         timings["d1"] = round(perf_counter() - phase_started, 3)
 
+        phase_started = perf_counter()
         rs_magnitudes = [abs(self._f(x.get("relative_strength"))) for x in results]
         market_regime = self._market_regime(benchmark_change)
         for row in results:
@@ -524,6 +525,7 @@ class MarketAttentionScannerService:
         timings["calculation"] = round(perf_counter() - phase_started, 3)
         total_seconds = round(perf_counter() - scan_started, 3)
         timings["total"] = total_seconds
+        timings["radar_total"] = total_seconds
         self._last_scan_diagnostics = {
             "status": "OK" if coverage_ok else "INSUFFICIENT_COVERAGE",
             "session": session_name,
