@@ -91,7 +91,7 @@ async def snapshot(authorization: str | None = Header(default=None)):
 @app.get("/v1/morning-radar")
 async def morning_radar(authorization: str | None = Header(default=None)):
     _require_api_key(authorization)
-    return engine.morning_radar.as_dict()
+    return engine.morning_radar.summary()
 
 
 @app.post("/v1/scan")
