@@ -34,6 +34,8 @@ class BCSAPI:
     CANDLE_TIMEOUT = 8.0
     CANDLE_RETRIES = 1
     CANDLE_MAX_CONCURRENCY = 4
+    CANDLE_DIAGNOSTICS = True
+    CANDLE_DIAGNOSTIC_EVERY = 50
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
     INSTRUMENT_METADATA_PAGE_SIZE = 200
@@ -61,6 +63,11 @@ class BCSAPI:
         self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
         self._candle_cache = {}
         self._instrument_metadata_cache = {}
+        self._candle_diag_lock = threading.RLock()
+        self._candle_diag = {
+            "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0},
+            "D": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0},
+        }
         self._candle_semaphore = threading.Semaphore(self.CANDLE_MAX_CONCURRENCY)
         self.__class__._initialized = True
 
@@ -551,6 +558,29 @@ class BCSAPI:
         result["records"] = filtered
         return result
 
+    def _print_candle_diagnostic(self, interval_key, diag):
+        if not self.CANDLE_DIAGNOSTICS:
+            return
+        requests = int(diag.get("requests", 0))
+        if requests <= 0 or requests % self.CANDLE_DIAGNOSTIC_EVERY != 0:
+            return
+        print(
+            f"CANDLE DIAGNOSTICS {interval_key}: "
+            f"requests={requests} "
+            f"cache_hits={int(diag.get('cache_hits', 0))} "
+            f"cache_misses={int(diag.get('cache_misses', 0))} "
+            f"http_ok={int(diag.get('http_ok', 0))} "
+            f"http_errors={int(diag.get('http_errors', 0))} "
+            f"http_seconds={diag.get('http_seconds', 0.0):.3f}"
+        )
+
+    def get_candle_diagnostics(self):
+        with self._candle_diag_lock:
+            return {
+                key: dict(value)
+                for key, value in self._candle_diag.items()
+            }
+
     def get_candles(self, ticker, class_code, interval="M5", start_time=None, end_time=None):
         """Load BCS candles with bounded retry, cache and safe concurrency."""
         url = f"{self.market_url}/candles-chart"
@@ -624,12 +654,32 @@ class BCSAPI:
             "endDate": request_end.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             "timeFrame": interval_key,
         }
+        http_started = time.perf_counter()
         try:
             with self._candle_semaphore:
                 r = RequestHelper.get(url, headers=self.headers(), params=params, timeout=self.CANDLE_TIMEOUT, max_retries=self.CANDLE_RETRIES)
         except Exception as exc:
+            elapsed = time.perf_counter() - http_started
+            if interval_key in self._candle_diag:
+                with self._candle_diag_lock:
+                    diag = self._candle_diag[interval_key]
+                    diag["requests"] += 1
+                    diag["http_errors"] += 1
+                    diag["http_seconds"] += elapsed
+                    self._print_candle_diagnostic(interval_key, diag)
             print("⚠️ Candle request failed:", ticker, interval, type(exc).__name__)
             return {}
+        elapsed = time.perf_counter() - http_started
+        if interval_key in self._candle_diag:
+            with self._candle_diag_lock:
+                diag = self._candle_diag[interval_key]
+                diag["requests"] += 1
+                diag["http_seconds"] += elapsed
+                if r.status_code == 200:
+                    diag["http_ok"] += 1
+                else:
+                    diag["http_errors"] += 1
+                self._print_candle_diagnostic(interval_key, diag)
         if r.status_code != 200:
             print("⚠️ Candle HTTP:", ticker, interval, r.status_code)
             return {}
