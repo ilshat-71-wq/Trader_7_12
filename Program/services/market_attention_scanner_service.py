@@ -112,8 +112,35 @@ class MarketAttentionScannerService:
         filtering_seconds = perf_counter() - filter_started
 
         macro_started = perf_counter()
-        alias_pool = tuple(dict.fromkeys(x for group in self.MACRO_ALIASES.values() for x in group))
-        macro_rows = self._metadata_by_alias(alias_pool)
+        macro_alias_keys = {
+            group: {self.api._instrument_lookup_key(alias) for alias in aliases}
+            for group, aliases in self.MACRO_ALIASES.items()
+        }
+        macro_rows = []
+        unresolved_groups = set(self.MACRO_ALIASES)
+        # Reuse the SPOT metadata catalog already loaded above. Only aliases
+        # absent from that real catalog fall through to BCS by-tickers lookup.
+        for row in spots:
+            if not isinstance(row, dict):
+                continue
+            ticker = self._metadata_ticker(row)
+            code = self._metadata_class_code(row)
+            if not ticker or not code:
+                continue
+            key = self.api._instrument_lookup_key(ticker)
+            for group, alias_keys in macro_alias_keys.items():
+                if key in alias_keys:
+                    macro_rows.append(row)
+                    unresolved_groups.discard(group)
+                    break
+        if unresolved_groups:
+            unresolved_aliases = tuple(
+                alias
+                for group, aliases in self.MACRO_ALIASES.items()
+                if group in unresolved_groups
+                for alias in aliases
+            )
+            macro_rows.extend(self._metadata_by_alias(unresolved_aliases))
         macro_metadata_seconds = perf_counter() - macro_started
 
         assembly_started = perf_counter()
@@ -125,8 +152,9 @@ class MarketAttentionScannerService:
             kind = str(row.get("type") or row.get("instrumentType") or row.get("securityType") or "").upper()
             if "FUT" in kind or "DERIV" in kind or not ticker or not code or ticker in seen_tickers:
                 continue
-            for group, aliases in self.MACRO_ALIASES.items():
-                if ticker in {x.upper() for x in aliases}:
+            ticker_key = self.api._instrument_lookup_key(ticker)
+            for group, alias_keys in macro_alias_keys.items():
+                if ticker_key in alias_keys:
                     seen.add((ticker, code))
                     seen_tickers.add(ticker)
                     universe.append({
