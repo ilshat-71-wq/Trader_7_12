@@ -124,6 +124,11 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.morning_radar = MorningRadarWidget()
         self.market_tabs.addTab(self.morning_radar, "MORNING RADAR")
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 1)
+        if self.market_tabs.count() >= 4:
+            self.market_tabs.setTabText(0, "RADAR")
+            self.market_tabs.setTabText(1, "MORNING RADAR")
+            self.market_tabs.setTabText(2, "FUTURES OI")
+            self.market_tabs.setTabText(3, "DIAGNOSTICS")
 
     def _build_settings_tab(self):
         panel = QWidget()
