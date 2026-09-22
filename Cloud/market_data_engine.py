@@ -237,6 +237,21 @@ class CloudMarketDataEngine:
                 snapshot.timing = timing
                 self._last_scan_timing = dict(timing)
 
+            radar_timing = radar_diagnostics.get("timings_seconds", {})
+            timing["radar_breakdown_seconds"] = {
+                key: radar_timing[key]
+                for key in (
+                    "universe",
+                    "benchmark",
+                    "benchmark_d1",
+                    "m5",
+                    "d1",
+                    "calculation",
+                    "total",
+                )
+                if key in radar_timing
+            }
+
             print(
                 "CLOUD SCAN TIMING:",
                 f"RADAR={timing['radar_ms'] / 1000:.3f}s",
@@ -245,6 +260,14 @@ class CloudMarketDataEngine:
                 f"SNAPSHOT={timing['snapshot_ms'] / 1000:.3f}s",
                 f"TOTAL={timing['total_seconds']:.3f}s",
             )
+            if timing["radar_breakdown_seconds"]:
+                print(
+                    "RADAR BREAKDOWN:",
+                    " ".join(
+                        f"{key.upper()}={value:.3f}s"
+                        for key, value in timing["radar_breakdown_seconds"].items()
+                    ),
+                )
 
             self._publish(snapshot)
             return copy.deepcopy(snapshot)
