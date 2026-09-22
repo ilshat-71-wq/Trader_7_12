@@ -134,31 +134,32 @@ class SpotUniverseService:
         load_started = perf_counter()
         loaded_by_kind = {}
         self._last_type_timings = {}
-        with ThreadPoolExecutor(max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)), thread_name_prefix="spot-universe") as executor:
+        with ThreadPoolExecutor(
+            max_workers=min(self.MAX_WORKERS, len(self.INSTRUMENT_TYPES)),
+            thread_name_prefix="spot-universe",
+        ) as executor:
             pending = {executor.submit(self._load_one, kind): kind for kind in self.INSTRUMENT_TYPES}
             for future in as_completed(pending):
-
                 try:
                     kind, items = future.result()
                 except Exception as exc:
                     print(f"SPOT metadata worker failed: {type(exc).__name__}")
                     continue
                 loaded_by_kind[kind] = items if isinstance(items, list) else []
-                load_timings[kind] = {\n                    "seconds": round(perf_counter() - worker_started, 3),\n                    "records": len(loaded_by_kind[kind]),\n                }\n
+
         failed_kinds = [kind for kind in self.INSTRUMENT_TYPES if not loaded_by_kind.get(kind)]
         if failed_kinds:
-            fallback_started = perf_counter()
             recovered = self._load_sequential_fallback(failed_kinds)
             loaded_by_kind.update(recovered)
-            for kind, items in recovered.items():
-                load_timings[kind] = {\n                    "seconds": round(perf_counter() - fallback_started, 3),\n                    "records": len(items) if isinstance(items, list) else 0,\n                    "mode": "sequential_fallback",\n                }
 
         records = []
         for kind, items in loaded_by_kind.items():
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                ticker = str(item.get("ticker") or item.get("secCode") or item.get("securityCode") or "").strip().upper()
+                ticker = str(
+                    item.get("ticker") or item.get("secCode") or item.get("securityCode") or ""
+                ).strip().upper()
                 class_code = self._class_code(item)
                 if not ticker or not class_code:
                     continue
@@ -179,4 +180,10 @@ class SpotUniverseService:
         unique = {}
         for item in records:
             unique[(item["spot_ticker"], item["spot_class_code"])] = item
-        self._last_load_timing = {\n            "total": round(perf_counter() - load_started, 3),\n            "by_type": dict(self._last_type_timings),\n            "records": len(records),\n            "unique_records": len(unique),\n        }\n        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
+        self._last_load_timing = {
+            "total": round(perf_counter() - load_started, 3),
+            "by_type": dict(self._last_type_timings),
+            "records": len(records),
+            "unique_records": len(unique),
+        }
+        return sorted(unique.values(), key=lambda item: (item["spot_ticker"], item["spot_class_code"]))
