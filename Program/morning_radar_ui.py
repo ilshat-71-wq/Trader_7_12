@@ -1,0 +1,234 @@
+"""Morning Radar presentation for Trader_7_12 Pro.
+
+Read-only client for the Cloud Market Data Engine. It never calculates or
+requests a second market scan; it displays the persisted morning snapshots.
+"""
+from __future__ import annotations
+
+import json
+import os
+from urllib.error import URLError, HTTPError
+from urllib.request import Request, urlopen
+
+from PySide6.QtCore import QObject, QThread, Signal, Qt
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
+)
+
+
+class MorningRadarWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url.rstrip("/") + "/v1/morning-radar"
+
+    def run(self):
+        try:
+            request = Request(self.url, headers={"Accept": "application/json"})
+            with urlopen(request, timeout=6) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.finished.emit(payload)
+        except (URLError, HTTPError, TimeoutError, ValueError) as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class MorningRadarWidget(QWidget):
+    """Premium compact morning history: interest + countertrend weakness."""
+
+    CLOUD_URL_ENV = "TRADER_CLOUD_URL"
+    DEFAULT_CLOUD_URL = "http://127.0.0.1:8080"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._thread = None
+        self._worker = None
+        self._payload = None
+        self._build()
+
+    def _build(self):
+        self.setStyleSheet("""
+            QLabel#mrTitle { font-size:17px; font-weight:800; color:#e8ecef; }
+            QLabel#mrMeta { font-size:11px; color:#8d98a2; }
+            QLabel#mrState { font-size:12px; font-weight:800; color:#d4af55; }
+            QPushButton { background:#30383f; color:#f0f2f4; border:1px solid #4a555f;
+                          border-radius:7px; padding:8px 13px; font-weight:700; }
+            QPushButton:hover { background:#39434c; }
+            QTableWidget { background:#171b20; color:#dfe3e7; border:1px solid #394149;
+                           gridline-color:#2d343b; font-size:11px; }
+            QHeaderView::section { background:#252c33; color:#b9c2ca; padding:7px;
+                                   border:0; border-bottom:1px solid #414a52; font-weight:700; }
+        """)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+
+        head = QHBoxLayout()
+        title = QLabel("MORNING RADAR")
+        title.setObjectName("mrTitle")
+        head.addWidget(title)
+        self.state = QLabel("NO DATA")
+        self.state.setObjectName("mrState")
+        head.addWidget(self.state)
+        head.addStretch(1)
+        self.refresh_button = QPushButton("REFRESH")
+        self.refresh_button.clicked.connect(self.refresh)
+        head.addWidget(self.refresh_button)
+        root.addLayout(head)
+
+        self.meta = QLabel(
+            "07:00 → 09:50 MSK • growing interest • weakness / short-watch • "
+            "Futures OI history"
+        )
+        self.meta.setObjectName("mrMeta")
+        root.addWidget(self.meta)
+
+        self.summary = QLabel("Morning Radar loads from the Cloud Market Data Engine.")
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet(
+            "background:#171b20;border:1px solid #394149;border-radius:8px;"
+            "padding:9px 12px;font-size:11px;color:#c9d0d6;"
+        )
+        root.addWidget(self.summary)
+
+        self.table = QTableWidget(0, 10)
+        self.table.setHorizontalHeaderLabels([
+            "Ticker", "Price Δ%", "RS", "₽/min", "15m Δ%",
+            "Accel", "Interest", "SHORT WATCH", "SIGNAL", "PROB",
+        ])
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        root.addWidget(self.table, 1)
+
+        self.oi_summary = QLabel("OI HISTORY: —")
+        self.oi_summary.setStyleSheet("font-size:10px;color:#7f8a94;padding:3px;")
+        root.addWidget(self.oi_summary)
+
+    @classmethod
+    def cloud_url(cls):
+        return os.getenv(cls.CLOUD_URL_ENV, cls.DEFAULT_CLOUD_URL).strip()
+
+    def refresh(self):
+        if self._thread is not None and self._thread.isRunning():
+            return
+        self.refresh_button.setEnabled(False)
+        self.state.setText("LOADING…")
+        self._thread = QThread(self)
+        self._worker = MorningRadarWorker(self.cloud_url())
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._finished)
+        self._worker.failed.connect(self._failed)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
+        self._thread.finished.connect(self._thread_finished)
+        self._thread.start()
+
+    def _finished(self, payload):
+        self._payload = payload or {}
+        captured = self._payload.get("captured_slots") or []
+        complete = bool(self._payload.get("complete"))
+        self.state.setText("COMPLETE • 09:50" if complete else f"{len(captured)}/7 SLOTS")
+        self.state.setStyleSheet(
+            "font-size:12px;font-weight:800;color:" +
+            ("#69e59a" if complete else "#d4af55") + ";"
+        )
+        self.meta.setText(
+            f"{self._payload.get('date','—')} MSK • "
+            f"SLOTS {', '.join(captured) if captured else '—'} • "
+            f"CLOUD {self.cloud_url()}"
+        )
+        history = self._payload.get("history") or []
+        latest = self._payload.get("latest") or {}
+        stocks = latest.get("stocks") or []
+        regime = str(latest.get("market_regime") or "—")
+        benchmark = latest.get("benchmark_change_percent")
+        short_count = sum(1 for x in stocks if x.get("short_watch"))
+        rising_interest = sum(1 for x in stocks if x.get("interest") == "↑")
+        self.summary.setText(
+            f"REGIME {regime} • IMOEX2 {benchmark if benchmark is not None else '—'}% • "
+            f"INTEREST ↑ {rising_interest} • SHORT WATCH {short_count} • "
+            f"SNAPSHOTS {len(history)}.  "
+            "Interest uses changes in existing 15m/rate/acceleration fields; "
+            "SHORT WATCH is a separate weakness lane, not a trade order."
+        )
+
+        rows = sorted(
+            stocks,
+            key=lambda x: (
+                0 if x.get("short_watch") else 1,
+                0 if x.get("interest") == "↑" else 1,
+                -(float(x.get("relative_strength") or 0.0)),
+            ),
+        )
+        self.table.setRowCount(len(rows))
+        for r, item in enumerate(rows):
+            values = [
+                item.get("ticker", "—"),
+                self._fmt(item.get("change_percent")),
+                self._fmt(item.get("relative_strength")),
+                self._fmt(item.get("money_per_minute"), 0),
+                self._fmt(item.get("recent_money_delta_pct")),
+                self._fmt(item.get("money_acceleration")),
+                str(item.get("interest") or "—"),
+                "● SHORT WATCH" if item.get("short_watch") else "—",
+                str(item.get("signal") or "—"),
+                self._fmt(item.get("signal_probability")),
+            ]
+            for col, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if col in (1, 2, 3, 4, 5, 9):
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(r, col, cell)
+            if item.get("short_watch"):
+                for col in range(self.table.columnCount()):
+                    self.table.item(r, col).setBackground(QColor("#3a272b"))
+            elif item.get("interest") == "↑":
+                for col in range(self.table.columnCount()):
+                    self.table.item(r, col).setBackground(QColor("#123f2a"))
+            if item.get("interest") == "↑":
+                self.table.item(r, 6).setForeground(QColor("#69e59a"))
+            if item.get("short_watch"):
+                self.table.item(r, 7).setForeground(QColor("#ff7d7d"))
+
+        oi = latest.get("futures_oi") or []
+        oi_hot = sum(
+            1 for x in oi if str(x.get("money_flow_liquidity_state") or "") == "HOT"
+        )
+        oi_flow = sum(
+            1 for x in oi if str(x.get("money_flow_status") or "") == "AVAILABLE"
+        )
+        self.oi_summary.setText(
+            f"OI HISTORY: {len(oi)} contracts • FLOW {oi_flow} available • "
+            f"HOT LIQ {oi_hot} • latest slot {latest.get('slot','—')}"
+        )
+
+    def _failed(self, error):
+        self.state.setText("OFFLINE")
+        self.state.setStyleSheet("font-size:12px;font-weight:800;color:#ff7d7d;")
+        self.summary.setText(
+            f"Morning Radar cloud is unavailable: {error}. "
+            "The desktop scanner remains unchanged."
+        )
+
+    def _thread_finished(self):
+        if self._thread is not None:
+            self._thread.deleteLater()
+        self._thread = None
+        self._worker = None
+        self.refresh_button.setEnabled(True)
+
+    @staticmethod
+    def _fmt(value, digits=1):
+        try:
+            return f"{float(value):+,.{digits}f}".replace(",", " ")
+        except (TypeError, ValueError):
+            return "—"
