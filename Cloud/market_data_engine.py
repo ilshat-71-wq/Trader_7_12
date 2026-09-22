@@ -26,7 +26,7 @@ from typing import Any
 from services.market_information_scanner_service import MarketInformationScannerService
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.money_flow_service import MoneyFlowService
-from Cloud.morning_radar import MorningRadarService, MSK
+from Cloud.morning_radar_service import MorningRadarService
 
 
 ENGINE_VERSION = "1.1.0"
@@ -141,7 +141,7 @@ class CloudMarketDataEngine:
                 "data_policy": "REAL_BCS_DATA_ONLY",
                 "decision_policy": "NO_TRADE_EXECUTION",
                 "timing": self._last_scan_timing,
-                "morning_radar": self.morning_radar.as_dict(),
+                "morning_radar": self.morning_radar.summary(),
             }
 
     @property
@@ -261,10 +261,6 @@ class CloudMarketDataEngine:
                 snapshot.timing = timing
                 self._last_scan_timing = dict(timing)
 
-            # Morning Radar records only scheduled Moscow slots. It reuses the
-            # exact production snapshot just generated; no second market scan.
-            self.morning_radar.record_if_due(snapshot.as_dict())
-
             print(
                 "CLOUD SCAN TIMING:",
                 f"RADAR={timing['radar_ms'] / 1000:.3f}s",
@@ -374,20 +370,21 @@ class CloudMarketDataEngine:
         last_regular_scan = 0.0
         last_slot_key = None
         while True:
-            now = datetime.now(MSK)
-            slot = self.morning_radar.due_slot(now)
+            now = datetime.now(self.morning_radar.TIMEZONE)
+            slot = self.morning_radar.slot_for(now)
             slot_key = f"{now.date().isoformat()}:{slot}" if slot else None
 
             if slot and slot_key != last_slot_key:
                 try:
-                    await asyncio.to_thread(self.scan_once)
+                    snapshot = await asyncio.to_thread(self.scan_once)
+                    self.morning_radar.record(snapshot.as_dict(), slot=slot)
                 except Exception:
-                    # Leave the slot unmarked so the next scheduler poll retries it.
-                    await asyncio.sleep(10.0)
+                    # Leave the slot unmarked so the next 5-second poll retries it.
+                    await asyncio.sleep(5.0)
                     continue
                 last_slot_key = slot_key
                 last_regular_scan = time.monotonic()
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(5.0)
                 continue
 
             elapsed = time.monotonic() - last_regular_scan
@@ -399,6 +396,6 @@ class CloudMarketDataEngine:
                 last_regular_scan = time.monotonic()
                 continue
 
-            # Poll frequently enough to hit the exact 07:00/07:15/... slots,
-            # while keeping normal scans on their existing 5-minute cadence.
-            await asyncio.sleep(min(30.0, max(1.0, self.scan_interval_seconds - elapsed)))
+            # Five-second polling is lightweight and guarantees the exact
+            # 20-second Morning Radar slot window is observed.
+            await asyncio.sleep(min(5.0, max(1.0, self.scan_interval_seconds - elapsed)))
