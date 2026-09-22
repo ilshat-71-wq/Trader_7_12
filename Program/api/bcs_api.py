@@ -68,6 +68,7 @@ class BCSAPI:
         self._candle_cache = {}
         self._instrument_metadata_cache = {}
         self._underlying_metadata_index_cache = {}
+        self._ticker_metadata_cache = {}
         self._candle_diag_lock = threading.RLock()
         self._candle_diag = {
             "M5": {"requests": 0, "cache_hits": 0, "cache_misses": 0, "http_ok": 0, "http_errors": 0, "http_seconds": 0.0, "http_statuses": {}, "exceptions": {}, "first_error": None, "last_error": None},
@@ -418,6 +419,14 @@ class BCSAPI:
         requested = [str(t).strip().upper() for t in tickers if str(t).strip()]
         if not requested:
             return []
+        ticker_cache_key = (tuple(sorted(set(requested))), bool(resolve_underlying))
+        now = time.time()
+        cached_tickers = self._ticker_metadata_cache.get(ticker_cache_key)
+        if cached_tickers is not None:
+            cached_at, cached_records = cached_tickers
+            if now - cached_at < self.INSTRUMENT_METADATA_CACHE_TTL:
+                return [dict(record) for record in cached_records]
+            self._ticker_metadata_cache.pop(ticker_cache_key, None)
         url = f"{self.info_url}/instruments/by-tickers"
         all_records = []
         seen_page_signatures = set()
@@ -458,7 +467,8 @@ class BCSAPI:
             all_records, fallback_diag = self._underlying_metadata_fallback(requested, all_records)
             if fallback_diag.get("fallback_matches"):
                 print("Underlying metadata fallback:", fallback_diag)
-        return all_records
+        self._ticker_metadata_cache[ticker_cache_key] = (now, list(all_records))
+        return [dict(record) for record in all_records]
 
     def get_quotes(self, instruments):
         url = f"{self.market_url}/quotes"
