@@ -1,7 +1,7 @@
 """Trader_7_12 Pro — professional unified read-only market-information radar UI."""
 
 from PySide6.QtCore import QThread, QTimer, Qt, QObject, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QBrush, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -451,6 +451,29 @@ class TraderWindow(QWidget):
             else QColor("#c9d0d6")
         )
 
+    @staticmethod
+    def _direction_row_brush(change_percent):
+        try:
+            change = float(change_percent)
+        except (TypeError, ValueError):
+            return None
+        if change > 0:
+            return QBrush(QColor("#123f2a"))
+        if change < 0:
+            return QBrush(QColor("#3a272b"))
+        return None
+
+    @classmethod
+    def _apply_spot_direction_colors(cls, table, prepared_results):
+        for row_index, item in enumerate(prepared_results):
+            brush = cls._direction_row_brush(item.get("change_percent"))
+            if brush is None:
+                continue
+            for col in range(table.columnCount()):
+                cell = table.item(row_index, col)
+                if cell:
+                    cell.setBackground(brush)
+
     @classmethod
     def _apply_signal_colors(cls, table, prepared_results):
         for row_index, item in enumerate(prepared_results):
@@ -510,6 +533,7 @@ class TraderWindow(QWidget):
             rows.append(row)
             items.append(item)
         table.set_rows(rows)
+        self._apply_spot_direction_colors(table, items)
         self._apply_signal_colors(table, items)
         table.setVisible(bool(rows))
         return len(rows)
@@ -571,20 +595,45 @@ class TraderWindow(QWidget):
         )
 
         entries = self._rows_for_results(results)
-        strong = [entry for entry in entries if entry[0] > 0.01]
-        weak = [entry for entry in entries if entry[0] < -0.01]
+
+        # The passport definition is relative performance against the live
+        # benchmark: positive RS means stronger than the index, negative RS
+        # means weaker. Do not hide small but real differences behind an
+        # arbitrary UI threshold; the two tabs are meant to answer the
+        # instantaneous strong/weak question for the current scan.
+        strong = [entry for entry in entries if entry[0] > 0.0]
+        weak = [entry for entry in entries if entry[0] < 0.0]
         neutral = len(entries) - len(strong) - len(weak)
 
         strong_count = self._populate_spot_table(self.result_table, strong)
         weak_count = self._populate_spot_table(self.weak_result_table, weak)
 
+        regime = str(diagnostics.get("market_regime") or "NEUTRAL").upper()
+        if regime == "UP":
+            regime_note = (
+                "INDEX UP: STRONGER = stocks rising more than IMOEX2; "
+                "WEAKER = stocks rising less than IMOEX2 or falling."
+            )
+        elif regime == "DOWN":
+            regime_note = (
+                "INDEX DOWN: STRONGER = stocks rising or falling less than IMOEX2; "
+                "WEAKER = stocks falling more than IMOEX2."
+            )
+        else:
+            regime_note = (
+                "INDEX NEUTRAL: tabs still use positive/negative RS; "
+                "row color shows the stock's own price direction."
+            )
+
         self.result_table.setToolTip(
-            "SPOT STRONGER THAN IMOEX2 — relative strength RS > +0.01. "
+            f"SPOT STRONGER THAN IMOEX2 — {regime_note} "
+            "Green row = stock is rising; red row = stock is falling. "
             "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
         self.weak_result_table.setToolTip(
-            "SPOT WEAKER THAN IMOEX2 — relative strength RS < -0.01. "
+            f"SPOT WEAKER THAN IMOEX2 — {regime_note} "
+            "Green row = stock is rising; red row = stock is falling. "
             "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
@@ -594,8 +643,8 @@ class TraderWindow(QWidget):
         )
 
         split_note = (
-            f"SPOT SPLIT • STRONGER {strong_count} • WEAKER {weak_count} • "
-            f"NEUTRAL/FLAT {neutral}"
+            f"SPOT {regime} • STRONGER {strong_count} • WEAKER {weak_count} • "
+            f"RS NEUTRAL {neutral} • ROW COLOR = PRICE DIRECTION"
         )
         self.result_box.setPlainText(
             "\n".join((line1, line2, line3, split_note))
