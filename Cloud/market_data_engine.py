@@ -31,7 +31,7 @@ from Cloud.morning_radar import MorningRadarService, MSK
 
 ENGINE_VERSION = "1.1.0"
 DEFAULT_SCAN_INTERVAL_SECONDS = 300
-DEFAULT_RADAR_LIMIT = 10
+DEFAULT_RADAR_LIMIT = 20
 
 
 def _json_safe(value: Any) -> Any:
