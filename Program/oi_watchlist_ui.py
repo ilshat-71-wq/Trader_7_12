@@ -82,7 +82,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         hint = QLabel(
-            "🟢 LIQ NOW = where current money activity is highest • "
+            "LIQ NOW = where current money activity is highest • "
             "FLOW = 30m money flow • ACTION = price + OI structure • ZONE = VWAP / flow"
         )
         hint.setStyleSheet("color:#7f8a94;font-size:10px;padding-left:3px;")
@@ -248,7 +248,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             f"FUTURES OI • {diagnostics.get('status') or '—'} • "
             f"{diagnostics.get('oi_available', 0)} OI • "
             f"{diagnostics.get('money_flow_hot_liquidity', 0)} HOT\n"
-            f"🟢 LIQ NOW = real 5m trade flow • FLOW = 30m flow + order book • "
+            f"LIQ NOW = real 5m trade flow • FLOW = 30m flow + order book • "
             f"ACTION = price + ΔOI • ZONE = flow / VWAP"
         )
         rows = []
