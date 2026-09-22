@@ -444,12 +444,13 @@ class TraderWindow(QWidget):
         return "No instrument passed all strict gates."
 
     @staticmethod
-    def _signal_color(signal):
-        return (
-            QColor("#69e59a") if signal == "LONG"
-            else QColor("#ff7d7d") if signal == "SHORT"
-            else QColor("#c9d0d6")
-        )
+    def _signal_label(signal):
+        signal = str(signal or "").upper()
+        return {
+            "LONG": "🟢 LONG",
+            "SHORT": "🔴 SHORT",
+            "NEUTRAL": "⚪ NEUTRAL",
+        }.get(signal, "⚪ —")
 
     @staticmethod
     def _direction_row_brush(change_percent):
@@ -476,12 +477,18 @@ class TraderWindow(QWidget):
 
     @classmethod
     def _apply_signal_colors(cls, table, prepared_results):
+        # Direction is carried by a premium-style colored dot; the text and
+        # probability remain neutral so color has one unambiguous meaning.
         for row_index, item in enumerate(prepared_results):
-            signal_color = cls._signal_color(str(item.get("signal") or ""))
-            for col in (13, 14, 15):
+            signal = str(item.get("signal") or "")
+            signal_cell = table.item(row_index, 13)
+            if signal_cell:
+                signal_cell.setText(cls._signal_label(signal))
+                signal_cell.setForeground(QColor("#e6e9ed"))
+            for col in (14, 15):
                 cell = table.item(row_index, col)
                 if cell:
-                    cell.setForeground(signal_color)
+                    cell.setForeground(QColor("#c9d0d6"))
 
     def _rows_for_results(self, results):
         rows = []
