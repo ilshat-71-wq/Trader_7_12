@@ -370,27 +370,33 @@ class CloudMarketDataEngine:
                     pass
 
     async def run_forever(self) -> None:
-        """Run normal refreshes and the exact Moscow Morning Radar slots."""
+        """Run regular refreshes plus exact Moscow Morning Radar slots."""
+        last_regular_scan = 0.0
         last_slot_key = None
         while True:
             now = datetime.now(MSK)
             slot = self.morning_radar.due_slot(now)
             slot_key = f"{now.date().isoformat()}:{slot}" if slot else None
+
             if slot and slot_key != last_slot_key:
                 try:
                     await asyncio.to_thread(self.scan_once)
                 except Exception:
                     pass
                 last_slot_key = slot_key
+                last_regular_scan = time.monotonic()
                 await asyncio.sleep(3.0)
                 continue
 
-            started = time.monotonic()
-            try:
-                await asyncio.to_thread(self.scan_once)
-            except Exception:
-                # Keep the last known good snapshot alive. The API exposes the
-                # exact error through /v1/status.
-                pass
-            elapsed = time.monotonic() - started
-            await asyncio.sleep(max(1.0, self.scan_interval_seconds - elapsed))
+            elapsed = time.monotonic() - last_regular_scan
+            if elapsed >= self.scan_interval_seconds:
+                try:
+                    await asyncio.to_thread(self.scan_once)
+                except Exception:
+                    pass
+                last_regular_scan = time.monotonic()
+                continue
+
+            # Poll frequently enough to hit the exact 07:00/07:15/... slots,
+            # while keeping normal scans on their existing 5-minute cadence.
+            await asyncio.sleep(min(30.0, max(1.0, self.scan_interval_seconds - elapsed)))
