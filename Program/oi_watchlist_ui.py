@@ -46,7 +46,7 @@ class FuturesOIWorker(QObject):
 class OIWatchlistTraderWindow(TraderWindow):
     """One professional read-only window: SPOT radar + Futures OI + money flow."""
 
-    VERSION = "2.9.2"
+    VERSION = "2.10.0"
     TURNOVER_HIGHLIGHT_TOP = 5
 
     def __init__(self, scanner_enabled=True):
@@ -86,8 +86,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         hint = QLabel(
-            "LIQ NOW = where current money activity is highest • "
-            "FLOW = 30m money flow • ACTION = price + OI structure • ZONE = VWAP / flow"
+            "LIQ NOW = current BCS trade activity • FLOW = 30m real flow • "
+            "BOOK/TAPE/FLOW RT = live BCS WebSocket • ACTION = price + OI structure • ZONE = VWAP / flow"
         )
         hint.setStyleSheet("color:#7f8a94;font-size:10px;padding-left:3px;")
         toolbar.addWidget(hint, 1)
@@ -357,6 +357,12 @@ class OIWatchlistTraderWindow(TraderWindow):
                 seen.add((ticker, class_code))
         if not instruments:
             return
+        self._oi_diagnostics.update({
+            "realtime_source": "BCS_WEBSOCKET_MARKET_DATA",
+            "realtime_policy": "READ_ONLY_REALTIME_BOOK_TAPE; TOP_SPOT_10_PLUS_ACTIVE_FUTURES",
+            "realtime_subscriptions": len(instruments),
+        })
+        self._append_oi_diagnostics()
         api = getattr(self.oi_worker.service, "api", None) if self.oi_worker is not None else None
         if api is None:
             api = FuturesOIMarketDataScannerService().api
