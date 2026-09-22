@@ -26,6 +26,7 @@ import time
 
 from config import get_refresh_token, save_refresh_token
 from api.request_helper import RequestHelper
+from services.bcs_metadata_cache_service import BCSMetadataCacheService
 
 
 class BCSAPI:
