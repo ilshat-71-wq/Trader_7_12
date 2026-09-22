@@ -209,6 +209,8 @@ Verified previously:
 - never print or commit the token
 
 ### 12. App status
+
+**Single-app decision (22.09.2026):** exactly one macOS desktop application exists: `Trader_7_12 Pro.app`. Radar, Futures OI, Diagnostics and Settings are functions of this one client. Cloud Market Data Engine is backend infrastructure, not another desktop application.
 Known previous successful build:
 - `dist/Trader_7_12 Pro.app`
 - installed copy: `~/Applications/Trader_7_12 Pro.app`
@@ -217,9 +219,11 @@ Known previous successful build:
 - PyInstaller onedir + macOS .app
 - ad-hoc signing
 
-The application UI has NOT been remotely inspected in this checkpoint because this ChatGPT session does not have a terminal/GUI-control channel into the user's Mac. Do not claim that the app was opened or visually inspected. The next local step is to build/open the current app and inspect the actual UI.
+The single application UI has NOT been remotely inspected in this checkpoint because this ChatGPT session does not have a terminal/GUI-control channel into the user's Mac. Do not claim that the app was opened or visually inspected. The next local step is to build/open the current app and inspect the actual UI.
 
 ### 13. Immediate next step
+
+Synchronize the iMac with current `main` and build/open the single application.
 Do not restart the project.
 
 First, on the user's Mac:
