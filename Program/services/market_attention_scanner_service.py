@@ -92,7 +92,8 @@ class MarketAttentionScannerService:
     def build_universe(self):
         started = perf_counter()
         spot_started = started
-        spots = SpotUniverseService(api=self.api).load()
+        spot_service = SpotUniverseService(api=self.api)
+        spots = spot_service.load()
         spot_load_seconds = round(perf_counter() - spot_started, 3)
 
         filter_started = perf_counter()
@@ -149,6 +150,7 @@ class MarketAttentionScannerService:
             "assembly": round(assembly_seconds, 3),
             "total": total_seconds,
             "spot_records": len(spots),
+            "spot_load_breakdown": dict(getattr(spot_service, "_last_load_timing", {}) or {}),
             "macro_records": len(macro_rows),
             "universe_records": len(universe),
         }
@@ -317,6 +319,7 @@ class MarketAttentionScannerService:
         end = now.astimezone(timezone.utc)
         candles_seconds = 0.0
         quote_fallback_seconds = 0.0
+        benchmark_requests = {}
         for requested in self.BENCHMARKS:
             instrument = by_ticker.get(requested)
             if not instrument:
@@ -324,7 +327,12 @@ class MarketAttentionScannerService:
             ticker, code = instrument
             candles_started = perf_counter()
             candles = self._candles(ticker, code, start, end)
-            candles_seconds += perf_counter() - candles_started
+            request_candles_seconds = perf_counter() - candles_started
+            candles_seconds += request_candles_seconds
+            benchmark_requests[requested] = {
+                "candles_seconds": round(request_candles_seconds, 3),
+                "candle_count": len(candles),
+            }
             if len(candles) >= 2:
                 candles.sort(key=lambda x: str(x.get("time") or ""))
                 first = self._f(candles[0].get("close"))
@@ -339,11 +347,16 @@ class MarketAttentionScannerService:
                         "metadata_records": len(rows),
                         "indices_fallback_records": fallback_records,
                         "resolved_benchmarks": list(by_ticker),
+                        "requests": benchmark_requests,
                     }
                     return ticker, code, (last / first - 1.0) * 100.0
             quote_started = perf_counter()
             quote_return = self._quote_session_return(ticker, code, now)
-            quote_fallback_seconds += perf_counter() - quote_started
+            request_quote_seconds = perf_counter() - quote_started
+            quote_fallback_seconds += request_quote_seconds
+            benchmark_requests.setdefault(requested, {}).update({
+                "quote_fallback_seconds": round(request_quote_seconds, 3),
+            })
             if quote_return is not None:
                 self._last_benchmark_timing = {
                     "metadata": round(metadata_seconds, 3),
@@ -366,6 +379,7 @@ class MarketAttentionScannerService:
             "metadata_records": len(rows),
             "indices_fallback_records": fallback_records,
             "resolved_benchmarks": list(by_ticker),
+            "requests": benchmark_requests,
         }
         return None, None, None
 
