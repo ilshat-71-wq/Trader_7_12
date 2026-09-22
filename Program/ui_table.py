@@ -71,7 +71,7 @@ class _SortableItem(QTableWidgetItem):
 
 
 class MarketTableWidget(QTableWidget):
-    """Professional read-only table with sorting and copy-friendly TSV export."""
+    """Professional read-only table with reliable header sorting and TSV copy."""
 
     def __init__(self, columns, widths=None, parent=None):
         super().__init__(0, len(columns), parent)
@@ -86,7 +86,14 @@ class MarketTableWidget(QTableWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
-        self.setSortingEnabled(True)
+
+        # Sorting is handled explicitly from header clicks. This avoids the
+        # QTableWidget sorting-state interaction that could leave OI tables
+        # apparently non-sortable after a refresh.
+        self.setSortingEnabled(False)
+        self._sort_column = -1
+        self._sort_order = Qt.SortOrder.AscendingOrder
+
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(30)
 
@@ -95,6 +102,9 @@ class MarketTableWidget(QTableWidget):
         header.setStretchLastSection(False)
         header.setSectionsClickable(True)
         header.setHighlightSections(False)
+        header.setSortIndicatorShown(True)
+        header.sectionClicked.connect(self._sort_by_column)
+
         for index in range(len(columns)):
             header.setSectionResizeMode(index, QHeaderView.ResizeMode.Interactive)
 
@@ -105,8 +115,22 @@ class MarketTableWidget(QTableWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
+    def _sort_by_column(self, column):
+        if column == self._sort_column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = column
+            self._sort_order = Qt.SortOrder.AscendingOrder
+
+        header = self.horizontalHeader()
+        header.setSortIndicator(column, self._sort_order)
+        self.sortItems(column, self._sort_order)
+
     def set_rows(self, rows):
-        self.setSortingEnabled(False)
         self.setUpdatesEnabled(False)
         self.clearContents()
         self.setRowCount(len(rows))
@@ -132,7 +156,12 @@ class MarketTableWidget(QTableWidget):
                 self.setItem(row_index, column_index, item)
 
         self.setUpdatesEnabled(True)
-        self.setSortingEnabled(True)
+
+        # New scan data starts unsorted. The user can then sort any column
+        # reliably by clicking its header.
+        self._sort_column = -1
+        self._sort_order = Qt.SortOrder.AscendingOrder
+        self.horizontalHeader().setSortIndicatorShown(True)
 
     def _selected_rows(self):
         return sorted({index.row() for index in self.selectedIndexes()})
