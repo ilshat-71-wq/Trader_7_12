@@ -616,6 +616,9 @@ class BCSAPI:
         cache_key = self._candle_cache_key(ticker, class_code, interval_key, start_dt, end_dt)
 
         cached = self._candle_cache.get(cache_key)
+        if cached is None and interval_key in self._candle_diag:
+            with self._candle_diag_lock:
+                self._candle_diag[interval_key]["cache_misses"] += 1
         if cached is not None:
             cached_at, cached_data, cached_start, cached_end = cached
             if (now - cached_at).total_seconds() < self.CANDLE_CACHE_TTL:
