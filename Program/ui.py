@@ -605,12 +605,9 @@ class TraderWindow(QWidget):
             f"REGIME {diagnostics.get('market_regime') or '—'}"
         )
 
-        self._spot_results_for_realtime = list(results or [])
         # The SPOT tabs are a market map, not a copy of the selected radar.
-        # The scanner keeps the selected trading-context rows in `results`,
-        # while `market_map` contains every analyzed real-data row. This keeps
-        # STRONGER/WEAKER IMOEX2 informative even when the active market regime
-        # selects only the opposite side for the directional radar.
+        # Keep realtime bounded to the strongest current relative-strength rows
+        # from the same market map, rather than subscribing to the full universe.
         raw_market_map = diagnostics.get("market_map")
         market_map = (
             raw_market_map
@@ -618,6 +615,21 @@ class TraderWindow(QWidget):
             else list(results or [])
         )
         entries = self._rows_for_results(market_map)
+        self._spot_results_for_realtime = [
+            entry[2]
+            for entry in sorted(
+                (
+                    entry for entry in entries
+                    if entry[2].get("spot_ticker")
+                    and (
+                        entry[2].get("spot_class_code")
+                        or entry[2].get("class_code")
+                    )
+                ),
+                key=lambda entry: abs(entry[0]),
+                reverse=True,
+            )[:30]
+        ]
 
         # STRONGER/WEAKER are an independent relative-strength market map.
         # They are NOT the selected radar. Positive RS belongs in STRONGER,
