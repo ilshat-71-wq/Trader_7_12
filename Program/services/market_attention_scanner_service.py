@@ -780,7 +780,9 @@ class MarketAttentionScannerService:
             "long_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"],
             "short_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"],
             "countertrend_watch": countertrend_watch,
-            # Full read-only market map for the SPOT Stronger/Weaker tabs.\n            # This is intentionally separate from the selected trading-context rows.\n            "market_map": market_map,
+            # Full read-only market map for the SPOT Stronger/Weaker tabs.
+            # This is intentionally separate from the selected trading-context rows.
+            "market_map": market_map,
             "market_map_total": len(market_map),
             "market_map_stronger": market_map_stronger,
             "market_map_weaker": market_map_weaker,
