@@ -6,10 +6,30 @@
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `613dbb4fd5c8052ed7e70e5e53dd1a43d797268c`  
+**Последний функциональный commit:** `937a578c3d1b5cfb5d681ce6e63dd6d351f7d2bc`  
+**Последний локально подтверждённый regression suite:** `149 passed, 1 warning` (23.09.2026)  
 **Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
+
+## 0.3 Realtime confirmation checkpoint — 23.09.2026
+
+Сохранена рабочая точка после расширения realtime-подтверждения SPOT market map.
+
+Последний realtime commit:
+
+`937a578c — Expand realtime confirmation to top SPOT market-map rows`
+
+### Realtime
+- перед каждой новой WebSocket-сессией выполняется повторная авторизация/обновление токена, чтобы reconnect не зависел от устаревшего access token;
+- futures realtime candidate rows сохраняют authoritative BCS `classCode` из contract metadata;
+- SPOT realtime подписывается на ограниченный TOP-30 текущего `market_map`, отсортированный по `abs(relative_strength)`, а не на весь universe;
+- цель слоя — дать BOOK/TAPE/FLOW RT подтверждение тем же текущим сильным/слабым market-map rows, которые видит оператор;
+- scanner calculations, qualification, ranking, market-map source и BCS market-data semantics не изменены;
+- локально подтверждено: `149 passed, 1 warning`.
+
+### Acceptance
+После pull на iMac обязательна локальная проверка: pytest → build → open единственного `Trader_7_12 Pro.app`. До фактического успешного build на iMac статус приложения не считать подтверждённым.
 
 ## 0.2 UI / Diagnostics checkpoint — 23.09.2026
 
@@ -464,7 +484,14 @@ The current source checkpoint is ready for local iMac synchronization. A success
 
 ## 18. Tests
 
-Latest confirmed local regression before the build-fix validation:
+Latest confirmed local regression after realtime checkpoint:
+
+```text
+149 passed, 1 warning in 2.45s
+```
+
+Previous confirmed local regression before the realtime checkpoint:
+
 
 ```text
 121 passed in 1.21s
