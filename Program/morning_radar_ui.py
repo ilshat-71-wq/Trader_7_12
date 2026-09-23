@@ -10,9 +10,9 @@ import os
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt
+from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (
+from PySide6.QtWidgets import (\n    QApplication,
     QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -79,6 +79,10 @@ class MorningRadarWidget(QWidget):
         self.refresh_button = QPushButton("REFRESH")
         self.refresh_button.clicked.connect(self.refresh)
         head.addWidget(self.refresh_button)
+        self.copy_button = QPushButton("COPY")
+        self.copy_button.setToolTip("Copy the visible Morning Radar table and summary")
+        self.copy_button.clicked.connect(self.copy_view)
+        head.addWidget(self.copy_button)
         root.addLayout(head)
 
         self.meta = QLabel(
@@ -217,6 +221,25 @@ class MorningRadarWidget(QWidget):
             f"OI HISTORY: {len(oi)} contracts • FLOW {oi_flow} available • "
             f"HOT LIQ {oi_hot} • latest slot {latest.get('slot','—')}"
         )
+
+    def copy_view(self):
+        lines = [self.summary.text(), self.meta.text()]
+        headers = [
+            self.table.horizontalHeaderItem(i).text()
+            for i in range(self.table.columnCount())
+        ]
+        lines.append("\t".join(headers))
+        for row in range(self.table.rowCount()):
+            lines.append(
+                "\t".join(
+                    self.table.item(row, col).text() if self.table.item(row, col) else ""
+                    for col in range(self.table.columnCount())
+                )
+            )
+        lines.append(self.oi_summary.text())
+        QApplication.clipboard().setText("\n".join(lines))
+        self.copy_button.setText("COPIED ✓")
+        QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
     def _failed(self, error):
         self.state.setText("OFFLINE")
