@@ -596,7 +596,8 @@ class MarketAttentionScannerService:
             else:
                 current_direction = "NEUTRAL"
             row["intraday_direction"] = current_direction
-            row["direction"] = current_direction            row["directional_qualified"] = (
+            row["direction"] = current_direction
+            row["directional_qualified"] = (
                 current_direction in {"LONG", "SHORT"}
                 and row.get("daily_qualified", False)
                 and row.get("liquidity_gate", False)
