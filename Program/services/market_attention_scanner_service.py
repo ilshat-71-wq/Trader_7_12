@@ -761,7 +761,7 @@ class MarketAttentionScannerService:
             "long_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"],
             "short_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"],
             "countertrend_watch": countertrend_watch,
-            "long_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"), None),
+            # Full read-only market map for the SPOT Stronger/Weaker tabs.\n            # This is intentionally separate from the selected trading-context rows.\n            "market_map": [dict(x) for x in results if x.get("relative_strength") is not None],\n            "long_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"), None),
             "short_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"), None),
             "group_status": {g: ("AVAILABLE" if any(x.get("market_group") == g for x in universe) else "UNAVAILABLE") for g in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
