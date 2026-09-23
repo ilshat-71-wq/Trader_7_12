@@ -197,8 +197,7 @@ class MarketAttentionScannerService:
         return universe
 
     def _candles(self, ticker, class_code, start, end):
-        try:
-            rows = self.history.load(ticker, class_code, start_time=start, end_time=end, timeframe_minutes=5)
+        try:            rows = self.history.load(ticker, class_code, start_time=start, end_time=end, timeframe_minutes=5)
         except Exception:
             return []
         return rows if isinstance(rows, list) else []
@@ -397,8 +396,7 @@ class MarketAttentionScannerService:
             benchmark_requests.setdefault(requested, {}).update({
                 "quote_fallback_seconds": round(request_quote_seconds, 3),
             })
-            if quote_return is not None:
-                self._last_benchmark_timing = {
+            if quote_return is not None:                self._last_benchmark_timing = {
                     "metadata": round(metadata_seconds, 3),
                     "indices_fallback": round(fallback_seconds, 3),
                     "candles": round(candles_seconds, 3),
@@ -597,8 +595,7 @@ class MarketAttentionScannerService:
             else:
                 current_direction = "NEUTRAL"
             row["intraday_direction"] = current_direction
-            row["direction"] = current_direction
-            row["directional_qualified"] = (
+            row["direction"] = current_direction            row["directional_qualified"] = (
                 current_direction in {"LONG", "SHORT"}
                 and row.get("daily_qualified", False)
                 and row.get("liquidity_gate", False)
@@ -795,12 +792,4 @@ class MarketAttentionScannerService:
             "watch_policy": "READ_ONLY_FALLBACK_WITH_SAME_MARKET_REGIME_AND_RS_DIRECTION",
             "timings_seconds": timings,
         }
-        diagnostics.update({
-            "market_map": market_map,
-            "market_map_total": len(market_map),
-            "market_map_stronger": market_map_stronger,
-            "market_map_weaker": market_map_weaker,
-            "market_map_neutral": market_map_neutral,
-        })
-        self._last_scan_diagnostics = diagnostics
         return selected
