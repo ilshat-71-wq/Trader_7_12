@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (\n    QApplication,
+from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
