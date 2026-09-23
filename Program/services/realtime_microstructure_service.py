@@ -33,6 +33,7 @@ class RealtimeMicrostructureWorker(QObject):
     TRADE_WINDOW_SECONDS = 60
     EMIT_MIN_INTERVAL_SECONDS = 0.15
     RECONNECT_SECONDS = 2.0
+    SUBSCRIPTION_TIMEOUT_SECONDS = 5.0
 
     def __init__(self, api, instruments):
         super().__init__()
@@ -52,6 +53,12 @@ class RealtimeMicrostructureWorker(QObject):
         self._connected_at = None
         self._ws = None
         self._ws_lock = threading.Lock()
+        self._subscription_requested = {0: False, 2: False}
+        self._subscription_accepted = {0: set(), 2: set()}
+        self._message_counts = {"OrderBook": 0, "LastTrades": 0}
+        self._subscription_errors = []
+        self._last_message_at = None
+        self._last_error = None
 
     def stop(self):
         self._stop_event.set()
@@ -151,6 +158,60 @@ class RealtimeMicrostructureWorker(QObject):
             "tape_acceleration_pct": round(acceleration, 2) if acceleration is not None else None,
         }
 
+    def _realtime_diagnostics(self):
+        expected = len(self.instruments)
+        return {
+            "instruments": expected,
+            "orderbook_requested": expected if self._subscription_requested[0] else 0,
+            "orderbook_accepted": len(self._subscription_accepted[0]),
+            "lasttrades_requested": expected if self._subscription_requested[2] else 0,
+            "lasttrades_accepted": len(self._subscription_accepted[2]),
+            "orderbook_messages": self._message_counts["OrderBook"],
+            "lasttrades_messages": self._message_counts["LastTrades"],
+            "subscription_errors": list(self._subscription_errors[-5:]),
+            "last_message_at": self._last_message_at,
+            "last_error": self._last_error,
+        }
+
+    def _emit_realtime_status(self, state, **extra):
+        payload = {"state": state, "source": "BCS_WEBSOCKET_MARKET_DATA"}
+        payload.update(self._realtime_diagnostics())
+        payload.update(extra)
+        self.status.emit(payload)
+
+    def _handle_subscription_response(self, payload):
+        response_type = str(payload.get("responseType") or "")
+        if response_type not in {"OrderBookSuccess", "LastTradesSuccess", "Error"} and not payload.get("errors"):
+            return False
+        if response_type == "Error" or payload.get("errors"):
+            errors = payload.get("errors") or payload.get("error") or []
+            if isinstance(errors, dict):
+                errors = [errors]
+            if not isinstance(errors, list):
+                errors = [errors]
+            for error in errors:
+                if isinstance(error, dict):
+                    code = error.get("code") or error.get("errorCode") or "UNKNOWN"
+                    message = error.get("message") or error.get("description") or str(error)
+                    item = f"{code}: {message}"
+                else:
+                    item = str(error)
+                if item not in self._subscription_errors:
+                    self._subscription_errors.append(item)
+            self._last_error = self._subscription_errors[-1] if self._subscription_errors else "BCS subscription error"
+            self._emit_realtime_status("SUBSCRIPTION_ERROR")
+            return True
+        accepted_type = 0 if response_type == "OrderBookSuccess" else 2
+        ticker = str(payload.get("ticker") or "").upper()
+        class_code = str(payload.get("classCode") or "").upper()
+        if ticker:
+            self._subscription_accepted[accepted_type].add((ticker, class_code))
+        else:
+            requested = {(item["ticker"], item["classCode"]) for item in self.instruments}
+            self._subscription_accepted[accepted_type].update(requested)
+        self._emit_realtime_status("SUBSCRIBED")
+        return True
+
     def _emit_snapshot(self, ticker, class_code):
         now = time.time()
         if now - self._last_emit.get(ticker, 0.0) < self.EMIT_MIN_INTERVAL_SECONDS:
@@ -189,6 +250,9 @@ class RealtimeMicrostructureWorker(QObject):
     def _handle(self, payload):
         if not isinstance(payload, dict):
             return
+        self._last_message_at = self._now().isoformat()
+        if self._handle_subscription_response(payload):
+            return
         response_type = str(payload.get("responseType") or "")
         ticker = str(payload.get("ticker") or "").upper()
         if not ticker:
@@ -196,11 +260,13 @@ class RealtimeMicrostructureWorker(QObject):
         class_code = str(payload.get("classCode") or "").upper()
 
         if response_type == "OrderBook":
+            self._message_counts["OrderBook"] += 1
             self._books[ticker] = payload
             self._emit_snapshot(ticker, class_code)
             return
 
         if response_type == "LastTrades":
+            self._message_counts["LastTrades"] += 1
             side = str(payload.get("side") or "").upper()
             if side not in {"BUY", "SELL"}:
                 return
@@ -224,6 +290,7 @@ class RealtimeMicrostructureWorker(QObject):
             if data_type == 0:
                 message["depth"] = self.DEPTH
             ws.send(json.dumps(message))
+            self._subscription_requested[data_type] = True
 
     def run(self):
         if not self.instruments:
@@ -255,14 +322,27 @@ class RealtimeMicrostructureWorker(QObject):
                     with self._ws_lock:
                         self._ws = ws
                     self._connected_at = self._now()
-                    self.status.emit({
-                        "state": "LIVE",
-                        "source": "BCS_WEBSOCKET_MARKET_DATA",
-                        "instruments": len(self.instruments),
-                        "connected_at": self._connected_at.isoformat(),
-                    })
+                    self._subscription_requested = {0: False, 2: False}
+                    self._subscription_accepted = {0: set(), 2: set()}
+                    self._message_counts = {"OrderBook": 0, "LastTrades": 0}
+                    self._subscription_errors = []
+                    self._last_message_at = None
+                    self._last_error = None
+                    self._emit_realtime_status("CONNECTED", connected_at=self._connected_at.isoformat())
                     self._subscribe(ws)
+                    subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
                     while not self._stop_event.is_set():
+                        if time.monotonic() >= subscription_deadline:
+                            expected = {(item["ticker"], item["classCode"]) for item in self.instruments}
+                            if not (
+                                self._subscription_accepted[0] >= expected
+                                and self._subscription_accepted[2] >= expected
+                            ):
+                                self._last_error = "BCS subscription acknowledgement timeout"
+                                self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
+                                raise RuntimeError(self._last_error)
+                            self._emit_realtime_status("LIVE")
+                            subscription_deadline = float("inf")
                         try:
                             raw = ws.recv()
                             if raw is None:
