@@ -165,8 +165,17 @@ def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):
 def test_neutral_market_has_no_strict_direction(monkeypatch):
     rows = [_row("STRONG", 1.0, 2_000_000), _row("WEAK", -1.0, 1_900_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
-    assert scanner.scan(limit=3) == []
+    result = scanner.scan(limit=3)
+
+    assert result
     assert scanner._last_scan_diagnostics["market_regime"] == "NEUTRAL"
+    assert scanner._last_scan_diagnostics["strict_selected"] == 0
+    assert scanner._last_scan_diagnostics["context_selected"] == len(result)
+    assert all(x["selection_role"] == "MARKET_CONTEXT" for x in result)
+    assert all(x["qualification_status"] == "CONTEXT_ONLY" for x in result)
+    assert all(x["context_reason"] == "NEUTRAL_MARKET" for x in result)
+    assert all(x["watch_direction"] == "NEUTRAL" for x in result)
+    assert all(x["selection_role"] not in {"MARKET_LEADER", "MARKET_LAGGARD"} for x in result)
 
 
 def test_acceleration_requires_two_complete_windows():
