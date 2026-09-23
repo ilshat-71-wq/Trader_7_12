@@ -613,6 +613,36 @@ class MarketAttentionScannerService:
                 selected.append(dict(row, selection_role=role, rank=len(selected) + 1))
 
         strict_selected_count = len(selected)
+
+        # In a NEUTRAL benchmark regime there is deliberately no strict LONG/SHORT
+        # direction.  The radar must nevertheless remain informative: return a
+        # read-only market-context set from the same real-data pipeline instead
+        # of leaving the dashboard empty.  Context rows are not trade candidates
+        # and carry an explicit MARKET_CONTEXT role.
+        context_selected_count = 0
+        if market_regime == "NEUTRAL" and not selected:
+            context_pool = [
+                x for x in results
+                if x.get("liquidity_gate")
+            ]
+            context_pool.sort(
+                key=lambda x: (
+                    self._f(x.get("directional_score")),
+                    self._f(x.get("attention_score")),
+                    abs(self._f(x.get("relative_strength"))),
+                    self._f(x.get("recent_money_per_minute")),
+                ),
+                reverse=True,
+            )
+            for row in context_pool[: max(0, int(limit or 0))]:
+                context = dict(row)
+                context["selection_role"] = "MARKET_CONTEXT"
+                context["qualification_status"] = "CONTEXT_ONLY"
+                context["context_reason"] = "NEUTRAL_MARKET"
+                context["watch_direction"] = "NEUTRAL"
+                selected.append(context)
+            context_selected_count = len(selected)
+
         coverage_ratio = (len(results) / len(universe)) if universe else 0.0
         coverage_percent = round(coverage_ratio * 100.0, 1)
         coverage_ok = coverage_ratio >= self.MIN_DIRECTIONAL_COVERAGE
@@ -725,6 +755,7 @@ class MarketAttentionScannerService:
             "directional_qualified": len(valid),
             "strict_selected": strict_selected_count,
             "watch_selected": watch_selected_count,
+            "context_selected": context_selected_count,
             "selected": len(selected),
             "radar_capacity": int(limit or 0),
             "long_candidates": [x["spot_ticker"] for x in selected if x.get("selection_role") == "LONG_CANDIDATE"],
