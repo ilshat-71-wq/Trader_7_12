@@ -396,7 +396,8 @@ class MarketAttentionScannerService:
             benchmark_requests.setdefault(requested, {}).update({
                 "quote_fallback_seconds": round(request_quote_seconds, 3),
             })
-            if quote_return is not None:                self._last_benchmark_timing = {
+            if quote_return is not None:
+                self._last_benchmark_timing = {
                     "metadata": round(metadata_seconds, 3),
                     "indices_fallback": round(fallback_seconds, 3),
                     "candles": round(candles_seconds, 3),
