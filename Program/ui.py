@@ -605,7 +605,13 @@ class TraderWindow(QWidget):
         )
 
         self._spot_results_for_realtime = list(results or [])
-        entries = self._rows_for_results(results)
+        # The SPOT tabs are a market map, not a copy of the selected radar.
+        # The scanner keeps the selected trading-context rows in `results`,
+        # while `market_map` contains every analyzed real-data row. This keeps
+        # STRONGER/WEAKER IMOEX2 informative even when the active market regime
+        # selects only the opposite side for the directional radar.
+        market_map = diagnostics.get("market_map") or results or []
+        entries = self._rows_for_results(market_map)
 
         # The passport definition is relative performance against the live
         # benchmark: positive RS means stronger than the index, negative RS
