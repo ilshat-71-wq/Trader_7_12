@@ -404,10 +404,46 @@ class OIWatchlistTraderWindow(TraderWindow):
 
     def _realtime_status(self, status):
         state = str(status.get("state") or "—")
+        instruments = int(status.get("instruments") or 0)
+        orderbook_accepted = int(status.get("orderbook_accepted") or 0)
+        lasttrades_accepted = int(status.get("lasttrades_accepted") or 0)
+        self._oi_diagnostics.update({
+            "realtime_state": state,
+            "realtime_instruments": instruments,
+            "realtime_orderbook_requested": status.get("orderbook_requested"),
+            "realtime_orderbook_accepted": orderbook_accepted,
+            "realtime_lasttrades_requested": status.get("lasttrades_requested"),
+            "realtime_lasttrades_accepted": lasttrades_accepted,
+            "realtime_orderbook_messages": status.get("orderbook_messages", 0),
+            "realtime_lasttrades_messages": status.get("lasttrades_messages", 0),
+            "realtime_subscription_errors": status.get("subscription_errors") or [],
+            "realtime_last_message_at": status.get("last_message_at"),
+            "realtime_last_error": status.get("last_error"),
+        })
+        self._append_oi_diagnostics()
+
+        base = self.oi_meta.text().split("\n")[0]
         if state == "LIVE":
-            self.oi_meta.setText(self.oi_meta.text().split("\n")[0] + " • REALTIME BOOK/TAPE: LIVE")
+            suffix = (
+                f" • REALTIME LIVE • BOOK {orderbook_accepted}/{instruments}"
+                f" • TAPE {lasttrades_accepted}/{instruments}"
+            )
+        elif state == "SUBSCRIBED":
+            suffix = (
+                f" • REALTIME SUBSCRIBED • BOOK {orderbook_accepted}/{instruments}"
+                f" • TAPE {lasttrades_accepted}/{instruments}"
+            )
+        elif state == "CONNECTED":
+            suffix = " • REALTIME CONNECTED • awaiting BCS subscription acknowledgements"
+        elif state == "SUBSCRIPTION_ERROR":
+            suffix = f" • REALTIME SUBSCRIPTION ERROR • {status.get('last_error') or 'BCS error'}"
+        elif state == "SUBSCRIPTION_TIMEOUT":
+            suffix = " • REALTIME SUBSCRIPTION TIMEOUT"
         elif state == "RECONNECTING":
-            self.oi_meta.setText(self.oi_meta.text().split("\n")[0] + " • REALTIME: RECONNECTING")
+            suffix = " • REALTIME RECONNECTING"
+        else:
+            suffix = f" • REALTIME {state}"
+        self.oi_meta.setText(base + suffix)
 
     def _realtime_failed(self, error):
         self._oi_diagnostics["realtime_error"] = error
