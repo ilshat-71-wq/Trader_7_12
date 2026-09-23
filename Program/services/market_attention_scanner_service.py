@@ -473,7 +473,7 @@ class MarketAttentionScannerService:
         trading_date = self.session.get_trading_day()
         now = self.session.now()
         if not self.session.is_market_open(now):
-            self._last_scan_diagnostics = {
+            diagnostics = {
                 "status": "MARKET_CLOSED", "session": "CLOSED", "trading_date": str(trading_date),
                 "scan_window": "ВСЯ ТЕКУЩАЯ ТОРГОВАЯ СЕССИЯ", "preferred_window": "09:50-13:00 MSK",
                 "universe_total": 0, "stocks_total": 0, "analyzed": 0, "benchmark": None,
@@ -795,4 +795,12 @@ class MarketAttentionScannerService:
             "watch_policy": "READ_ONLY_FALLBACK_WITH_SAME_MARKET_REGIME_AND_RS_DIRECTION",
             "timings_seconds": timings,
         }
+        diagnostics.update({
+            "market_map": market_map,
+            "market_map_total": len(market_map),
+            "market_map_stronger": market_map_stronger,
+            "market_map_weaker": market_map_weaker,
+            "market_map_neutral": market_map_neutral,
+        })
+        self._last_scan_diagnostics = diagnostics
         return selected
