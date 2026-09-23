@@ -83,6 +83,17 @@ class OIWatchlistTraderWindow(TraderWindow):
             "border-radius:8px;padding:9px 12px;font-size:11px;"
         )
         layout.addWidget(self.oi_meta)
+
+        self.oi_realtime_status = QLabel("RT: —")
+        self.oi_realtime_status.setWordWrap(False)
+        self.oi_realtime_status.setMinimumHeight(24)
+        self.oi_realtime_status.setMaximumHeight(28)
+        self.oi_realtime_status.setStyleSheet(
+            "background:#20262c;color:#8d98a2;border:1px solid #394149;"
+            "border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;"
+        )
+        layout.addWidget(self.oi_realtime_status)
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         hint = QLabel(
@@ -422,28 +433,31 @@ class OIWatchlistTraderWindow(TraderWindow):
         })
         self._append_oi_diagnostics()
 
-        base = self.oi_meta.text().split("\n")[0]
         if state == "LIVE":
-            suffix = (
-                f" • REALTIME LIVE • BOOK {orderbook_accepted}/{instruments}"
-                f" • TAPE {lasttrades_accepted}/{instruments}"
-            )
+            text = f"RT: LIVE • INS {instruments} • BOOK {orderbook_accepted} • TAPE {lasttrades_accepted}"
+            style = "background:#173325;color:#69e59a;border:1px solid #315c44;"
         elif state == "SUBSCRIBED":
-            suffix = (
-                f" • REALTIME SUBSCRIBED • BOOK {orderbook_accepted}/{instruments}"
-                f" • TAPE {lasttrades_accepted}/{instruments}"
-            )
+            text = f"RT: SUBSCRIBED • INS {instruments} • BOOK {orderbook_accepted} • TAPE {lasttrades_accepted}"
+            style = "background:#2b3020;color:#d4af55;border:1px solid #55502e;"
         elif state == "CONNECTED":
-            suffix = " • REALTIME CONNECTED • awaiting BCS subscription acknowledgements"
+            text = f"RT: CONNECTED • INS {instruments} • awaiting ACK"
+            style = "background:#252b31;color:#b9c1c8;border:1px solid #394149;"
         elif state == "SUBSCRIPTION_ERROR":
-            suffix = f" • REALTIME SUBSCRIPTION ERROR • {status.get('last_error') or 'BCS error'}"
+            text = f"RT: SUBSCRIPTION ERROR • INS {instruments}"
+            style = "background:#3a272b;color:#ff7d7d;border:1px solid #6b3c43;"
         elif state == "SUBSCRIPTION_TIMEOUT":
-            suffix = " • REALTIME SUBSCRIPTION TIMEOUT"
+            text = f"RT: TIMEOUT • INS {instruments}"
+            style = "background:#3a3020;color:#ffb86b;border:1px solid #6b5135;"
         elif state == "RECONNECTING":
-            suffix = " • REALTIME RECONNECTING"
+            text = f"RT: RECONNECTING • INS {instruments} • BOOK {orderbook_accepted} • TAPE {lasttrades_accepted}"
+            style = "background:#2b3020;color:#d4af55;border:1px solid #55502e;"
         else:
-            suffix = f" • REALTIME {state}"
-        self.oi_meta.setText(base + suffix)
+            text = f"RT: {state} • INS {instruments} • BOOK {orderbook_accepted} • TAPE {lasttrades_accepted}"
+            style = "background:#252b31;color:#b9c1c8;border:1px solid #394149;"
+        self.oi_realtime_status.setText(text)
+        self.oi_realtime_status.setStyleSheet(
+            style + "border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;"
+        )
 
     def _realtime_failed(self, error):
         self._oi_diagnostics["realtime_error"] = error
