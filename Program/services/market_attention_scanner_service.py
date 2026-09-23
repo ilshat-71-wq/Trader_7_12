@@ -720,6 +720,26 @@ class MarketAttentionScannerService:
                 "rank": rank,
             })
 
+        market_map = [
+            dict(row) for row in results
+            if row.get("relative_strength") is not None
+        ]
+        market_map.sort(
+            key=lambda row: self._f(row.get("relative_strength")),
+            reverse=True,
+        )
+        market_map_stronger = sum(
+            1 for row in market_map
+            if self._f(row.get("relative_strength")) > 0.0
+        )
+        market_map_weaker = sum(
+            1 for row in market_map
+            if self._f(row.get("relative_strength")) < 0.0
+        )
+        market_map_neutral = (
+            len(market_map) - market_map_stronger - market_map_weaker
+        )
+
         timings["calculation"] = round(perf_counter() - phase_started, 3)
         total_seconds = round(perf_counter() - scan_started, 3)
         timings["total"] = total_seconds
