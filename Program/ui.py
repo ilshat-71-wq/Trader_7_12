@@ -252,7 +252,8 @@ class TraderWindow(QWidget):
         self.market_tabs = QTabWidget()
         self.market_tabs.setDocumentMode(True)
         self.market_tabs.addTab(self.result_stack, "SPOT")
-        self.market_tabs.addTab(self._build_diagnostics_panel(), "DIAGNOSTICS")
+        self.diagnostics_panel = self._build_diagnostics_panel()
+        self.market_tabs.addTab(self.diagnostics_panel, "DIAGNOSTICS")
 
         self.footer = self._build_footer()
 
