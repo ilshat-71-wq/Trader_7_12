@@ -743,6 +743,11 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 continue
             locked_curve_contracts[family_key] = curve
         curve_contracts = locked_curve_contracts
+        contract_by_ticker = {
+            str(item.get("futures_ticker") or "").strip().upper(): item
+            for item in bcs_contracts
+            if str(item.get("futures_ticker") or "").strip()
+        }
         candidates, skipped, oi_available = [], 0, 0
         liquidity_available = 0
         base_change_available = 0
@@ -851,6 +856,9 @@ class FuturesOIMarketDataScannerService(FuturesOIScannerService):
                 "futures_root": family,
                 "oi_root": family,
                 "futures_ticker": secid,
+                "futures_class_code": str(
+                    (contract_by_ticker.get(secid) or {}).get("futures_class_code") or ""
+                ).strip(),
                 "last": last,
                 "change_pct": change,
                 "change_percent": change,
