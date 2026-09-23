@@ -480,15 +480,34 @@ class OIWatchlistTraderWindow(TraderWindow):
         super().closeEvent(event)
 
     def _append_oi_diagnostics(self):
-        base = self.diagnostics_box.toPlainText().rstrip()
-        lines = ["", "", "=== FUTURES OI / REAL MONEY FLOW ==="]
-        for key, value in self._oi_diagnostics.items():
-            lines.append(f"{key}: {value}")
+        base = self._format_diagnostics(self._last_diagnostics or {})
+        d = self._oi_diagnostics or {}
+        lines = ["", "=== FUTURES OI / REAL MONEY FLOW ==="]
+        lines.append(
+            f"Status {d.get('status', '—')} • Contracts {d.get('active_contracts', d.get('analyzed', '—'))} "
+            f"• OI {d.get('oi_available', d.get('oi', '—'))}"
+        )
+        lines.append(
+            f"Money flow {d.get('money_flow_status', '—')} • Available {d.get('money_flow_available', '—')} "
+            f"• Hot liquidity {d.get('money_flow_hot_liquidity', '—')}"
+        )
+        lines.append(
+            f"Realtime {d.get('realtime_state', '—')} • Instruments {d.get('realtime_instruments', '—')} "
+            f"• BOOK {d.get('realtime_orderbook_accepted', '—')} • TAPE {d.get('realtime_lasttrades_accepted', '—')}"
+        )
+        errors = d.get('realtime_subscription_errors') or []
+        if errors:
+            lines.append(f"Realtime errors: {len(errors)}")
+        if d.get('realtime_last_error'):
+            lines.append(f"Realtime last error: {d.get('realtime_last_error')}")
+        if d.get('error'):
+            lines.append(f"ERROR: {d.get('error')}")
         self.diagnostics_box.setPlainText(base + "\n" + "\n".join(lines))
 
     def copy_oi_table(self):
-        self.oi_table.copy_selection()
+        copied = self.oi_table.copy_selection()
         self.market_tabs.setCurrentWidget(self.oi_panel)
+        return copied
 
     def _oi_failed(self, error):
         self.oi_table.hide()
