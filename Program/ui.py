@@ -610,20 +610,38 @@ class TraderWindow(QWidget):
         # while `market_map` contains every analyzed real-data row. This keeps
         # STRONGER/WEAKER IMOEX2 informative even when the active market regime
         # selects only the opposite side for the directional radar.
-        market_map = diagnostics.get("market_map") or results or []
+        raw_market_map = diagnostics.get("market_map")
+        market_map = (
+            raw_market_map
+            if isinstance(raw_market_map, list)
+            else list(results or [])
+        )
         entries = self._rows_for_results(market_map)
 
-        # The passport definition is relative performance against the live
-        # benchmark: positive RS means stronger than the index, negative RS
-        # means weaker. Do not hide small but real differences behind an
-        # arbitrary UI threshold; the two tabs are meant to answer the
-        # instantaneous strong/weak question for the current scan.
-        strong = [entry for entry in entries if entry[0] > 0.0]
-        weak = [entry for entry in entries if entry[0] < 0.0]
+        # STRONGER/WEAKER are an independent relative-strength market map.
+        # They are NOT the selected radar. Positive RS belongs in STRONGER,
+        # negative RS belongs in WEAKER, regardless of market regime or
+        # whether the row was selected as LONG/SHORT/WATCH.
+        strong = sorted(
+            (entry for entry in entries if entry[0] > 0.0),
+            key=lambda entry: entry[0],
+            reverse=True,
+        )
+        weak = sorted(
+            (entry for entry in entries if entry[0] < 0.0),
+            key=lambda entry: entry[0],
+        )
         neutral = len(entries) - len(strong) - len(weak)
 
         strong_count = self._populate_spot_table(self.result_table, strong)
         weak_count = self._populate_spot_table(self.weak_result_table, weak)
+
+        # Keep the diagnostic passport internally consistent. If the backend
+        # reports a non-zero market map but the UI receives no rows, surface it
+        # explicitly instead of silently showing an empty STRONGER tab.
+        map_total = diagnostics.get("market_map_total", len(entries))
+        map_stronger = diagnostics.get("market_map_stronger", strong_count)
+        map_weaker = diagnostics.get("market_map_weaker", weak_count)
 
         regime = str(diagnostics.get("market_regime") or "NEUTRAL").upper()
         if regime == "UP":
@@ -661,8 +679,9 @@ class TraderWindow(QWidget):
         )
 
         split_note = (
-            f"SPOT {regime} • STRONGER {strong_count} • WEAKER {weak_count} • "
-            f"RS NEUTRAL {neutral} • ROW COLOR = PRICE DIRECTION"
+            f"SPOT {regime} • MAP {map_total} • STRONGER {map_stronger}/{strong_count} • "
+            f"WEAKER {map_weaker}/{weak_count} • RS NEUTRAL {neutral} • "
+            f"ROW COLOR = PRICE DIRECTION"
         )
         self.result_box.setPlainText(
             "\n".join((line1, line2, line3, split_note))
