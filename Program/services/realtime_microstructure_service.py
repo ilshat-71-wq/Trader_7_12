@@ -308,10 +308,14 @@ class RealtimeMicrostructureWorker(QObject):
                 self.failed.emit("BCS realtime authorization failed.")
                 self.finished.emit()
                 return
-            token = self.api.access_token
             while not self._stop_event.is_set():
                 ws = None
                 try:
+                    # Re-check/refresh the access token before each connection.
+                    # A stale token must never trap realtime in a reconnect loop.
+                    if not self.api.authorize():
+                        raise RuntimeError("BCS realtime authorization failed during reconnect")
+                    token = self.api.access_token
                     ws = websocket.create_connection(
                         self.WS_URL,
                         header=[f"Authorization: Bearer {token}"],
@@ -358,10 +362,10 @@ class RealtimeMicrostructureWorker(QObject):
                             raise
                 except Exception as exc:
                     if not self._stop_event.is_set():
-                        self.status.emit({
-                            "state": "RECONNECTING",
-                            "error": f"{type(exc).__name__}: {exc}",
-                        })
+                        self._emit_realtime_status(
+                            "RECONNECTING",
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
                         time.sleep(self.RECONNECT_SECONDS)
                 finally:
                     with self._ws_lock:
