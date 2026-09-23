@@ -693,20 +693,73 @@ class TraderWindow(QWidget):
 
     @staticmethod
     def _format_diagnostics(diagnostics):
+        """Render a compact operator passport; never dump raw internal maps."""
         if not diagnostics:
             return "No diagnostics available."
-        lines = ["=== SPOT / MARKET RADAR ==="]
-        lines.extend(f"{key}: {value}" for key, value in diagnostics.items())
+
+        def val(key, default="—"):
+            value = diagnostics.get(key, default)
+            return default if value is None or value == "" else value
+
+        def num(key, digits=1):
+            return _number(diagnostics.get(key), digits)
+
+        lines = [
+            "=== SPOT / MARKET RADAR ===",
+            f"STATUS: {val('status')}   SESSION: {val('session')}   REGIME: {val('market_regime')}",
+            f"TRADING DATE: {val('trading_date')}   PREFERRED WINDOW: {val('preferred_window_active')}",
+            "",
+            "COVERAGE",
+            f"Universe {val('universe_total', 0)} • Analyzed {val('analyzed', 0)} • Coverage {num('coverage_percent')}%",
+            f"Liquidity passed {val('liquidity_passed', 0)} • Filtered {val('liquidity_filtered', 0)}",
+            f"D1 qualified {val('daily_profiles_qualified', 0)} • Directional qualified {val('directional_qualified', 0)}",
+            "",
+            "SELECTION",
+            f"Strict {val('strict_selected', 0)} • Watch {val('watch_selected', 0)} • Context {val('context_selected', 0)} • Selected {val('selected', 0)}",
+            f"Market map {val('market_map_total', 0)} • Stronger {val('market_map_stronger', 0)} • Weaker {val('market_map_weaker', 0)} • Neutral {val('market_map_neutral', 0)}",
+            "",
+            "SKIPS",
+            f"{TraderWindow._skip_summary(diagnostics)}",
+            "",
+            "TIMING",
+        ]
+
+        timing = diagnostics.get("timings_seconds") or {}
+        if isinstance(timing, dict):
+            labels = (
+                ("universe", "Universe"),
+                ("benchmark", "Benchmark"),
+                ("benchmark_d1", "Benchmark D1"),
+                ("m5", "M5"),
+                ("d1", "D1"),
+                ("calculation", "Calculation"),
+                ("total", "Total"),
+            )
+            for key, label in labels:
+                if key in timing:
+                    try:
+                        lines.append(f"{label} {float(timing[key]):.3f}s")
+                    except (TypeError, ValueError):
+                        lines.append(f"{label} {timing[key]}")
         return "\n".join(lines)
 
     def copy_active_table(self):
         widget = self.market_tabs.currentWidget()
         if widget is self.result_stack:
-            self.spot_tabs.currentWidget().copy_selection()
-            return
-        table = widget.findChild(MarketTableWidget)
-        if table is not None:
-            table.copy_selection()
+            copied = self.spot_tabs.currentWidget().copy_selection()
+        elif widget is getattr(self, "oi_panel", None):
+            copied = getattr(self, "copy_oi_table", lambda: False)()
+        elif widget is getattr(self, "diagnostics_panel", None):
+            QApplication.clipboard().setText(self.diagnostics_box.toPlainText())
+            copied = True
+        else:
+            table = widget.findChild(MarketTableWidget) if widget is not None else None
+            copied = table.copy_selection() if table is not None else False
+        if copied is False:
+            self.copy_button.setText("NOTHING TO COPY")
+        else:
+            self.copy_button.setText("COPIED ✓")
+        QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
     def _scan_failed(self, error):
         self.scan_button.setEnabled(True)
