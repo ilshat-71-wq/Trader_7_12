@@ -1,15 +1,46 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 22.09.2026  
+**Дата актуализации:** 23.09.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `272a9c1943a78bb9216fd4be7bc48498c89c9ab7`  
+**Последний функциональный commit:** `613dbb4fd5c8052ed7e70e5e53dd1a43d797268c`  
 **Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
+
+## 0.2 UI / Diagnostics checkpoint — 23.09.2026
+
+Сохранена текущая рабочая точка после SPOT market-map и UI-диагностики.
+
+Последовательность последних UI-коммитов:
+
+```
+d086abb5 — Fix SPOT market map diagnostics entry
+58893dd7 — Compact diagnostics and improve global copy action
+0ac841c3 — Compact Futures OI diagnostics and return copy status
+613dbb4 — Add professional copy action to Morning Radar
+```
+
+### Диагностика
+- DIAGNOSTICS больше не выводит полный `market_map` и внутренние массивы.
+- Сохраняется компактный операторский паспорт: status/session/regime, coverage, liquidity, selection, market-map counts, skips и timings.
+- Полный `market_map` остаётся в scanner diagnostics для вкладок STRONGER / WEAKER и не удалён из backend.
+
+### Копирование
+- Основная кнопка `COPY` работает с активным представлением.
+- Таблицы поддерживают `⌘C / Ctrl+C`, выделение строк и контекстное меню.
+- DIAGNOSTICS копируется как компактный текстовый паспорт.
+- Futures OI возвращает статус копирования.
+- Morning Radar получил отдельную профессиональную кнопку `COPY`, копирующую summary + таблицу + OI summary.
+- После копирования UI показывает `COPIED ✓`.
+
+### Важное правило
+UI-изменения не меняют scanner calculations, qualification, ranking, market-map source или BCS market-data semantics.
+
+Текущая точка должна сначала пройти локальные `py_compile` / `pytest` и macOS build после синхронизации рабочей машины.
 
 ## 1. Назначение
 
