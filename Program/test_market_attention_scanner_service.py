@@ -162,6 +162,26 @@ def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):
     assert scanner._last_scan_diagnostics["selected"] == 1
 
 
+def test_market_map_is_independent_from_selected_radar(monkeypatch):
+    rows = [
+        _row("STRONG", 1.2, 2_000_000),
+        _row("WEAK", -1.4, 1_900_000),
+        _row("MIDDLE", 0.05, 1_800_000),
+    ]
+    scanner = _scanner(monkeypatch, rows, -0.6)
+    result = scanner.scan(limit=1)
+
+    assert [x["spot_ticker"] for x in result] == ["WEAK"]
+    diagnostics = scanner._last_scan_diagnostics
+    assert diagnostics["market_map_total"] == 3
+    assert diagnostics["market_map_stronger"] == 2
+    assert diagnostics["market_map_weaker"] == 1
+    assert diagnostics["market_map_neutral"] == 0
+    assert [x["spot_ticker"] for x in diagnostics["market_map"]] == [
+        "STRONG", "MIDDLE", "WEAK"
+    ]
+
+
 def test_neutral_market_has_no_strict_direction(monkeypatch):
     rows = [_row("STRONG", 1.0, 2_000_000), _row("WEAK", -1.0, 1_900_000)]
     scanner = _scanner(monkeypatch, rows, 0.0)
