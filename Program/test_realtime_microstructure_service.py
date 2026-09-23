@@ -31,3 +31,72 @@ def test_worker_limits_subscription_to_bcs_documented_maximum():
     instruments = [{"ticker": f"S{i}", "classCode": "TQBR"} for i in range(150)]
     worker = RealtimeMicrostructureWorker(None, instruments)
     assert len(worker.instruments) == 100
+
+
+def test_subscription_success_is_counted_per_instrument():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [
+            {"ticker": "SBER", "classCode": "TQBR"},
+            {"ticker": "GAZP", "classCode": "TQBR"},
+        ],
+    )
+    worker._subscription_requested = {0: True, 2: True}
+    worker._handle({
+        "responseType": "OrderBookSuccess",
+        "subscribeType": 0,
+        "ticker": "SBER",
+        "classCode": "TQBR",
+    })
+    worker._handle({
+        "responseType": "LastTradesSuccess",
+        "subscribeType": 0,
+        "ticker": "SBER",
+        "classCode": "TQBR",
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["orderbook_accepted"] == 1
+    assert diagnostics["lasttrades_accepted"] == 1
+    assert diagnostics["orderbook_messages"] == 0
+    assert diagnostics["lasttrades_messages"] == 0
+
+
+def test_subscription_error_is_visible_in_diagnostics():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "BAD", "classCode": "SPBFUT"}],
+    )
+    worker._handle({
+        "responseType": "OrderBook",
+        "errors": [{"code": "NOT_FOUND", "message": "instrument not found"}],
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["subscription_errors"] == ["NOT_FOUND: instrument not found"]
+    assert diagnostics["last_error"] == "NOT_FOUND: instrument not found"
+
+
+def test_market_data_messages_are_counted():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "SBER", "classCode": "TQBR"}],
+    )
+    worker._handle({
+        "responseType": "OrderBook",
+        "ticker": "SBER",
+        "classCode": "TQBR",
+        "bidVolume": 80,
+        "askVolume": 20,
+        "bids": [{"price": 100, "quantity": 80}],
+        "asks": [{"price": 101, "quantity": 20}],
+    })
+    worker._handle({
+        "responseType": "LastTrades",
+        "ticker": "SBER",
+        "classCode": "TQBR",
+        "side": "BUY",
+        "price": 100,
+        "quantity": 10,
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["orderbook_messages"] == 1
+    assert diagnostics["lasttrades_messages"] == 1
