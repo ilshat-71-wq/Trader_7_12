@@ -426,7 +426,21 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_worker = None
 
     def closeEvent(self, event):
+        # Stop worker threads before Qt destroys their QThread owners.
         self._stop_realtime()
+
+        if self.realtime_thread is not None and self.realtime_thread.isRunning():
+            self.realtime_thread.quit()
+            self.realtime_thread.wait(4000)
+
+        if self.oi_thread is not None and self.oi_thread.isRunning():
+            self.oi_thread.quit()
+            self.oi_thread.wait(4000)
+
+        if self.scan_thread is not None and self.scan_thread.isRunning():
+            self.scan_thread.quit()
+            self.scan_thread.wait(4000)
+
         super().closeEvent(event)
 
     def _append_oi_diagnostics(self):

@@ -50,9 +50,19 @@ class RealtimeMicrostructureWorker(QObject):
         self._trades = defaultdict(deque)
         self._last_emit = {}
         self._connected_at = None
+        self._ws = None
+        self._ws_lock = threading.Lock()
 
     def stop(self):
         self._stop_event.set()
+        # Interrupt blocking recv() so Qt can shut the worker down cleanly.
+        with self._ws_lock:
+            ws = self._ws
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
 
     @staticmethod
     def _float(value):
@@ -241,7 +251,9 @@ class RealtimeMicrostructureWorker(QObject):
                         timeout=10,
                         enable_multithread=True,
                     )
-                    ws.settimeout(2.0)
+                    ws.settimeout(1.0)
+                    with self._ws_lock:
+                        self._ws = ws
                     self._connected_at = self._now()
                     self.status.emit({
                         "state": "LIVE",
@@ -272,6 +284,9 @@ class RealtimeMicrostructureWorker(QObject):
                         })
                         time.sleep(self.RECONNECT_SECONDS)
                 finally:
+                    with self._ws_lock:
+                        if self._ws is ws:
+                            self._ws = None
                     if ws is not None:
                         try:
                             ws.close()
