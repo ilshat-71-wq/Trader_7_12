@@ -12,6 +12,8 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
+from services.signal_probability_service import SignalProbabilityService
+
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
@@ -50,6 +52,7 @@ class MorningRadarWidget(QWidget):
         self._thread = None
         self._worker = None
         self._payload = None
+        self.signal_probability = SignalProbabilityService()
         self._build()
 
     def _build(self):
@@ -188,42 +191,62 @@ class MorningRadarWidget(QWidget):
             "SHORT WATCH is a separate weakness lane, not a trade order."
         )
 
-        watch_rows = sorted(
-            stocks,
-            key=lambda x: float(x.get("signal_probability") or 0.0),
-            reverse=True,
-        )[:10]
+        # Futures-first compact watchlist: it answers WHO is interesting
+        # before the main session. The detailed SPOT history remains below.
+        latest_futures = list(latest.get("futures_oi") or [])
+        previous_futures = list((history[-2] if len(history) > 1 else {}).get("futures_oi") or [])
+        previous_by_contract = {
+            str(x.get("futures_ticker") or x.get("oi_root") or "").upper(): x
+            for x in previous_futures
+        }
+        future_rows = []
+        for item in latest_futures:
+            model = self.signal_probability.futures(item)
+            key = str(item.get("futures_ticker") or item.get("oi_root") or "").upper()
+            previous = previous_by_contract.get(key)
+            previous_prob = self.signal_probability.futures(previous)["probability"] if previous else None
+            enriched = dict(item)
+            enriched.update({
+                "signal": model["signal"],
+                "signal_probability": model["probability"],
+                "signal_probability_delta": round(model["probability"] - previous_prob, 1) if previous_prob is not None else None,
+            })
+            future_rows.append(enriched)
+        future_rows.sort(key=lambda x: float(x.get("signal_probability") or 0.0), reverse=True)
+        watch_rows = future_rows[:5]
         self.watchlist_table.setRowCount(len(watch_rows))
         for r, item in enumerate(watch_rows, 1):
             signal = str(item.get("signal") or "").upper()
             direction = {"LONG": "🟢 LONG", "SHORT": "🔴 SHORT", "NEUTRAL": "⚪ NEUTRAL"}.get(signal, "⚪ —")
-            probability = item.get("signal_probability")
-            try:
-                strength = f"{float(probability):.0f}"
-            except (TypeError, ValueError):
-                strength = "—"
-            interest_state = str((item.get("interest") or {}).get("state") or "NEW").upper()
-            interest = {"RISING": "↑", "FALLING": "↓", "STABLE": "→", "NEW": "NEW"}.get(interest_state, "→")
-            setup = "DEVELOPING" if interest_state == "RISING" else ("WATCH" if interest_state in {"STABLE", "NEW"} else "WEAKENING")
-            values = [
-                str(r),
-                str(item.get("spot_ticker") or item.get("ticker") or "—"),
-                direction,
-                strength,
-                interest,
-                setup,
-                "—",
-            ]
+            strength = f"{float(item.get('signal_probability')):.0f}" if item.get("signal_probability") is not None else "—"
+            delta = item.get("signal_probability_delta")
+            if delta is None:
+                interest = "NEW"
+            elif float(delta) > 1.0:
+                interest = "↑"
+            elif float(delta) < -1.0:
+                interest = "↓"
+            else:
+                interest = "→"
+            action = str(item.get("money_flow_position_action") or "").upper()
+            setup = "DEVELOPING" if interest == "↑" else ("WATCH" if interest in {"→", "NEW"} else "WEAKENING")
+            if action == "LONG_LIQUIDATION":
+                setup = "LIQUIDATION"
+            elif action == "SHORT_COVERING":
+                setup = "COVERING"
+            values = [str(r), str(item.get("futures_ticker") or item.get("oi_root") or "—"), direction, strength, interest, setup, "—"]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter if col in (0, 2, 3, 4, 5, 6) else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 self.watchlist_table.setItem(r - 1, col, cell)
-            bg = QColor("#123f2a") if interest_state == "RISING" else QColor("#252b31")
+            bg = QColor("#123f2a") if interest == "↑" else QColor("#252b31")
+            if setup == "LIQUIDATION":
+                bg = QColor("#3a272b")
             for col in range(self.watchlist_table.columnCount()):
                 self.watchlist_table.item(r - 1, col).setBackground(bg)
             self.watchlist_table.item(r - 1, 2).setForeground(QColor("#69e59a" if signal == "LONG" else "#ff7d7d" if signal == "SHORT" else "#c9d0d6"))
             self.watchlist_table.item(r - 1, 3).setForeground(QColor("#e8ecef"))
-            self.watchlist_table.item(r - 1, 4).setForeground(QColor("#69e59a" if interest_state == "RISING" else "#d4af55" if interest_state == "NEW" else "#b9c1c8"))
+            self.watchlist_table.item(r - 1, 4).setForeground(QColor("#69e59a" if interest == "↑" else "#ff7d7d" if interest == "↓" else "#d4af55"))
 
         rows = sorted(
             stocks,
