@@ -13,11 +13,16 @@ class MorningRadarService:
     """Persist scheduled real-data snapshots and transparent morning deltas."""
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
+    # Morning Radar captures the clean pre-auction part of the futures
+    # morning session. The 08:50–09:00 opening auction is intentionally
+    # excluded; Entry Radar takes over at 09:00.
     SLOTS = (
         time(7, 0), time(7, 15), time(7, 30), time(8, 0),
-        time(9, 0), time(9, 45), time(9, 50),
+        time(8, 30), time(8, 45),
     )
-    VERSION = "1.1.0"
+    MORNING_COMPLETE_SLOT = "08:45"
+    ENTRY_HANDOFF_TIME = time(9, 0)
+    VERSION = "1.2.0"
     MAX_DAYS = 14
     MAX_COUNTERTREND = 10
 
@@ -284,12 +289,16 @@ class MorningRadarService:
             persistent.append(item)
         latest["countertrend_watch"] = persistent
 
+        completed_slots = [x.get("slot") for x in snapshots if x.get("slot")]
         return {
             "version": self.VERSION,
             "trading_date": payload.get("trading_date"),
             "status": payload.get("status", "EMPTY"),
             "slots": payload.get("slots", []),
-            "completed_slots": [x.get("slot") for x in snapshots if x.get("slot")],
+            "completed_slots": completed_slots,
+            "morning_complete": self.MORNING_COMPLETE_SLOT in completed_slots,
+            "morning_complete_slot": self.MORNING_COMPLETE_SLOT,
+            "entry_handoff_time": self.ENTRY_HANDOFF_TIME.strftime("%H:%M"),
             "snapshot_count": len(snapshots),
             "first_slot": first.get("slot") if first else None,
             "last_slot": latest.get("slot") if latest else None,
