@@ -90,8 +90,8 @@ class MorningRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "07:00 → 09:50 MSK • growing interest • weakness / short-watch • "
-            "Futures OI history"
+            "07:00 → 09:50 MSK • MORNING SESSION • 10:00 → ENTRY RADAR • "
+            "growing interest • weakness / short-watch • Futures OI history"
         )
         self.meta.setObjectName("mrMeta")
         root.addWidget(self.meta)
@@ -161,7 +161,7 @@ class MorningRadarWidget(QWidget):
         self._payload = payload or {}
         captured = self._payload.get("completed_slots") or []
         complete = "09:50" in captured
-        self.state.setText("COMPLETE • 09:50" if complete else f"{len(captured)}/7 SLOTS")
+        self.state.setText("COMPLETE • 09:50 → ENTRY 10:00" if complete else f"{len(captured)}/7 SLOTS")
         self.state.setStyleSheet(
             "font-size:12px;font-weight:800;color:" +
             ("#69e59a" if complete else "#d4af55") + ";"

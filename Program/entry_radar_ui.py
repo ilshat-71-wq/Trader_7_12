@@ -5,7 +5,7 @@ create orders and does not recalculate the underlying signal model.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
@@ -13,6 +13,8 @@ from services.entry_radar_service import EntryRadarService
 
 
 class EntryRadarWidget(QWidget):
+    entry_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
@@ -42,11 +44,14 @@ class EntryRadarWidget(QWidget):
         self.refresh_button = QPushButton("REFRESH FROM OI")
         self.refresh_button.clicked.connect(self.refresh_from_source)
         head.addWidget(self.refresh_button)
+        self.start_button = QPushButton("START ENTRY SESSION")
+        self.start_button.clicked.connect(self.entry_requested.emit)
+        head.addWidget(self.start_button)
         root.addLayout(head)
 
         self.meta = QLabel(
-            "WHEN / WHERE • compact view of the existing Futures OI model • "
-            "ENTER/WAIT/WATCH/AVOID are model states, not order commands"
+            "WHEN / WHERE • 10:00 MSK main session • compact view of the existing "
+            "Futures OI model • ENTER/WAIT/WATCH/AVOID are model states, not order commands"
         )
         self.meta.setObjectName("erMeta")
         self.meta.setWordWrap(True)
