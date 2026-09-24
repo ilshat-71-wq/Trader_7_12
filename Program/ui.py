@@ -267,9 +267,9 @@ class TraderWindow(QWidget):
 
         if self.scanner_enabled:
             self.result_box.setPlainText(
-                "BCS CONNECTED • Ready to scan. "
-                "Select SPOT and press SCAN MARKET. "
-                "Column headers support sorting."
+                "START HERE  •  1) SCAN MARKET → market context  •  "
+                "2) MORNING RADAR → WHO  •  3) ENTRY RADAR → WHEN / WHERE  •  "
+                "4) FUTURES OI → WHY  •  5) BOOK / TAPE / FLOW RT → WHAT IS HAPPENING NOW."
             )
         else:
             self.result_box.setPlainText("VIEW-ONLY MODE • BCS temporarily unavailable.")
@@ -307,6 +307,12 @@ class TraderWindow(QWidget):
         self._set_scan_button_style()
         top.addWidget(self.scan_button)
 
+        self.guide_button = QPushButton("30 SEC GUIDE")
+        self.guide_button.setObjectName("secondaryAction")
+        self.guide_button.setToolTip("How to read Trader_7_12 Pro in 30 seconds")
+        self.guide_button.clicked.connect(self._show_quick_guide)
+        top.addWidget(self.guide_button)
+
         self.copy_button = QPushButton("COPY")
         self.copy_button.setObjectName("secondaryAction")
         self.copy_button.clicked.connect(self.copy_active_table)
@@ -314,6 +320,46 @@ class TraderWindow(QWidget):
             "⌘C / Ctrl+C — selected rows; without selection — entire table"
         )
         top.addWidget(self.copy_button)
+
+    def _show_quick_guide(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Trader_7_12 Pro — 30 Second Guide")
+        dialog.setMinimumWidth(640)
+        layout = QVBoxLayout(dialog)
+
+        title = QLabel("TRADER_7_12 PRO • 30 SECOND GUIDE")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#e8ecef;")
+        layout.addWidget(title)
+
+        body = QLabel(
+            "<b>THE WORKFLOW</b><br>"
+            "<b>1. MARKET RADAR</b> — what is happening across the market.<br>"
+            "<b>2. MORNING RADAR</b> — WHO deserves attention before the main futures session.<br>"
+            "<b>3. ENTRY RADAR</b> — WHEN / WHERE the existing model sees an entry setup.<br>"
+            "<b>4. FUTURES OI</b> — WHY: price, open interest, turnover, flow, action and zone.<br>"
+            "<b>5. BOOK / TAPE / FLOW RT</b> — WHAT is happening right now in the live market.<br><br>"
+            "<b>READ THE STATES</b><br>"
+            "<b>ENTER</b> = confidence ≥ 80% + valid zone.<br>"
+            "<b>WAIT</b> = 65–79% + valid zone.<br>"
+            "<b>WATCH</b> = incomplete or lower-confidence setup.<br>"
+            "<b>AVOID</b> = no new entry is confirmed by the current structure; it does not mean the instrument is permanently bad.<br><br>"
+            "<b>IMPORTANT</b><br>"
+            "PROB is model confidence, not a guaranteed probability of profit. "
+            "BOOK / TAPE / FLOW RT are observed realtime pressure scores, not probabilities. "
+            "Trader_7_12 Pro is read-only and does not place orders."
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(
+            "background:#171b20;border:1px solid #394149;border-radius:8px;"
+            "padding:12px;color:#c9d0d6;font-size:12px;"
+        )
+        layout.addWidget(body)
+
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(dialog.reject)
+        close.accepted.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
 
     @staticmethod
     def _status_card(title, value):

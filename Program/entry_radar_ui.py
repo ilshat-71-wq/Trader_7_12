@@ -49,8 +49,8 @@ class EntryRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "WHEN / WHERE • compact view of the existing Futures OI model • "
-            "ENTER/WAIT/WATCH/AVOID are model states, not order commands"
+            "WHEN / WHERE • start here after the 09:00 futures handoff • "
+            "uses the existing Futures OI model • states are decision-support, not orders"
         )
         self.meta.setObjectName("erMeta")
         self.meta.setWordWrap(True)
@@ -63,12 +63,17 @@ class EntryRadarWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setToolTip(
+            "Instrument = futures contract • Direction = model direction • Confidence = model confidence + change • "
+            "Entry = current entry state • Entry Zone = dominant flow/VWAP working range. "
+            "Realtime BOOK/TAPE/FLOW RT does not overwrite model confidence."
+        )
         root.addWidget(self.table, 1)
 
         self.note = QLabel(
-            "ENTRY = confidence ≥ 80% + valid zone; WAIT = 65–79%; "
-            "WATCH = 55–64% or incomplete setup; AVOID = confidence < 55% "
-            "or a liquidation conflict. The full professional table remains in FUTURES OI."
+            "ENTER = ≥80% + valid zone • WAIT = 65–79% + zone • "
+            "WATCH = incomplete / lower confidence • AVOID = current structure does not confirm a new entry. "
+            "PROB is model confidence, not profit probability. Full detail → FUTURES OI."
         )
         self.note.setWordWrap(True)
         self.note.setStyleSheet("font-size:10px;color:#7f8a94;padding:4px;")
