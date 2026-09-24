@@ -101,6 +101,23 @@ class MorningRadarWidget(QWidget):
         )
         root.addWidget(self.summary)
 
+        watch_title = QLabel("TODAY'S WATCHLIST")
+        watch_title.setStyleSheet("font-size:12px;font-weight:800;color:#e8ecef;padding-top:2px;")
+        root.addWidget(watch_title)
+        self.watchlist_table = QTableWidget(0, 7)
+        self.watchlist_table.setHorizontalHeaderLabels([
+            "#", "Instrument", "Direction", "Strength", "Interest", "Setup", "Entry"
+        ])
+        self.watchlist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.watchlist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.watchlist_table.setAlternatingRowColors(True)
+        self.watchlist_table.verticalHeader().setVisible(False)
+        self.watchlist_table.horizontalHeader().setStretchLastSection(True)
+        root.addWidget(self.watchlist_table)
+
+        details_title = QLabel("MORNING DETAILS")
+        details_title.setStyleSheet("font-size:11px;font-weight:800;color:#8d98a2;padding-top:3px;")
+        root.addWidget(details_title)
         self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels([
             "Ticker", "Price Δ%", "RS", "₽/min", "15m Δ%",
@@ -170,6 +187,43 @@ class MorningRadarWidget(QWidget):
             "Interest uses changes in existing 15m/rate/acceleration fields; "
             "SHORT WATCH is a separate weakness lane, not a trade order."
         )
+
+        watch_rows = sorted(
+            stocks,
+            key=lambda x: float(x.get("signal_probability") or 0.0),
+            reverse=True,
+        )[:10]
+        self.watchlist_table.setRowCount(len(watch_rows))
+        for r, item in enumerate(watch_rows, 1):
+            signal = str(item.get("signal") or "").upper()
+            direction = {"LONG": "🟢 LONG", "SHORT": "🔴 SHORT", "NEUTRAL": "⚪ NEUTRAL"}.get(signal, "⚪ —")
+            probability = item.get("signal_probability")
+            try:
+                strength = f"{float(probability):.0f}"
+            except (TypeError, ValueError):
+                strength = "—"
+            interest_state = str((item.get("interest") or {}).get("state") or "NEW").upper()
+            interest = {"RISING": "↑", "FALLING": "↓", "STABLE": "→", "NEW": "NEW"}.get(interest_state, "→")
+            setup = "DEVELOPING" if interest_state == "RISING" else ("WATCH" if interest_state in {"STABLE", "NEW"} else "WEAKENING")
+            values = [
+                str(r),
+                str(item.get("spot_ticker") or item.get("ticker") or "—"),
+                direction,
+                strength,
+                interest,
+                setup,
+                "—",
+            ]
+            for col, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter if col in (0, 2, 3, 4, 5, 6) else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                self.watchlist_table.setItem(r - 1, col, cell)
+            bg = QColor("#123f2a") if interest_state == "RISING" else QColor("#252b31")
+            for col in range(self.watchlist_table.columnCount()):
+                self.watchlist_table.item(r - 1, col).setBackground(bg)
+            self.watchlist_table.item(r - 1, 2).setForeground(QColor("#69e59a" if signal == "LONG" else "#ff7d7d" if signal == "SHORT" else "#c9d0d6"))
+            self.watchlist_table.item(r - 1, 3).setForeground(QColor("#e8ecef"))
+            self.watchlist_table.item(r - 1, 4).setForeground(QColor("#69e59a" if interest_state == "RISING" else "#d4af55" if interest_state == "NEW" else "#b9c1c8"))
 
         rows = sorted(
             stocks,
