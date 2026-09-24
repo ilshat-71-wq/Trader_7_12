@@ -429,7 +429,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             "realtime_lasttrades_messages": status.get("lasttrades_messages", 0),
             "realtime_subscription_errors": status.get("subscription_errors") or [],
             "realtime_last_message_at": status.get("last_message_at"),
-            "realtime_last_error": status.get("last_error"),
+            "realtime_last_error": status.get("last_error") or status.get("error"),
         })
         self._append_oi_diagnostics()
 
