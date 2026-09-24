@@ -51,10 +51,11 @@ def test_schedule_is_exact_moscow_slots():
     service = MorningRadarService("/tmp/trader_test_morning_radar")
     assert [x for x in service.SLOTS] == [
         datetime.strptime(x, "%H:%M").time()
-        for x in ("07:00", "07:15", "07:30", "08:00", "09:00", "09:45", "09:50")
+        for x in ("07:00", "07:15", "07:30", "08:00", "08:30", "08:45")
     ]
     assert service.slot_for(datetime(2026, 9, 23, 7, 0, 10, tzinfo=MSK)) == "07:00"
-    assert service.slot_for(datetime(2026, 9, 23, 9, 50, 10, tzinfo=MSK)) == "09:50"
+    assert service.slot_for(datetime(2026, 9, 23, 8, 45, 10, tzinfo=MSK)) == "08:45"
+    assert service.slot_for(datetime(2026, 9, 23, 8, 50, 10, tzinfo=MSK)) is None
 
 
 def test_history_derives_interest_and_countertrend_persistence(tmp_path: Path):
@@ -77,8 +78,10 @@ def test_history_derives_interest_and_countertrend_persistence(tmp_path: Path):
 def test_persistence_round_trip(tmp_path: Path):
     path = tmp_path / "morning_radar"
     service = MorningRadarService(str(path))
-    service.record(_snapshot(), slot="09:50")
+    service.record(_snapshot(), slot="08:45")
     restored = MorningRadarService(str(path))
     payload = restored.summary("2026-09-23")
-    assert payload["completed_slots"] == ["09:50"]
+    assert payload["completed_slots"] == ["08:45"]
+    assert payload["morning_complete"] is True
+    assert payload["entry_handoff_time"] == "09:00"
     assert payload["snapshot_count"] == 1
