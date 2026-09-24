@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from oi_watchlist_ui import OIWatchlistTraderWindow
 from morning_radar_ui import MorningRadarWidget
+from entry_radar_ui import EntryRadarWidget
 
 
 class ScanSound:
@@ -107,6 +108,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
         self._configure_professional_tabs()
         self._build_morning_radar_tab()
+        self._build_entry_radar_tab()
         self._build_settings_tab()
         self.morning_radar_refresh_timer = QTimer(self)
         self.morning_radar_refresh_timer.timeout.connect(self.morning_radar.refresh)
@@ -129,6 +131,14 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
             self.market_tabs.setTabText(1, "MORNING RADAR")
             self.market_tabs.setTabText(2, "FUTURES OI")
             self.market_tabs.setTabText(3, "DIAGNOSTICS")
+
+    def _build_entry_radar_tab(self):
+        self.entry_radar = EntryRadarWidget()
+        self.market_tabs.addTab(self.entry_radar, "ENTRY RADAR")
+        self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 2)
+        for index, title in enumerate(("RADAR", "MORNING RADAR", "ENTRY RADAR", "FUTURES OI", "DIAGNOSTICS")):
+            if index < self.market_tabs.count():
+                self.market_tabs.setTabText(index, title)
 
     def _build_settings_tab(self):
         panel = QWidget()
@@ -225,6 +235,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _oi_finished(self, results, diagnostics):
         super()._oi_finished(results, diagnostics)
+        self.entry_radar.set_results(getattr(self, "_latest_oi_results", results) or results)
         self._play_completion_sound()
 
     def _oi_failed(self, error):
