@@ -90,7 +90,7 @@ class MorningRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "07:00 → 09:50 MSK • growing interest • weakness / short-watch • "
+            "06:50 → 09:00 MSK • morning session • growing interest • weakness / short-watch • "
             "Futures OI history"
         )
         self.meta.setObjectName("mrMeta")
