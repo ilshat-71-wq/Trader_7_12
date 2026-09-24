@@ -57,6 +57,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self._oi_diagnostics = {}
         self.signal_probability = SignalProbabilityService()
         self._oi_previous_probabilities = {}
+        self._latest_oi_results = []
         self.realtime_thread = None
         self.realtime_worker = None
         self._realtime_by_ticker = {}
@@ -317,6 +318,7 @@ class OIWatchlistTraderWindow(TraderWindow):
                 ),
             ])
         self.oi_table.set_rows(rows)
+        self._latest_oi_results = [dict(x) for x in prepared_results]
         self._highlight_money_rows(prepared_results)
         for row_index, item in enumerate(prepared_results):
             signal = str(item.get('signal') or '')
@@ -390,6 +392,8 @@ class OIWatchlistTraderWindow(TraderWindow):
 
     def _realtime_snapshot(self, item):
         self._realtime_by_ticker[item.get("ticker")] = item
+        if hasattr(self, "entry_radar"):
+            self.entry_radar.update_realtime(item)
         ticker = str(item.get("ticker") or "").upper()
         book = item.get("book_score")
         tape = item.get("tape_score")
