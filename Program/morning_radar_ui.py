@@ -90,8 +90,8 @@ class MorningRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "06:50 → 09:00 MSK • morning session • growing interest • weakness / short-watch • "
-            "Futures OI history"
+            "WHO TO WATCH • 06:50 → 09:00 MSK • futures-first morning shortlist • "
+            "at 09:00 the app hands off to ENTRY RADAR"
         )
         self.meta.setObjectName("mrMeta")
         root.addWidget(self.meta)
@@ -116,6 +116,11 @@ class MorningRadarWidget(QWidget):
         self.watchlist_table.setAlternatingRowColors(True)
         self.watchlist_table.verticalHeader().setVisible(False)
         self.watchlist_table.horizontalHeader().setStretchLastSection(True)
+        self.watchlist_table.setToolTip(
+            "WHO TO WATCH before the main futures session. Strength = existing futures model confidence. "
+            "Interest = change in that confidence between morning snapshots. Setup describes the current structure; "
+            "Entry stays in ENTRY RADAR after the 09:00 handoff."
+        )
         root.addWidget(self.watchlist_table)
 
         details_title = QLabel("MORNING DETAILS")
