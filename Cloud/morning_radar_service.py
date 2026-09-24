@@ -14,10 +14,10 @@ class MorningRadarService:
 
     TIMEZONE = ZoneInfo("Europe/Moscow")
     SLOTS = (
-        time(7, 0), time(7, 15), time(7, 30), time(8, 0),
-        time(9, 0), time(9, 45), time(9, 50),
+        time(7, 0), time(7, 30), time(8, 0), time(8, 30),
+        time(9, 0), time(9, 30), time(9, 50),
     )
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
     MAX_DAYS = 14
     MAX_COUNTERTREND = 10
 
