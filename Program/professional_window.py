@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import wave
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
@@ -111,9 +113,30 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self._build_entry_radar_tab()
         self._build_settings_tab()
         self.morning_radar_refresh_timer = QTimer(self)
-        self.morning_radar_refresh_timer.timeout.connect(self.morning_radar.refresh)
+        self.morning_radar_refresh_timer.timeout.connect(self._refresh_morning_if_open)
         self.morning_radar_refresh_timer.start(60_000)
-        QTimer.singleShot(1200, self.morning_radar.refresh)
+        self.session_handoff_timer = QTimer(self)
+        self.session_handoff_timer.timeout.connect(self._check_session_handoff)
+        self.session_handoff_timer.start(1_000)
+        QTimer.singleShot(1200, self._refresh_morning_if_open)
+        QTimer.singleShot(1300, self._check_session_handoff)
+
+    @staticmethod
+    def _moscow_time():
+        return datetime.now(ZoneInfo('Europe/Moscow'))
+
+    def _refresh_morning_if_open(self):
+        if self._moscow_time().hour < 9:
+            self.morning_radar.refresh()
+
+    def _check_session_handoff(self):
+        if self._moscow_time().hour < 9:
+            return
+        self.morning_radar_refresh_timer.stop()
+        entry_index = self.market_tabs.indexOf(self.entry_radar)
+        if entry_index >= 0:
+            self.market_tabs.setCurrentIndex(entry_index)
+        self.session_handoff_timer.stop()
 
     def _configure_professional_tabs(self):
         if self.market_tabs.count() >= 3:
