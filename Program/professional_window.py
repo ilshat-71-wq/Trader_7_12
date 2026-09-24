@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import tempfile
 import wave
+from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
@@ -110,6 +112,11 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
         self._build_settings_tab()
+        self._entry_session_date = None
+        self.entry_session_timer = QTimer(self)
+        self.entry_session_timer.timeout.connect(self._update_session_transition)
+        self.entry_session_timer.start(15_000)
+        self._update_session_transition()
         self.morning_radar_refresh_timer = QTimer(self)
         self.morning_radar_refresh_timer.timeout.connect(self.morning_radar.refresh)
         self.morning_radar_refresh_timer.start(60_000)
@@ -134,11 +141,27 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _build_entry_radar_tab(self):
         self.entry_radar = EntryRadarWidget()
+        self.entry_radar.entry_requested.connect(self._activate_entry_session)
         self.market_tabs.addTab(self.entry_radar, "ENTRY RADAR")
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 2)
         for index, title in enumerate(("RADAR", "MORNING RADAR", "ENTRY RADAR", "FUTURES OI", "DIAGNOSTICS")):
             if index < self.market_tabs.count():
                 self.market_tabs.setTabText(index, title)
+
+    def _activate_entry_session(self):
+        # Presentation-only handoff: Entry Radar becomes the active workstation
+        # for the MOEX main derivatives session. It does not place orders.
+        if self.market_tabs.count() > 2:
+            self.market_tabs.setCurrentIndex(2)
+        self.entry_radar.refresh_from_source()
+
+    def _update_session_transition(self):
+        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        current = now.time()
+        if time(10, 0) <= current < time(19, 0):
+            if self._entry_session_date != now.date():
+                self._entry_session_date = now.date()
+                self._activate_entry_session()
 
     def _build_settings_tab(self):
         panel = QWidget()
