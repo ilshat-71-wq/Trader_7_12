@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
-from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from services.entry_radar_service import EntryRadarService
 
@@ -42,6 +42,10 @@ class EntryRadarWidget(QWidget):
         self.refresh_button = QPushButton("REFRESH FROM OI")
         self.refresh_button.clicked.connect(self.refresh_from_source)
         head.addWidget(self.refresh_button)
+        self.copy_button = QPushButton("COPY")
+        self.copy_button.setToolTip("Copy the visible Entry Radar table")
+        self.copy_button.clicked.connect(self.copy_view)
+        head.addWidget(self.copy_button)
         root.addLayout(head)
 
         self.meta = QLabel(
@@ -77,6 +81,24 @@ class EntryRadarWidget(QWidget):
     def refresh_from_source(self):
         if self._rows:
             self._render()
+
+    def copy_view(self):
+        headers = [
+            self.table.horizontalHeaderItem(i).text()
+            for i in range(self.table.columnCount())
+        ]
+        lines = ["ENTRY RADAR", "\t".join(headers)]
+        for row in range(self.table.rowCount()):
+            lines.append(
+                "\t".join(
+                    self.table.item(row, col).text() if self.table.item(row, col) else ""
+                    for col in range(self.table.columnCount())
+                )
+            )
+        QApplication.clipboard().setText("\n".join(lines))
+        self.copy_button.setText("COPIED ✓")
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
     def update_realtime(self, snapshot):
         ticker = str((snapshot or {}).get("ticker") or "").upper()
