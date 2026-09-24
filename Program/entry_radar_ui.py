@@ -27,6 +27,7 @@ class EntryRadarWidget(QWidget):
             QPushButton:hover { background:#39434c; }
             QTableWidget { background:#171b20; color:#dfe3e7; border:1px solid #394149;
                            gridline-color:#2d343b; font-size:12px; }
+            QTableWidget::item:selected { background:#33424a; color:#f2f4f5; }
             QHeaderView::section { background:#252c33; color:#b9c2ca; padding:8px;
                                    border:0; border-bottom:1px solid #414a52; font-weight:700; }
         """)
@@ -49,8 +50,7 @@ class EntryRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "WHEN / WHERE • start here after the 09:00 futures handoff • "
-            "uses the existing Futures OI model • states are decision-support, not orders"
+            "WHEN / WHERE • 09:00 handoff • existing Futures OI model • read-only decision support"
         )
         self.meta.setObjectName("erMeta")
         self.meta.setWordWrap(True)
@@ -63,6 +63,8 @@ class EntryRadarWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setShowGrid(False)
         self.table.setToolTip(
             "Instrument = futures contract • Direction = model direction • Confidence = model confidence + change • "
             "Entry = current entry state • Entry Zone = dominant flow/VWAP working range. "
@@ -139,6 +141,7 @@ class EntryRadarWidget(QWidget):
         }
         for row, item in enumerate(rows):
             state = EntryRadarService.state(item)
+            is_hero = row == 0 and state == "ENTER"
             values = [
                 str(item.get("futures_ticker") or item.get("futures_root") or "—"),
                 EntryRadarService.direction_label(item),
@@ -151,8 +154,18 @@ class EntryRadarWidget(QWidget):
                 cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter if col in (1, 2, 3) else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row, col, cell)
             for col in range(self.table.columnCount()):
-                self.table.item(row, col).setBackground(QBrush(QColor(colors[state])))
+                cell = self.table.item(row, col)
+                cell.setBackground(QBrush(QColor(colors[state])))
+                if is_hero:
+                    cell.setFont(cell.font())
+                    font = cell.font()
+                    font.setBold(True)
+                    cell.setFont(font)
             self.table.item(row, 3).setForeground(QColor(foregrounds[state]))
+            if is_hero:
+                self.table.item(row, 0).setForeground(QColor("#e8ecef"))
+                self.table.item(row, 2).setForeground(QColor("#e8ecef"))
+                self.table.item(row, 4).setForeground(QColor("#d9e4dc"))
             self.table.item(row, 3).setText(f"🟢 ENTER" if state == "ENTER" else
                                             f"🟡 WAIT" if state == "WAIT" else
                                             f"⚪ WATCH" if state == "WATCH" else

@@ -4,6 +4,8 @@ from PySide6.QtCore import QThread, QTimer, Qt, QObject, Signal
 from PySide6.QtGui import QColor, QBrush, QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -149,6 +151,16 @@ class TraderWindow(QWidget):
                 font-size: 11px;
                 font-weight: 700;
             }
+            QLabel#liveDot {
+                color: #69e59a;
+                font-size: 9px;
+                font-weight: 800;
+            }
+            QLabel#microStatus {
+                color: #6f7a84;
+                font-size: 9px;
+                font-weight: 700;
+            }
             QPushButton {
                 background: #30383f;
                 color: #f0f2f4;
@@ -212,6 +224,10 @@ class TraderWindow(QWidget):
         self.result_box.setStyleSheet(
             "font-size:11px;font-weight:600;background:#171b20;"
             "border:0;padding:7px 10px;"
+        )
+        self.result_box.setToolTip(
+            "Market passport: session, coverage, selection and regime. "
+            "The tables below are the market map."
         )
 
         columns = [
@@ -301,7 +317,7 @@ class TraderWindow(QWidget):
         top.addWidget(self.session_status)
         top.addWidget(self.coverage_status)
 
-        self.scan_button = QPushButton("●  SCAN MARKET")
+        self.scan_button = QPushButton("SCAN MARKET")
         self.scan_button.setObjectName("primaryAction")
         self.scan_button.clicked.connect(self.run_market_scan)
         self._set_scan_button_style()
@@ -388,10 +404,16 @@ class TraderWindow(QWidget):
         layout.setContentsMargins(10, 5, 10, 5)
         layout.setSpacing(18)
         left = QLabel("READ-ONLY  •  REAL DATA ONLY  •  NO ORDER EXECUTION")
+        left.setObjectName("microStatus")
+        live = QLabel("● LIVE")
+        live.setObjectName("liveDot")
+        live.setToolTip("Live market-data presentation layer")
         right = QLabel("BCS SPOT  +  MOEX RFUD FUTURES/OI")
+        right.setObjectName("microStatus")
         layout.addWidget(left)
         layout.addStretch(1)
         layout.addWidget(right)
+        layout.addWidget(live)
         return footer
 
     def _build_diagnostics_panel(self):
@@ -441,7 +463,7 @@ class TraderWindow(QWidget):
 
     def _animate_scan(self):
         self.animation_step = (self.animation_step + 1) % len(SCAN_COLORS)
-        self.scan_button.setText("●  ANALYZING D1 + M5 + RS")
+        self.scan_button.setText("ANALYZING  •  D1 + M5 + RS")
         self._set_scan_button_style(SCAN_COLORS[self.animation_step])
 
     def _start_scan_animation(self):
