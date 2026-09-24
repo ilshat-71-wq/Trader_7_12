@@ -342,7 +342,11 @@ class RealtimeMicrostructureWorker(QObject):
                                 self._subscription_accepted[0] >= expected
                                 and self._subscription_accepted[2] >= expected
                             ):
-                                self._last_error = "BCS subscription acknowledgement timeout"
+                                self._last_error = (
+                                    "BCS subscription acknowledgement timeout: "
+                                    f"BOOK {len(self._subscription_accepted[0])}/{len(expected)}, "
+                                    f"TAPE {len(self._subscription_accepted[2])}/{len(expected)}"
+                                )
                                 self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
                                 raise RuntimeError(self._last_error)
                             self._emit_realtime_status("LIVE")
@@ -362,9 +366,10 @@ class RealtimeMicrostructureWorker(QObject):
                             raise
                 except Exception as exc:
                     if not self._stop_event.is_set():
+                        self._last_error = f"{type(exc).__name__}: {exc}"
                         self._emit_realtime_status(
                             "RECONNECTING",
-                            error=f"{type(exc).__name__}: {exc}",
+                            error=self._last_error,
                         )
                         time.sleep(self.RECONNECT_SECONDS)
                 finally:
