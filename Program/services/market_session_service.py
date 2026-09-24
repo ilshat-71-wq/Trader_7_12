@@ -12,10 +12,11 @@ class MarketSessionService:
     from 09:50 to 19:00 MSK. Only dates explicitly declared non-trading
     by the current MOEX calendar are closed.
 
-    From 14 September 2026 the stock/futures trading schedule is:
-    06:50–09:00 morning session, 09:00–19:00 main session and
-    19:00–23:50 evening session. The first 10 minutes of the morning
-    session are the opening auction for instruments participating in it.
+    From 14 July 2026 the futures trading schedule is:
+    06:50–07:00 opening auction, 07:00–10:00 morning trading period,
+    10:00–19:00 main session and 19:00–23:50 evening session.
+    The 08:50–09:00 opening auction reference is used by the
+    Morning Radar → Entry Radar handoff; it is not a main-session boundary.
 
     The scanner's intraday market-data window is the whole current trading
     session from the official session start through the moment of scanning.
@@ -25,7 +26,7 @@ class MarketSessionService:
     TIMEZONE = ZoneInfo("Europe/Moscow")
     PRE_OPEN_START = time(6, 50)
     MORNING_START = time(7, 0)
-    MAIN_START = time(9, 0)
+    MAIN_START = time(10, 0)
     WEEKEND_SESSION_START = time(9, 50)
     EVENING_START = time(19, 0)
     MARKET_CLOSE = time(23, 50)
