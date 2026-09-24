@@ -100,3 +100,33 @@ def test_market_data_messages_are_counted():
     diagnostics = worker._realtime_diagnostics()
     assert diagnostics["orderbook_messages"] == 1
     assert diagnostics["lasttrades_messages"] == 1
+
+
+def test_connection_error_is_preserved_in_realtime_diagnostics():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "ONZ6", "classCode": "SPBFUT"}],
+    )
+    worker._last_error = "WebSocketProxyException: proxy connection failed"
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["last_error"] == "WebSocketProxyException: proxy connection failed"
+
+def test_subscription_timeout_diagnostic_contains_partial_ack_counts():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [
+            {"ticker": "ONZ6", "classCode": "SPBFUT"},
+            {"ticker": "SBER", "classCode": "TQBR"},
+        ],
+    )
+    worker._subscription_accepted = {
+        0: {("ONZ6", "SPBFUT")},
+        2: set(),
+    }
+    expected = {(item["ticker"], item["classCode"]) for item in worker.instruments}
+    worker._last_error = (
+        "BCS subscription acknowledgement timeout: "
+        f"BOOK {len(worker._subscription_accepted[0])}/{len(expected)}, "
+        f"TAPE {len(worker._subscription_accepted[2])}/{len(expected)}"
+    )
+    assert worker._last_error == "BCS subscription acknowledgement timeout: BOOK 1/2, TAPE 0/2"
