@@ -182,7 +182,7 @@ class MorningRadarWidget(QWidget):
         self.table.setRowCount(len(rows))
         for r, item in enumerate(rows):
             values = [
-                item.get("ticker", "—"),
+                item.get("spot_ticker") or item.get("ticker") or "—",
                 self._fmt(item.get("change_percent")),
                 self._fmt(item.get("relative_strength")),
                 self._fmt(item.get("money_per_minute"), 0),
