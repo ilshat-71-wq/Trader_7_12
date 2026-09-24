@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 import json
 import threading
 import time
+import ssl
 
+import certifi
 from PySide6.QtCore import QObject, Signal
 
 try:
@@ -321,6 +323,10 @@ class RealtimeMicrostructureWorker(QObject):
                         header=[f"Authorization: Bearer {token}"],
                         timeout=10,
                         enable_multithread=True,
+                        sslopt={
+                            "cert_reqs": ssl.CERT_REQUIRED,
+                            "ca_certs": certifi.where(),
+                        },
                     )
                     ws.settimeout(1.0)
                     with self._ws_lock:
