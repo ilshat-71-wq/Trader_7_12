@@ -394,6 +394,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         self._realtime_by_ticker[item.get("ticker")] = item
         if hasattr(self, "entry_radar"):
             self.entry_radar.update_realtime(item)
+        if hasattr(self, "move_radar"):
+            self.move_radar.update_realtime(item)
         ticker = str(item.get("ticker") or "").upper()
         book = item.get("book_score")
         tape = item.get("tape_score")
