@@ -687,6 +687,8 @@ class TraderWindow(QWidget):
             if isinstance(raw_market_map, list)
             else list(results or [])
         )
+        if hasattr(self, "move_radar"):
+            self.move_radar.set_results(market_map)
         entries = self._rows_for_results(market_map)
         self._spot_results_for_realtime = [
             entry[2]
