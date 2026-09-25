@@ -571,11 +571,12 @@ class MarketAttentionScannerService:
                     row["daily_profile"] = profile
                     row["atr_value"] = profile.get("atr_value")
                     row["atr_percent"] = profile.get("atr_percent")
-                    atr_percent = self._f(profile.get("atr_percent"))
-                    day_move_percent = row.get("day_move_percent")
+                    atr_value = self._f(profile.get("atr_value"))
+                    session_open = self._f(row.get("session_open"))
+                    current_price = self._f(row.get("price"))
                     row["atr_used_percent"] = (
-                        round(abs(float(day_move_percent)) / atr_percent * 100.0, 1)
-                        if atr_percent > 0 and day_move_percent is not None else None
+                        round(abs(current_price - session_open) / atr_value * 100.0, 1)
+                        if atr_value > 0 and session_open > 0 and current_price > 0 else None
                     )
                     row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
                     row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
