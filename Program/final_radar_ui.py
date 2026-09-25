@@ -74,11 +74,11 @@ class FinalRadarWidget(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setShowGrid(False)
         self.table.setToolTip(
-            "FINAL RADAR promotes only candidates that survive three consecutive "
-            "strict scans, have real-time confirmation from at least two live "
-            "BOOK/TAPE/FLOW components, and have no conflicting matching futures "
-            "signal. No matching future is not treated as a failure. "
-            "This is a read-only shortlist, not an order signal."
+            "FINAL RADAR promotes only liquid candidates that survive three consecutive "
+            "strict scans and have real-time confirmation from at least two live "
+            "BOOK/TAPE/FLOW components. SPOT uses the established SPOT liquidity gate; "
+            "futures use existing OI/Money Flow liquidity data. A conflicting matching "
+            "future blocks a SPOT candidate. This is a read-only shortlist, not an order signal."
         )
         root.addWidget(self.table, 1)
 
