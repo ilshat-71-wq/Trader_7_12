@@ -68,3 +68,50 @@ def test_day_change_resets_confirmation():
     assert service.final_candidates()
     service.record_spot_scan([spot()], "2026-09-26")
     assert service.final_candidates() == []
+
+
+def future(contract="NGV6", prob=91.0, direction="LONG"):
+    return {
+        "futures_ticker": contract,
+        "oi_root": "NG",
+        "underlying_ticker": "NG",
+        "signal": direction,
+        "signal_probability": prob,
+        "turnover_rub": 11_000_000_000,
+        "money_flow_status": "AVAILABLE",
+        "money_flow_liquidity_state": "HOT",
+        "money_flow_position_action": "LONG_BUILDUP" if direction == "LONG" else "SHORT_BUILDUP",
+    }
+
+
+def test_liquid_futures_can_promote_to_final():
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_futures_scan([future()], "2026-09-25")
+    service.update_realtime({
+        "ticker": "NGV6",
+        "book_score": 70,
+        "tape_score": 80,
+        "flow_score": 75,
+    })
+    rows = service.final_candidates()
+    assert len(rows) == 1
+    assert rows[0]["final_instrument_type"] == "FUTURES"
+    assert rows[0]["futures_ticker"] == "NGV6"
+
+
+def test_illiquid_futures_never_promote():
+    service = FinalRadarService()
+    row = future("PRMBF")
+    row["turnover_rub"] = 0
+    row["money_flow_liquidity_state"] = "NO_DATA"
+    row["money_flow_status"] = "NO_DATA"
+    for _ in range(3):
+        service.record_futures_scan([row], "2026-09-25")
+    service.update_realtime({
+        "ticker": "PRMBF",
+        "book_score": 90,
+        "tape_score": 90,
+        "flow_score": 90,
+    })
+    assert service.final_candidates() == []
