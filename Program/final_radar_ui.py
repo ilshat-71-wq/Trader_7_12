@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
@@ -48,6 +49,10 @@ class FinalRadarWidget(QWidget):
         self.state.setStyleSheet("font-size:12px;font-weight:800;color:#d4af55;")
         head.addWidget(self.state)
         head.addStretch(1)
+        self.copy_button = QPushButton("COPY")
+        self.copy_button.setToolTip("Copy FINAL RADAR status and all rows to the clipboard")
+        self.copy_button.clicked.connect(self.copy_table)
+        head.addWidget(self.copy_button)
         root.addLayout(head)
 
         self.meta = QLabel(
@@ -143,6 +148,28 @@ class FinalRadarWidget(QWidget):
                 if col == 2:
                     cell.setForeground(QColor("#69e59a" if item.get("signal") == "LONG" else "#ff7d7d"))
         self.table.resizeColumnsToContents()
+
+    def copy_table(self):
+        lines = [
+            "=== FINAL RADAR ===",
+            f"STATE: {self.state.text()}",
+            self.meta.text(),
+            "",
+            "\t".join([
+                "#", "Ticker", "Direction", "Phase", "Δ%", "ATR / USED",
+                "PROB", "Scans", "RT", "FUTURES"
+            ]),
+        ]
+        for row in range(self.table.rowCount()):
+            values = []
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                values.append(item.text() if item is not None else "")
+            lines.append("\t".join(values))
+        lines.extend(["", self.note.text()])
+        QApplication.clipboard().setText("\n".join(lines))
+        self.copy_button.setText("COPIED ✓")
+        QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
     def record_spot_scan(self, market_map, day_key=None):
         self.service.record_spot_scan(market_map, day_key=day_key)
