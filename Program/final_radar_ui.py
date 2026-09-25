@@ -56,14 +56,14 @@ class FinalRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "FINAL 1–3 • existing MOVE + SPOT + OI/FLOW + REALTIME • "
-            "first scan + two confirmations • read-only"
+            "FINAL 1–3 • SPOT + FUTURES OI/FLOW + REALTIME • "
+            "first scan + two confirmations • liquid instruments only • read-only"
         )
         self.meta.setObjectName("frMeta")
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = QTableWidget(0, 10)
+        self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels([
             "#", "Ticker", "Direction", "Phase", "Δ%", "ATR / USED",
             "PROB", "Scans", "RT", "FUTURES",
@@ -128,13 +128,16 @@ class FinalRadarWidget(QWidget):
             elif futures["state"] == "NO_MATCH":
                 fut_text = "NO MATCH"
 
+            instrument_type = str(item.get("final_instrument_type") or "—")
+            is_futures = instrument_type == "FUTURES"
             values = [
                 str(row),
-                str(item.get("spot_ticker") or "—"),
+                instrument_type,
+                str(item.get("futures_ticker") if is_futures else item.get("spot_ticker") or "—"),
                 "🟢 LONG" if item.get("signal") == "LONG" else "🔴 SHORT",
-                str(item.get("move_phase") or "—"),
+                "OI/FLOW" if is_futures else str(item.get("move_phase") or "—"),
                 self._fmt(item.get("change_percent"), 2, True),
-                f"{self._fmt(item.get('atr_percent'), 1)}% • {self._fmt(item.get('atr_used_percent'), 0)}%",
+                "—" if is_futures else f"{self._fmt(item.get('atr_percent'), 1)}% • {self._fmt(item.get('atr_used_percent'), 0)}%",
                 f"{self._fmt(item.get('signal_probability'), 1)}%",
                 f"{item.get('final_confirmations', 0)}/3",
                 rt_text,
@@ -156,7 +159,7 @@ class FinalRadarWidget(QWidget):
             self.meta.text(),
             "",
             "\t".join([
-                "#", "Ticker", "Direction", "Phase", "Δ%", "ATR / USED",
+                "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "ATR / USED",
                 "PROB", "Scans", "RT", "FUTURES"
             ]),
         ]
