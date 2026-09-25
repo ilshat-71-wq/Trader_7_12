@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from oi_watchlist_ui import OIWatchlistTraderWindow
 from morning_radar_ui import MorningRadarWidget
 from entry_radar_ui import EntryRadarWidget
+from move_radar_ui import MoveRadarWidget
 
 
 class ScanSound:
@@ -111,6 +112,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self._configure_professional_tabs()
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
+        self._build_move_radar_tab()
         self._build_settings_tab()
         self.morning_radar_refresh_timer = QTimer(self)
         self.morning_radar_refresh_timer.timeout.connect(self._refresh_morning_if_open)
@@ -160,6 +162,16 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.market_tabs.addTab(self.entry_radar, "ENTRY RADAR")
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 2)
         for index, title in enumerate(("RADAR", "MORNING RADAR", "ENTRY RADAR", "FUTURES OI", "DIAGNOSTICS")):
+            if index < self.market_tabs.count():
+                self.market_tabs.setTabText(index, title)
+
+    def _build_move_radar_tab(self):
+        self.move_radar = MoveRadarWidget()
+        self.market_tabs.addTab(self.move_radar, "MOVE RADAR")
+        self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 3)
+        for index, title in enumerate((
+            "RADAR", "MORNING RADAR", "ENTRY RADAR", "MOVE RADAR", "FUTURES OI", "DIAGNOSTICS"
+        )):
             if index < self.market_tabs.count():
                 self.market_tabs.setTabText(index, title)
 
