@@ -231,12 +231,12 @@ class TraderWindow(QWidget):
         )
 
         columns = [
-            "#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%",
+            "#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "ATR / USED",
             "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
             "SIGNAL", "PROB", "ΔPROB", "BOOK", "TAPE", "FLOW RT",
         ]
         widths = [
-            42, 78, 118, 88, 72, 78, 86, 78, 104, 112, 98, 78, 72,
+            42, 78, 118, 88, 72, 78, 86, 94, 78, 104, 112, 98, 78, 72,
             78, 72, 72, 82, 82, 82,
         ]
         self.result_table = MarketTableWidget(columns, widths)
@@ -580,6 +580,11 @@ class TraderWindow(QWidget):
                     numeric(_number(item.get("daily_relative_mean_pp"), 2)),
                     numeric(_number(item.get("benchmark_change_percent"), 2)),
                     numeric(_number(item.get("change_percent"), 2)),
+                    numeric(
+                        f"{_number(item.get('atr_percent'), 1)}% • {_number(item.get('atr_used_percent'), 0)}%"
+                        if item.get("atr_percent") is not None and item.get("atr_used_percent") is not None
+                        else "—"
+                    ),
                     numeric(_number(rs, 2)),
                     numeric(_money(item.get("money_per_minute"))),
                     numeric(_money(item.get("day_money", item.get("session_money")))),
@@ -744,7 +749,7 @@ class TraderWindow(QWidget):
         self.result_table.setToolTip(
             f"SPOT STRONGER THAN IMOEX2 — {regime_note} "
             "Green row = stock is rising; red row = stock is falling. "
-            "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
+            "ATR / USED = completed D1 ATR(14) as % of reference price • intraday move used as % of ATR; informational only. "
             "BOOK/TAPE/FLOW RT — live BCS WebSocket observed pressure scores; not probabilities. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
