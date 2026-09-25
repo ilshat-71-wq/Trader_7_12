@@ -65,6 +65,11 @@ class FinalRadarService:
 
             if not ticker or not direction:
                 continue
+            # FINAL RADAR must use the same established SPOT liquidity gate
+            # as Market Radar. High model confidence cannot promote an
+            # illiquid instrument.
+            if item.get("liquidity_gate") is not True:
+                continue
             if probability is None or probability < self.MIN_PROBABILITY:
                 continue
             if used is None or used > self.MAX_ATR_USED:
