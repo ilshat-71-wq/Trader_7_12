@@ -1,8 +1,8 @@
 """FINAL RADAR — confirmation layer over existing SPOT/OI/realtime data.
 
 This layer does not scan the market or create a new signal model. It keeps a
-small in-memory history of the existing scan snapshots and only promotes a
-candidate after repeated confirmation.
+small in-memory history of existing SPOT and Futures OI snapshots and only
+promotes a candidate after repeated confirmation.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from services.move_radar_service import MoveRadarService
 
 
 class FinalRadarService:
-    MIN_CONFIRMATIONS = 3  # first scan + two additional confirmations
+    MIN_CONFIRMATIONS = 3
     MIN_PROBABILITY = 80.0
     MAX_ATR_USED = 70.0
     MIN_DIRECTIONAL_ACCEL = 20.0
@@ -38,12 +38,36 @@ class FinalRadarService:
         signal = str(item.get("signal") or "").upper()
         return signal if signal in {"LONG", "SHORT"} else None
 
+    @staticmethod
+    def _futures_key(item):
+        return str(
+            item.get("futures_ticker") or item.get("oi_root") or ""
+        ).upper()
+
     def reset(self, day_key=None):
         self._day_key = day_key
         self._scan_no = 0
         self._history = {}
         self._realtime = {}
         self._futures = []
+
+    def _record_candidate(self, key, direction, item, scan_no, instrument_type):
+        previous = self._history.get(key)
+        same_direction = previous and previous.get("direction") == direction
+        consecutive = (
+            previous.get("confirmations", 0) + 1
+            if same_direction and previous.get("last_scan") == scan_no - 1
+            else 1
+        )
+        return {
+            "key": key,
+            "ticker": key,
+            "instrument_type": instrument_type,
+            "direction": direction,
+            "confirmations": consecutive,
+            "last_scan": scan_no,
+            "item": dict(item),
+        }
 
     def record_spot_scan(self, market_map, day_key=None):
         if day_key is not None and day_key != self._day_key:
@@ -65,9 +89,8 @@ class FinalRadarService:
 
             if not ticker or not direction:
                 continue
-            # FINAL RADAR must use the same established SPOT liquidity gate
-            # as Market Radar. High model confidence cannot promote an
-            # illiquid instrument.
+            # FINAL RADAR uses the same established SPOT liquidity gate as
+            # Market Radar. High model confidence cannot promote illiquidity.
             if item.get("liquidity_gate") is not True:
                 continue
             if probability is None or probability < self.MIN_PROBABILITY:
@@ -79,30 +102,63 @@ class FinalRadarService:
             if item.get("move_phase") not in {"START", "DEVELOPING"}:
                 continue
 
-            previous = self._history.get(ticker)
-            same_direction = previous and previous.get("direction") == direction
-            consecutive = (
-                previous.get("confirmations", 0) + 1
-                if same_direction and previous.get("last_scan") == scan_no - 1
-                else 1
+            key = f"SPOT:{ticker}"
+            current[key] = self._record_candidate(
+                key, direction, item, scan_no, "SPOT"
             )
-            current[ticker] = {
-                "ticker": ticker,
-                "direction": direction,
-                "confirmations": consecutive,
-                "last_scan": scan_no,
-                "item": dict(item),
-            }
 
-        # A candidate that disappears from the strict chain loses its
-        # consecutive streak. History is retained only for display/debugging.
-        for ticker, state in self._history.items():
-            if ticker not in current:
+        self._merge_current(current, scan_no)
+        return self.final_candidates()
+
+    def record_futures_scan(self, results, day_key=None):
+        if day_key is not None and day_key != self._day_key:
+            self.reset(day_key)
+        elif self._day_key is None:
+            self._day_key = day_key
+
+        if self._scan_no == 0:
+            self._scan_no = 1
+        scan_no = self._scan_no
+        current = {}
+
+        for item in results or []:
+            ticker = self._futures_key(item)
+            direction = self._direction(item)
+            probability = self._f(item.get("signal_probability"))
+            turnover = self._f(item.get("turnover_rub"))
+            liquidity_state = str(item.get("money_flow_liquidity_state") or "").upper()
+            money_flow_status = str(item.get("money_flow_status") or "").upper()
+            action = str(item.get("money_flow_position_action") or "").upper()
+
+            if not ticker or not direction:
+                continue
+            if probability is None or probability < self.MIN_PROBABILITY:
+                continue
+            # Use the established Futures OI / Money Flow liquidity data.
+            # Do not apply the SPOT liquidity_gate to futures.
+            if turnover is None or turnover <= 0:
+                continue
+            if money_flow_status != "AVAILABLE":
+                continue
+            if liquidity_state not in {"ACTIVE", "HOT"}:
+                continue
+            if action in {"LONG_LIQUIDATION", "LIQUIDATE"}:
+                continue
+
+            key = f"FUT:{ticker}"
+            current[key] = self._record_candidate(
+                key, direction, item, scan_no, "FUTURES"
+            )
+
+        self._merge_current(current, scan_no)
+        return self.final_candidates()
+
+    def _merge_current(self, current, scan_no):
+        for key, state in self._history.items():
+            if key not in current:
                 state["confirmations"] = 0
                 state["last_scan"] = scan_no - 1
-
         self._history.update(current)
-        return self.final_candidates()
 
     def update_realtime(self, snapshot):
         ticker = str((snapshot or {}).get("ticker") or "").upper()
@@ -146,12 +202,18 @@ class FinalRadarService:
             action = str(item.get("money_flow_position_action") or "").upper()
             if action in {"LONG_LIQUIDATION", "LIQUIDATE"}:
                 continue
-            valid.append((signal == direction and probability is not None and probability >= 65.0, item))
+            valid.append((
+                signal == direction and probability is not None and probability >= 65.0,
+                item,
+            ))
 
         if not valid:
             return {"state": "CONFLICT"}
 
-        confirmed, item = max(valid, key=lambda pair: self._f(pair[1].get("signal_probability")) or 0.0)
+        confirmed, item = max(
+            valid,
+            key=lambda pair: self._f(pair[1].get("signal_probability")) or 0.0,
+        )
         return {
             "state": "CONFIRMED" if confirmed else "CONFLICT",
             "contract": item.get("futures_ticker") or item.get("oi_root") or "—",
@@ -170,16 +232,24 @@ class FinalRadarService:
             item = state["item"]
             ticker = state["ticker"]
             direction = state["direction"]
-            rt = self._realtime_state(ticker)
+            rt = self._realtime_state(
+                str(item.get("futures_ticker") if state["instrument_type"] == "FUTURES" else item.get("spot_ticker") or ticker).upper()
+            )
             if rt is None or rt["average"] < self.MIN_RT_SCORE:
                 continue
 
-            futures = self._futures_state(ticker, direction)
+            futures = (
+                self._futures_state(ticker, direction)
+                if state["instrument_type"] == "SPOT"
+                else {"state": "—"}
+            )
             if futures["state"] == "CONFLICT":
                 continue
 
             rows.append({
                 **item,
+                "final_instrument_type": state["instrument_type"],
+                "final_ticker": ticker,
                 "final_confirmations": state["confirmations"],
                 "final_realtime": rt,
                 "final_futures": futures,
