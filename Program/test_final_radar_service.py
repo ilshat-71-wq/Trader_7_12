@@ -12,6 +12,7 @@ def spot(ticker="VGSB", prob=91.0, used=25.0, accel=900.0, change=1.8):
         "change_percent": change,
         "move_phase": "START",
         "directional_acceleration": accel,
+        "liquidity_gate": True,
     }
 
 
@@ -26,6 +27,16 @@ def test_requires_three_consecutive_scans_and_realtime():
     rows = service.final_candidates()
     assert len(rows) == 1
     assert rows[0]["spot_ticker"] == "VGSB"
+
+
+def test_illiquid_candidate_never_promotes():
+    service = FinalRadarService()
+    for _ in range(3):
+        row = spot("PRMB")
+        row["liquidity_gate"] = False
+        service.record_spot_scan([row], "2026-09-25")
+    service.update_realtime({"ticker": "PRMB", "book_score": 90, "tape_score": 90, "flow_score": 90})
+    assert service.final_candidates() == []
 
 
 def test_missing_realtime_does_not_promote():
