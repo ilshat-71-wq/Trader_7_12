@@ -15,6 +15,7 @@ class DailyTrendProfileService:
     VERSION = "2.1"
     MIN_DAYS = 2
     MAX_DAYS = 3
+    ATR_PERIOD = 14
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
     @staticmethod
@@ -138,9 +139,57 @@ class DailyTrendProfileService:
         return output
 
     @classmethod
+    def atr(cls, candles, before_date=None, period=None):
+        """Return Wilder ATR from completed daily candles only."""
+        period = int(period or cls.ATR_PERIOD)
+        if period <= 0:
+            return None
+
+        selected = cls._completed(candles, before_date=before_date)
+        if len(selected) < period + 1:
+            return None
+
+        selected = selected[-(period + 1):]
+        true_ranges = []
+        previous_close = None
+        for candle in selected:
+            high = cls._f(candle, "high")
+            low = cls._f(candle, "low")
+            close = cls._f(candle, "close")
+            if min(high, low, close) <= 0:
+                return None
+            if previous_close is None:
+                previous_close = close
+                continue
+            true_ranges.append(max(
+                high - low,
+                abs(high - previous_close),
+                abs(low - previous_close),
+            ))
+            previous_close = close
+
+        if len(true_ranges) < period:
+            return None
+
+        atr_value = sum(true_ranges[:period]) / period
+        for true_range in true_ranges[period:]:
+            atr_value = ((atr_value * (period - 1)) + true_range) / period
+
+        reference_close = cls._f(selected[-1], "close")
+        if reference_close <= 0:
+            return None
+        return {
+            "period": period,
+            "value": round(atr_value, 8),
+            "percent": round(atr_value / reference_close * 100.0, 4),
+            "reference_close": reference_close,
+        }
+
+    @classmethod
     def analyze(cls, candles, benchmark_candles=None, before_date=None):
         """Return D1 structure plus market-relative confirmation on completed dates."""
         structure = cls._structure(candles, before_date=before_date)
+        atr = cls.atr(candles, before_date=before_date)
         days = structure["days"]
         daily_relative = cls._daily_relative_returns(candles, benchmark_candles, days, before_date=before_date) if benchmark_candles else []
 
@@ -167,6 +216,9 @@ class DailyTrendProfileService:
                 "days": days, "green_days": structure["green_days"], "red_days": structure["red_days"],
                 "rising_highs": structure["rising_highs"], "rising_lows": structure["rising_lows"],
                 "falling_highs": structure["falling_highs"], "falling_lows": structure["falling_lows"],
-                "return_percent": structure["return_percent"], "relative_direction": relative_direction,
+                "return_percent": structure["return_percent"], "atr": atr,
+                "atr_value": atr["value"] if atr else None,
+                "atr_percent": atr["percent"] if atr else None,
+                "relative_direction": relative_direction,
                 "relative_mean_pp": round(relative_mean, 4), "relative_consistent": relative_consistent,
                 "daily_relative": daily_relative, "qualified": confirmed_direction in {"LONG", "SHORT"}}
