@@ -349,6 +349,8 @@ class OIWatchlistTraderWindow(TraderWindow):
         if not rows:
             self.oi_meta.setText(self.oi_meta.text() + "\nNo data available.")
         self._append_oi_diagnostics()
+        if hasattr(self, "final_radar"):
+            self.final_radar.update_futures(prepared_results)
         self._start_realtime(prepared_results)
 
     def _start_realtime(self, prepared_results):
@@ -396,6 +398,8 @@ class OIWatchlistTraderWindow(TraderWindow):
             self.entry_radar.update_realtime(item)
         if hasattr(self, "move_radar"):
             self.move_radar.update_realtime(item)
+        if hasattr(self, "final_radar"):
+            self.final_radar.update_realtime(item)
         ticker = str(item.get("ticker") or "").upper()
         book = item.get("book_score")
         tape = item.get("tape_score")
