@@ -36,7 +36,7 @@ class HistoryCandleService:
 
     COMPLETED_DAYS_FOR_AVERAGE = 5
 
-    HISTORY_DAYS_TO_LOAD = 10
+    HISTORY_DAYS_TO_LOAD = 30
 
     MORNING_START = time(6, 50)
     MORNING_END = time(9, 0)
