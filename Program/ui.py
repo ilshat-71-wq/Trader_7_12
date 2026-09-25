@@ -756,6 +756,7 @@ class TraderWindow(QWidget):
         self.weak_result_table.setToolTip(
             f"SPOT WEAKER THAN IMOEX2 — {regime_note} "
             "Green row = stock is rising; red row = stock is falling. "
+            "ATR / USED = completed D1 ATR(14) as % of reference price • intraday move used as % of ATR; informational only. "
             "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
