@@ -28,6 +28,7 @@ from oi_watchlist_ui import OIWatchlistTraderWindow
 from morning_radar_ui import MorningRadarWidget
 from entry_radar_ui import EntryRadarWidget
 from move_radar_ui import MoveRadarWidget
+from final_radar_ui import FinalRadarWidget
 
 
 class ScanSound:
@@ -113,6 +114,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
         self._build_move_radar_tab()
+        self._build_final_radar_tab()
         self._build_settings_tab()
         self.morning_radar_refresh_timer = QTimer(self)
         self.morning_radar_refresh_timer.timeout.connect(self._refresh_morning_if_open)
@@ -171,6 +173,17 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 3)
         for index, title in enumerate((
             "RADAR", "MORNING RADAR", "ENTRY RADAR", "MOVE RADAR", "FUTURES OI", "DIAGNOSTICS"
+        )):
+            if index < self.market_tabs.count():
+                self.market_tabs.setTabText(index, title)
+
+    def _build_final_radar_tab(self):
+        self.final_radar = FinalRadarWidget()
+        self.market_tabs.addTab(self.final_radar, "FINAL RADAR")
+        self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 4)
+        for index, title in enumerate((
+            "RADAR", "MORNING RADAR", "ENTRY RADAR", "MOVE RADAR",
+            "FINAL RADAR", "FUTURES OI", "DIAGNOSTICS"
         )):
             if index < self.market_tabs.count():
                 self.market_tabs.setTabText(index, title)
