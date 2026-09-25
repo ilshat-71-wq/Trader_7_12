@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from services.market_attention_scanner_service import MarketAttentionScannerService
 from services.market_session_service import MarketSessionService
+from services.move_radar_service import MoveRadarService
 from ui_table import MarketTableWidget, numeric
 
 
@@ -689,7 +690,16 @@ class TraderWindow(QWidget):
         )
         if hasattr(self, "move_radar"):
             self.move_radar.set_results(market_map)
+        if hasattr(self, "final_radar"):
+            self.final_radar.record_spot_scan(
+                market_map,
+                day_key=diagnostics.get("trading_date") or info.get("date"),
+            )
         entries = self._rows_for_results(market_map)
+        move_tickers = {
+            str(item.get("spot_ticker") or "").upper()
+            for item in MoveRadarService.candidates(market_map)
+        }
         self._spot_results_for_realtime = [
             entry[2]
             for entry in sorted(
@@ -701,7 +711,10 @@ class TraderWindow(QWidget):
                         or entry[2].get("class_code")
                     )
                 ),
-                key=lambda entry: abs(entry[0]),
+                key=lambda entry: (
+                    str(entry[2].get("spot_ticker") or "").upper() in move_tickers,
+                    abs(entry[0]),
+                ),
                 reverse=True,
             )[:30]
         ]
