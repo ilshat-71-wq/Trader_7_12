@@ -319,6 +319,12 @@ class OIWatchlistTraderWindow(TraderWindow):
             ])
         self.oi_table.set_rows(rows)
         self._latest_oi_results = [dict(x) for x in prepared_results]
+        if hasattr(self, "final_radar"):
+            info = self.session_service.get_session_info()
+            self.final_radar.record_futures_scan(
+                prepared_results,
+                day_key=self._oi_diagnostics.get("trading_date") or info.get("date"),
+            )
         self._highlight_money_rows(prepared_results)
         for row_index, item in enumerate(prepared_results):
             signal = str(item.get('signal') or '')
