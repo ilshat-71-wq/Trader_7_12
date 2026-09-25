@@ -113,6 +113,13 @@ class CloudMarketDataEngine:
         self._last_scan_finished_at: float | None = None
         self._last_scan_error: str | None = None
         self._last_scan_timing: dict[str, Any] = {}
+        # Morning scheduler diagnostics. These are deliberately separate from
+        # market-data diagnostics so a missed morning slot is observable.
+        self._morning_scheduler_started_at: str | None = None
+        self._morning_last_attempt: str | None = None
+        self._morning_last_success: str | None = None
+        self._morning_last_slot: str | None = None
+        self._morning_last_error: str | None = None
 
         self._subscribers: set[asyncio.Queue] = set()
         self._subscriber_lock = threading.Lock()
@@ -141,7 +148,14 @@ class CloudMarketDataEngine:
                 "data_policy": "REAL_BCS_DATA_ONLY",
                 "decision_policy": "NO_TRADE_EXECUTION",
                 "timing": self._last_scan_timing,
-                "morning_radar": self.morning_radar.summary(),
+                "morning_radar": {
+                    **self.morning_radar.summary(),
+                    "scheduler_started_at": self._morning_scheduler_started_at,
+                    "last_attempt": self._morning_last_attempt,
+                    "last_success": self._morning_last_success,
+                    "last_slot": self._morning_last_slot,
+                    "last_error": self._morning_last_error,
+                },
             }
 
     @property
@@ -369,6 +383,12 @@ class CloudMarketDataEngine:
         """Run regular refreshes plus exact Moscow Morning Radar slots."""
         last_regular_scan = 0.0
         last_slot_key = None
+        self._morning_scheduler_started_at = datetime.now(self.morning_radar.TIMEZONE).isoformat()
+        print(
+            "MORNING RADAR SCHEDULER: ACTIVE",
+            f"SLOTS={','.join(x.strftime('%H:%M') for x in self.morning_radar.SLOTS)}",
+            f"TZ={self.morning_radar.TIMEZONE.key}",
+        )
         while True:
             now = datetime.now(self.morning_radar.TIMEZONE)
             today = self.morning_radar.load(now.date().isoformat())
@@ -387,13 +407,28 @@ class CloudMarketDataEngine:
             slot_key = f"{now.date().isoformat()}:{slot}" if slot else None
 
             if slot and slot_key != last_slot_key:
+                self._morning_last_attempt = now.isoformat()
+                self._morning_last_slot = slot
                 try:
                     snapshot = await asyncio.to_thread(self.scan_once)
                     self.morning_radar.record(snapshot.as_dict(), slot=slot)
-                except Exception:
+                    self._morning_last_success = datetime.now(self.morning_radar.TIMEZONE).isoformat()
+                    self._morning_last_error = None
+                except Exception as exc:
+                    self._morning_last_error = f"{type(exc).__name__}: {exc}"
+                    print(
+                        "MORNING RADAR SLOT FAILED:",
+                        slot,
+                        self._morning_last_error,
+                    )
                     # Leave the slot unmarked so the next 5-second poll retries it.
                     await asyncio.sleep(5.0)
                     continue
+                print(
+                    "MORNING RADAR SLOT CAPTURED:",
+                    slot,
+                    f"AT={self._morning_last_success}",
+                )
                 last_slot_key = slot_key
                 last_regular_scan = time.monotonic()
                 await asyncio.sleep(5.0)
