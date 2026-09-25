@@ -126,9 +126,9 @@ class MorningRadarWidget(QWidget):
         details_title = QLabel("MORNING DETAILS")
         details_title.setStyleSheet("font-size:11px;font-weight:800;color:#8d98a2;padding-top:3px;")
         root.addWidget(details_title)
-        self.table = QTableWidget(0, 11)
+        self.table = QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels([
-            "Ticker", "Price Δ%", "RS", "₽/min", "15m Δ%",
+            "Ticker", "Price Δ%", "RS", "ATR / USED", "₽/min", "15m Δ%",
             "Accel", "Interest", "SHORT WATCH", "PERSIST", "SIGNAL", "PROB",
         ])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -267,6 +267,11 @@ class MorningRadarWidget(QWidget):
                 item.get("spot_ticker") or item.get("ticker") or "—",
                 self._fmt(item.get("change_percent")),
                 self._fmt(item.get("relative_strength")),
+                (
+                    f"{self._fmt(item.get('atr_percent'))}% • {self._fmt(item.get('atr_used_percent'), 0)}%"
+                    if item.get("atr_percent") is not None and item.get("atr_used_percent") is not None
+                    else "—"
+                ),
                 self._fmt(item.get("money_per_minute"), 0),
                 self._fmt((item.get("interest") or {}).get("recent_pace_delta_pct")),
                 self._fmt(item.get("money_acceleration")),
@@ -278,7 +283,7 @@ class MorningRadarWidget(QWidget):
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if col in (1, 2, 3, 4, 5, 10):
+                if col in (1, 2, 3, 4, 5, 6, 11):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, col, cell)
             if item.get("short_watch"):
