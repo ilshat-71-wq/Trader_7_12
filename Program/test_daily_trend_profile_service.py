@@ -65,3 +65,18 @@ def test_insufficient_d1_data_is_neutral():
     result = DailyTrendProfileService.analyze(asset, market, before_date=date(2026, 9, 2))
     assert result["direction"] == "NEUTRAL"
     assert result["qualified"] is False
+
+def test_atr14_uses_completed_daily_ranges_and_excludes_current_day():
+    asset = []
+    for i in range(15):
+        day = f"2026-08-{10 + i:02d}"
+        asset.append(candle(day, 100 + i, 103 + i, 99 + i, 102 + i))
+    asset.append(candle("2026-08-25", 115, 150, 90, 149))
+    result = DailyTrendProfileService.analyze(
+        asset,
+        before_date=date(2026, 8, 25),
+    )
+    assert result["atr_value"] is not None
+    assert result["atr_percent"] is not None
+    assert result["atr_value"] == 4.0
+    assert result["atr_percent"] > 0
