@@ -63,7 +63,11 @@ class FinalRadarService:
         )
         return {
             "key": key,
-            "ticker": key,
+            "ticker": str(
+                item.get("spot_ticker")
+                or item.get("futures_ticker")
+                or key
+            ).upper(),
             "instrument_type": instrument_type,
             "direction": direction,
             "confirmations": consecutive,
