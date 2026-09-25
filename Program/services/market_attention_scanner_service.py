@@ -226,7 +226,10 @@ class MarketAttentionScannerService:
             seen_dates.add(day)
             completed.append(candle)
         completed.sort(key=lambda x: str(x.get("time") or x.get("date") or ""))
-        return completed[-DailyTrendProfileService.MAX_DAYS:]
+        # Keep enough completed D1 candles for ATR(14); the profile itself
+        # still uses only its canonical 2–3 day structure window.
+        keep_days = max(DailyTrendProfileService.MAX_DAYS, DailyTrendProfileService.ATR_PERIOD + 1)
+        return completed[-keep_days:]
 
     def _daily_profile(self, item, trading_date, benchmark_daily):
         candles = self._daily_candles(item["spot_ticker"], item["spot_class_code"], trading_date)
@@ -261,9 +264,13 @@ class MarketAttentionScannerService:
             recent_pace = recent_money / max(1, recent_minutes)
             acceleration = 0.0
         change = (last / first - 1.0) * 100.0
+        session_open = self._f(candles[0].get("open"))
+        day_move = (last / session_open - 1.0) * 100.0 if session_open > 0 else None
         result = {
             **item,
             "price": last,
+            "session_open": session_open if session_open > 0 else None,
+            "day_move_percent": day_move,
             "change_percent": change,
             "direction": "LONG" if change > 0 else "SHORT" if change < 0 else "NEUTRAL",
             "session_money": total_money,
@@ -562,6 +569,14 @@ class MarketAttentionScannerService:
                     except Exception:
                         profile = self._empty_daily_profile("ERROR")
                     row["daily_profile"] = profile
+                    row["atr_value"] = profile.get("atr_value")
+                    row["atr_percent"] = profile.get("atr_percent")
+                    atr_percent = self._f(profile.get("atr_percent"))
+                    day_move_percent = row.get("day_move_percent")
+                    row["atr_used_percent"] = (
+                        round(abs(float(day_move_percent)) / atr_percent * 100.0, 1)
+                        if atr_percent > 0 and day_move_percent is not None else None
+                    )
                     row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
                     row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
                     row["daily_relative_direction"] = profile.get("relative_direction", "UNAVAILABLE")
