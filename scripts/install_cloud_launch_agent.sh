@@ -34,6 +34,15 @@ cat > "$PLIST" <<EOF
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- Start the Cloud before the first Morning Radar slot every day.
+         RunAtLoad alone is insufficient when the Mac is logged in after 07:00. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>40</integer>
+    </dict>
     <key>ProcessType</key>
     <string>Background</string>
     <key>StandardOutPath</key>
@@ -54,5 +63,6 @@ launchctl kickstart -k "gui/$(id -u)/com.ilshat.trader712.cloud"
 
 echo "=== TRADER_7_12 CLOUD AUTOSTART INSTALLED ==="
 echo "Morning Radar schedule: 07:00 07:15 07:30 08:00 09:00 09:45 09:50 MSK"
+echo "Cloud autostart: daily 06:40 MSK + RunAtLoad + KeepAlive"
 echo "Health: http://127.0.0.1:8080/health"
 echo "Morning Radar: http://127.0.0.1:8080/v1/morning-radar"
