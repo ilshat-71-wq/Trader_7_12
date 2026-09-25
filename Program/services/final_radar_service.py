@@ -25,6 +25,8 @@ class FinalRadarService:
         self._history = {}
         self._realtime = {}
         self._futures = []
+        self._spot_scan_no = 0
+        self._futures_scan_no = 0
 
     @staticmethod
     def _f(value):
@@ -107,7 +109,8 @@ class FinalRadarService:
                 key, direction, item, scan_no, "SPOT"
             )
 
-        self._merge_current(current, scan_no)
+        self._spot_scan_no = scan_no
+        self._merge_current(current, scan_no, "SPOT")
         return self.final_candidates()
 
     def record_futures_scan(self, results, day_key=None):
@@ -118,6 +121,8 @@ class FinalRadarService:
 
         if self._scan_no == 0:
             self._scan_no = 1
+        elif self._spot_scan_no != self._scan_no:
+            self._scan_no += 1
         scan_no = self._scan_no
         current = {}
 
@@ -150,11 +155,14 @@ class FinalRadarService:
                 key, direction, item, scan_no, "FUTURES"
             )
 
-        self._merge_current(current, scan_no)
+        self._futures_scan_no = scan_no
+        self._merge_current(current, scan_no, "FUTURES")
         return self.final_candidates()
 
-    def _merge_current(self, current, scan_no):
+    def _merge_current(self, current, scan_no, instrument_type):
         for key, state in self._history.items():
+            if state.get("instrument_type") != instrument_type:
+                continue
             if key not in current:
                 state["confirmations"] = 0
                 state["last_scan"] = scan_no - 1
