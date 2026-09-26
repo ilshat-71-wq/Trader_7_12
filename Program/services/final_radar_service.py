@@ -103,7 +103,13 @@ class FinalRadarService:
                 continue
             if used is None or used > self.MAX_ATR_USED:
                 continue
-            if directional_accel is None or directional_accel < self.MIN_DIRECTIONAL_ACCEL:
+            if directional_accel is None:
+                continue
+            # Directional acceleration must confirm the candidate direction:
+            # LONG requires positive acceleration; SHORT requires negative.
+            if direction == "LONG" and directional_accel < self.MIN_DIRECTIONAL_ACCEL:
+                continue
+            if direction == "SHORT" and directional_accel > -self.MIN_DIRECTIONAL_ACCEL:
                 continue
             if item.get("move_phase") not in {"START", "DEVELOPING"}:
                 continue
