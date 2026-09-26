@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget
+from ui_table import CopyableTableWidget
 
 from services.entry_radar_service import EntryRadarService
 
@@ -56,7 +57,7 @@ class EntryRadarWidget(QWidget):
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = QTableWidget(0, 5)
+        self.table = CopyableTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Инструмент", "Направление", "Confidence", "Entry", "Entry Zone"])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
