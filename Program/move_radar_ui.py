@@ -10,11 +10,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from ui_table import CopyableTableWidget
 
 from services.move_radar_service import MoveRadarService
 
@@ -65,7 +66,7 @@ class MoveRadarWidget(QWidget):
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = QTableWidget(0, 11)
+        self.table = CopyableTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels([
             "Ticker", "Phase", "Direction", "Price Δ%", "ATR / USED",
             "RS", "₽/min", "15m", "Accel", "PROB", "RT",
