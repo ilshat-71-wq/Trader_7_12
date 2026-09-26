@@ -122,7 +122,10 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.session_handoff_timer = QTimer(self)
         self.session_handoff_timer.timeout.connect(self._check_session_handoff)
         self.session_handoff_timer.start(1_000)
-        QTimer.singleShot(1200, self._refresh_morning_if_open)
+        # Always load the persisted morning result once on startup. After 09:00
+        # periodic refresh is stopped, but the completed morning snapshot must
+        # remain visible when the app is opened later in the day.
+        QTimer.singleShot(1200, self.morning_radar.refresh)
         QTimer.singleShot(1300, self._check_session_handoff)
 
     @staticmethod
