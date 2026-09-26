@@ -70,6 +70,72 @@ class _SortableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class CopyableTableWidget(QTableWidget):
+    """Read-only Qt table with professional row-copy shortcuts and context menu."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_copy_menu)
+
+    def _selected_rows(self):
+        return sorted({index.row() for index in self.selectedIndexes()})
+
+    def copy_rows(self, include_headers=True):
+        rows = self._selected_rows()
+        if not rows:
+            rows = list(range(self.rowCount()))
+        if not rows:
+            return False
+
+        lines = []
+        if include_headers:
+            lines.append(
+                "\t".join(
+                    self.horizontalHeaderItem(i).text()
+                    if self.horizontalHeaderItem(i) else ""
+                    for i in range(self.columnCount())
+                )
+            )
+        for row in rows:
+            lines.append(
+                "\t".join(
+                    self.item(row, column).text()
+                    if self.item(row, column) else ""
+                    for column in range(self.columnCount())
+                )
+            )
+        QApplication.clipboard().setText("\n".join(lines))
+        return True
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.copy_rows()
+            event.accept()
+            return
+        if event.matches(QKeySequence.StandardKey.SelectAll):
+            self.selectAll()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _show_copy_menu(self, position):
+        menu = QMenu(self)
+        selected = menu.addAction("Копировать выбранные строки")
+        selected.triggered.connect(self.copy_rows)
+        all_rows = menu.addAction("Копировать всю таблицу")
+        all_rows.triggered.connect(lambda: self.copy_rows(True))
+        no_headers = menu.addAction("Копировать без заголовков")
+        no_headers.triggered.connect(lambda: self.copy_rows(False))
+        menu.addSeparator()
+        menu.addAction("Выделить всё", self.selectAll)
+        menu.exec(self.viewport().mapToGlobal(position))
+
+
 class MarketTableWidget(QTableWidget):
     """Professional read-only table with reliable header sorting and TSV copy."""
 
