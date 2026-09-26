@@ -66,6 +66,7 @@ def test_day_change_resets_confirmation():
     for _ in range(3):
         service.record_spot_scan([spot()], "2026-09-25")
     service.update_realtime({"ticker": "VGSB", "book_score": 70, "tape_score": 80})
+    service.update_futures([future(underlying="VGSB")])
     assert service.final_candidates()
     service.record_spot_scan([spot()], "2026-09-26")
     service.update_futures([future(underlying="VGSB")])
