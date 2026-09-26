@@ -258,7 +258,7 @@ class FinalRadarService:
                 if state["instrument_type"] == "SPOT"
                 else {"state": "—"}
             )
-            if futures["state"] == "CONFLICT":
+            if futures["state"] in {"CONFLICT", "NO_MATCH"}:
                 continue
 
             rows.append({
