@@ -1,12 +1,12 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 23.09.2026  
+**Дата актуализации:** 26.09.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `937a578c3d1b5cfb5d681ce6e63dd6d351f7d2bc`  
+**Последний функциональный commit:** `0ad611d789d45246792cf5faebb907ebb9dedd6c`  
 **Последний локально подтверждённый regression suite:** `149 passed, 1 warning` (23.09.2026)  
 **Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
@@ -61,6 +61,86 @@ d086abb5 — Fix SPOT market map diagnostics entry
 UI-изменения не меняют scanner calculations, qualification, ranking, market-map source или BCS market-data semantics.
 
 Текущая точка должна сначала пройти локальные `py_compile` / `pytest` и macOS build после синхронизации рабочей машины.
+
+
+## 0.4 New-chat recovery protocol — CANONICAL
+
+**Purpose:** a new ChatGPT chat must recover the project from GitHub and the canonical passport instead of relying on conversational memory.
+
+### Source of truth
+1. GitHub repository: `ilshat-71-wq/Trader_7_12`
+2. Working branch: `main` — the only working branch.
+3. Canonical project passport: `Docs/PROJECT_PASSPORT.md`
+4. Current code on `main` is authoritative for implementation details.
+5. ChatGPT memory/context is auxiliary only; it must never override GitHub, the passport, tests, or verified live results.
+
+### Mandatory new-chat sequence
+When the user says to continue Trader_7_12 in a new chat, first:
+1. Read `Docs/PROJECT_PASSPORT.md` from GitHub `main`.
+2. Check the latest commit on `main`.
+3. Compare the passport checkpoint with the latest commit and current code where the difference matters.
+4. Restore the current project state: implemented, verified, known limitations, open investigation, and next step.
+5. Do not restart the project, re-ask already documented context, invent missing implementation details, or assume that an old chat state is still current.
+6. For any uncertainty, use the sequence: **memory/context → hypothesis → GitHub/code → tests → real check**.
+7. Never report an item as verified unless the relevant code/test/live/build evidence exists.
+
+### Mandatory local synchronization after a new-chat recovery
+On the user's Mac, the project must be synchronized to the same GitHub `main` before local acceptance:
+```bash
+cd ~/Documents/Trader_7_12 && \
+git fetch origin && \
+git switch main && \
+git pull --ff-only origin main && \
+echo "=== SYNC CHECK ===" && \
+git status --short --branch && \
+git log -1 --oneline
+```
+Expected state: `main` tracks `origin/main`, working tree clean, and local HEAD equals the latest GitHub `main` commit.
+
+### Mandatory acceptance sequence
+After synchronization, use the project workflow:
+```
+code/change
+→ tests
+→ real check
+→ commit to main
+→ update PROJECT_PASSPORT.md
+→ push main
+→ local pull
+→ build
+→ open the single Trader_7_12 Pro.app
+→ app check
+```
+
+### Passport update rule
+After every material project change, update this same canonical passport. Do not create a second project passport, replacement concept document, or parallel status MD.
+
+The checkpoint must record, when applicable:
+- current GitHub `main` HEAD;
+- application/scanner versions;
+- latest confirmed tests;
+- latest real/live check;
+- latest successful macOS build;
+- current architecture and data-source constraints;
+- open investigations;
+- next concrete step;
+- important things that must not be changed.
+
+### Current recovery checkpoint — 26.09.2026
+- GitHub `main` latest commit: `0ad611d789d45246792cf5faebb907ebb9dedd6c` — `Fix Final Radar day-change regression setup`.
+- Immediately preceding merged checkpoint: `2e4e6d2f2e13f3ce985a45ba95f9efa34d0bab38` — `Fix Morning Radar and Futures confirmation gate`.
+- Current targeted regression result after the recent Final Radar work: `23 passed, 1 warning`.
+- Last previously confirmed full Program suite: `170 passed, 1 warning` before the latest commits; this is not to be presented as a fresh post-commit full-suite result until rerun.
+- Known warning: Python 3.14 / `pytest_asyncio` deprecation concerning `asyncio.get_event_loop_policy`; not a project failure.
+- Morning Radar startup persistence fix is on `main`.
+- Final Radar missing Futures mapping gate is on `main`: SPOT Final is blocked on `NO_MATCH`.
+- Open realtime investigation: verify from live-market evidence whether `FLOW RT` is an independent source or an aggregate derived from BOOK/TAPE. Do not change the implementation until evidence is collected.
+- Weekend control run showed insufficient SPOT coverage and zero strict candidates; this is a data/session condition, not a reason to weaken the gates.
+- Next live validation: **OI → FLOW → BOOK → TAPE → FLOW RT → Final Radar**, with sequential scans required for Final persistence.
+
+### Standing project rule
+**A new chat starts from GitHub `main` + this passport, not from memory alone.**
+
 
 ## 1. Назначение
 
