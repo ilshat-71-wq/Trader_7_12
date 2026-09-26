@@ -132,7 +132,7 @@ def test_short_candidate_uses_negative_directional_acceleration():
     rows = service.final_candidates()
     assert len(rows) == 1
     assert rows[0]["spot_ticker"] == "EELT"
-    assert rows[0]["direction"] == "SHORT"
+    assert rows[0]["signal"] == "SHORT"
 
 
 def test_short_candidate_with_positive_acceleration_is_rejected():
