@@ -313,20 +313,42 @@ class MorningRadarWidget(QWidget):
         )
 
     def copy_view(self):
-        lines = [self.summary.text(), self.meta.text()]
-        headers = [
+        lines = [
+            "=== MORNING RADAR ===",
+            self.state.text(),
+            self.meta.text(),
+            self.summary.text(),
+            "",
+            "TODAY'S WATCHLIST",
+        ]
+        watch_headers = [
+            self.watchlist_table.horizontalHeaderItem(i).text()
+            for i in range(self.watchlist_table.columnCount())
+        ]
+        lines.append("\t".join(watch_headers))
+        for row in range(self.watchlist_table.rowCount()):
+            lines.append(
+                "\t".join(
+                    self.watchlist_table.item(row, col).text()
+                    if self.watchlist_table.item(row, col) else ""
+                    for col in range(self.watchlist_table.columnCount())
+                )
+            )
+        lines.extend(["", "MORNING DETAILS"])
+        detail_headers = [
             self.table.horizontalHeaderItem(i).text()
             for i in range(self.table.columnCount())
         ]
-        lines.append("\t".join(headers))
+        lines.append("\t".join(detail_headers))
         for row in range(self.table.rowCount()):
             lines.append(
                 "\t".join(
-                    self.table.item(row, col).text() if self.table.item(row, col) else ""
+                    self.table.item(row, col).text()
+                    if self.table.item(row, col) else ""
                     for col in range(self.table.columnCount())
                 )
             )
-        lines.append(self.oi_summary.text())
+        lines.extend(["", self.oi_summary.text()])
         QApplication.clipboard().setText("\n".join(lines))
         self.copy_button.setText("COPIED ✓")
         QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
