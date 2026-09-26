@@ -115,3 +115,37 @@ def test_illiquid_futures_never_promote():
         "flow_score": 90,
     })
     assert service.final_candidates() == []
+
+
+def test_short_candidate_uses_negative_directional_acceleration():
+    service = FinalRadarService()
+    row = spot("EELT", prob=88.8, used=23.0, accel=-88.5, change=-1.30)
+    row["signal"] = "SHORT"
+    for _ in range(3):
+        service.record_spot_scan([row], "2026-09-25")
+    service.update_realtime({
+        "ticker": "EELT",
+        "book_score": 70,
+        "tape_score": 80,
+        "flow_score": 75,
+    })
+    rows = service.final_candidates()
+    assert len(rows) == 1
+    assert rows[0]["spot_ticker"] == "EELT"
+    assert rows[0]["direction"] == "SHORT"
+
+
+def test_short_candidate_with_positive_acceleration_is_rejected():
+    service = FinalRadarService()
+    row = spot("EELT", prob=88.8, used=23.0, accel=88.5, change=-1.30)
+    row["signal"] = "SHORT"
+    for _ in range(3):
+        service.record_spot_scan([row], "2026-09-25")
+    service.update_realtime({
+        "ticker": "EELT",
+        "book_score": 70,
+        "tape_score": 80,
+        "flow_score": 75,
+    })
+    assert service.final_candidates() == []
+}
