@@ -61,6 +61,7 @@ class RealtimeMicrostructureWorker(QObject):
         self._subscription_errors = []
         self._last_message_at = None
         self._last_error = None
+        self._live_data_seen = False
 
     def stop(self):
         self._stop_event.set()
@@ -173,6 +174,7 @@ class RealtimeMicrostructureWorker(QObject):
             "subscription_errors": list(self._subscription_errors[-5:]),
             "last_message_at": self._last_message_at,
             "last_error": self._last_error,
+            "live_data_seen": self._live_data_seen,
         }
 
     def _emit_realtime_status(self, state, **extra):
@@ -263,6 +265,9 @@ class RealtimeMicrostructureWorker(QObject):
 
         if response_type == "OrderBook":
             self._message_counts["OrderBook"] += 1
+            if not self._live_data_seen:
+                self._live_data_seen = True
+                self._emit_realtime_status("LIVE")
             self._books[ticker] = payload
             self._emit_snapshot(ticker, class_code)
             return
@@ -338,6 +343,7 @@ class RealtimeMicrostructureWorker(QObject):
                     self._subscription_errors = []
                     self._last_message_at = None
                     self._last_error = None
+                    self._live_data_seen = False
                     self._emit_realtime_status("CONNECTED", connected_at=self._connected_at.isoformat())
                     self._subscribe(ws)
                     subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
@@ -355,7 +361,7 @@ class RealtimeMicrostructureWorker(QObject):
                                 )
                                 self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
                                 raise RuntimeError(self._last_error)
-                            self._emit_realtime_status("LIVE")
+                            self._emit_realtime_status("SUBSCRIBED")
                             subscription_deadline = float("inf")
                         try:
                             raw = ws.recv()
