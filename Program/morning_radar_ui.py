@@ -12,11 +12,13 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
+from ui_table import CopyableTableWidget
+
 from services.signal_probability_service import SignalProbabilityService
 
 from PySide6.QtWidgets import (
     QApplication,
-    QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -107,7 +109,7 @@ class MorningRadarWidget(QWidget):
         watch_title = QLabel("TODAY'S WATCHLIST")
         watch_title.setStyleSheet("font-size:12px;font-weight:800;color:#e8ecef;padding-top:2px;")
         root.addWidget(watch_title)
-        self.watchlist_table = QTableWidget(0, 7)
+        self.watchlist_table = CopyableTableWidget(0, 7)
         self.watchlist_table.setHorizontalHeaderLabels([
             "#", "Instrument", "Direction", "Strength", "Interest", "Setup", "Entry"
         ])
@@ -126,7 +128,7 @@ class MorningRadarWidget(QWidget):
         details_title = QLabel("MORNING DETAILS")
         details_title.setStyleSheet("font-size:11px;font-weight:800;color:#8d98a2;padding-top:3px;")
         root.addWidget(details_title)
-        self.table = QTableWidget(0, 12)
+        self.table = CopyableTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels([
             "Ticker", "Price Δ%", "RS", "ATR / USED", "₽/min", "15m Δ%",
             "Accel", "Interest", "SHORT WATCH", "PERSIST", "SIGNAL", "PROB",
