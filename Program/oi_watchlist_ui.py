@@ -1,8 +1,9 @@
 """Trader_7_12 Pro — single-window dashboard with Futures OI + money flow."""
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt
+from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QBrush, QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+import time
 
 from ui import TraderWindow
 from ui_table import MarketTableWidget, numeric
@@ -61,6 +62,12 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_thread = None
         self.realtime_worker = None
         self._realtime_by_ticker = {}
+        self._realtime_prepared_results = []
+        self._realtime_next_retry_at = 0.0
+        self._realtime_watchdog = QTimer(self)
+        self._realtime_watchdog.setInterval(3000)
+        self._realtime_watchdog.timeout.connect(self._realtime_watchdog_tick)
+        self._realtime_watchdog.start()
         self.oi_panel = self._build_oi_panel()
         self.market_tabs.addTab(self.oi_panel, "FUTURES OI")
         self.market_tabs.tabBar().moveTab(2, 1)
@@ -357,7 +364,19 @@ class OIWatchlistTraderWindow(TraderWindow):
         self._append_oi_diagnostics()
         if hasattr(self, "final_radar"):
             self.final_radar.update_futures(prepared_results)
+        self._realtime_prepared_results = [dict(x) for x in prepared_results]
         self._start_realtime(prepared_results)
+
+    def _realtime_watchdog_tick(self):
+        if not self.scanner_enabled or not self._realtime_prepared_results:
+            return
+        if self.oi_thread is not None and self.oi_thread.isRunning():
+            return
+        if self.realtime_thread is not None and self.realtime_thread.isRunning():
+            return
+        if time.monotonic() < self._realtime_next_retry_at:
+            return
+        self._start_realtime(self._realtime_prepared_results)
 
     def _start_realtime(self, prepared_results):
         if self.realtime_thread is not None and self.realtime_thread.isRunning():
@@ -377,7 +396,13 @@ class OIWatchlistTraderWindow(TraderWindow):
                 instruments.append({"ticker": ticker, "classCode": class_code})
                 seen.add((ticker, class_code))
         if not instruments:
+            self._oi_diagnostics.update({
+                "realtime_state": "NO_INSTRUMENTS",
+                "realtime_last_error": "No valid futures/spot instruments available for BCS WebSocket subscription",
+            })
+            self._append_oi_diagnostics()
             return
+        self._realtime_next_retry_at = time.monotonic() + 10.0
         self._oi_diagnostics.update({
             "realtime_source": "BCS_WEBSOCKET_MARKET_DATA",
             "realtime_policy": "READ_ONLY_REALTIME_BOOK_TAPE; TOP_SPOT_10_PLUS_ACTIVE_FUTURES",
@@ -399,6 +424,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_thread.start()
 
     def _realtime_snapshot(self, item):
+        self._realtime_next_retry_at = 0.0
         self._realtime_by_ticker[item.get("ticker")] = item
         if hasattr(self, "entry_radar"):
             self.entry_radar.update_realtime(item)
@@ -476,8 +502,12 @@ class OIWatchlistTraderWindow(TraderWindow):
         )
 
     def _realtime_failed(self, error):
-        self._oi_diagnostics["realtime_error"] = error
-        self._append_oi_diagnostics()
+        self._oi_diagnostics.update({
+            "realtime_state": "FAILED",
+            "realtime_error": error,
+            "realtime_last_error": error,
+        })
+        self._realtime_status({"state": "FAILED", "instruments": len(self._realtime_prepared_results), "last_error": error})
 
     def _stop_realtime(self):
         if self.realtime_worker is not None:
@@ -490,6 +520,8 @@ class OIWatchlistTraderWindow(TraderWindow):
             self.realtime_thread.deleteLater()
         self.realtime_thread = None
         self.realtime_worker = None
+        # A finished worker is not a healthy realtime connection. The watchdog
+        # will restart it after the retry cooldown using the latest scan universe.
 
     def closeEvent(self, event):
         # Stop worker threads before Qt destroys their QThread owners.
