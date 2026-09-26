@@ -148,4 +148,3 @@ def test_short_candidate_with_positive_acceleration_is_rejected():
         "flow_score": 75,
     })
     assert service.final_candidates() == []
-}
