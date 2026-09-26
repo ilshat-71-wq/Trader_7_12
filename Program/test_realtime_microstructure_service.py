@@ -130,3 +130,24 @@ def test_subscription_timeout_diagnostic_contains_partial_ack_counts():
         f"TAPE {len(worker._subscription_accepted[2])}/{len(expected)}"
     )
     assert worker._last_error == "BCS subscription acknowledgement timeout: BOOK 1/2, TAPE 0/2"
+
+
+def test_live_data_is_not_claimed_before_first_order_book():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "SBER", "classCode": "TQBR"}],
+    )
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["live_data_seen"] is False
+
+    worker._handle({
+        "responseType": "OrderBook",
+        "ticker": "SBER",
+        "classCode": "TQBR",
+        "bidVolume": 80,
+        "askVolume": 20,
+        "bids": [{"price": 100, "quantity": 80}],
+        "asks": [{"price": 101, "quantity": 20}],
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["live_data_seen"] is True
