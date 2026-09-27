@@ -179,6 +179,10 @@ class FinalRadarWidget(QWidget):
         self.service.record_spot_scan(market_map, day_key=day_key)
         self._render()
 
+    def record_futures_scan(self, results, day_key=None):
+        self.service.record_futures_scan(results, day_key=day_key)
+        self._render()
+
     def update_realtime(self, snapshot):
         self.service.update_realtime(snapshot)
         self._render()
