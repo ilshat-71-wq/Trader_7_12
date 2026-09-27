@@ -5,6 +5,11 @@ Uses the existing local BCSAPI refresh-token configuration and the documented
 market-data WebSocket protocol. It does not modify Radar, OI, or realtime
 production code and never prints credentials.
 
+The probe deliberately uses the documented real MOEX instrument SBER/TQBR.
+The metadata lookup is not used as a gate because it may return an empty
+collection outside the trading session; that must not prevent testing the
+WebSocket path itself.
+
 Run from the repository root:
     python3 scripts/diagnose_bcs_realtime.py
 """
@@ -12,7 +17,6 @@ Run from the repository root:
 from __future__ import annotations
 
 import json
-import os
 import ssl
 import sys
 import time
@@ -38,7 +42,8 @@ from api.bcs_api import BCSAPI  # noqa: E402
 WS_URL = "wss://ws.broker.ru/trade-api-market-data-connector/api/v1/market-data/ws"
 DEPTH = 20
 PROBE_SECONDS = 20
-TICKER_CANDIDATES = ("SBER", "GAZP", "LKOH", "YNDX")
+TICKER = "SBER"
+CLASS_CODE = "TQBR"
 
 
 def short_type(payload: object) -> str:
@@ -50,6 +55,7 @@ def short_type(payload: object) -> str:
 def main() -> int:
     print("=== BCS REALTIME DIAGNOSTIC PROBE ===")
     print("Diagnostic only: production realtime code is not modified.")
+    print("Instrument: canonical real BCS/MOEX SBER / TQBR")
     print()
 
     api = BCSAPI()
@@ -58,30 +64,7 @@ def main() -> int:
         print("AUTH              FAIL")
         return 1
     print("AUTH              OK")
-
-    # Prefer a real BCS card returned by the existing metadata API so the
-    # probe never invents a classCode.
-    print("INSTRUMENT LOOKUP  ...")
-    records = api.get_instruments_by_tickers(list(TICKER_CANDIDATES), resolve_underlying=False)
-    candidates = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        ticker = str(
-            record.get("ticker") or record.get("secCode") or record.get("securityCode") or ""
-        ).strip().upper()
-        class_code = str(
-            record.get("classCode") or record.get("class_code") or ""
-        ).strip().upper()
-        if ticker and class_code:
-            candidates.append((ticker, class_code))
-
-    if not candidates:
-        print("INSTRUMENT LOOKUP  FAIL: no real BCS ticker/classCode pair returned")
-        return 1
-
-    ticker, class_code = candidates[0]
-    print(f"INSTRUMENT         {ticker} / {class_code}")
+    print(f"INSTRUMENT         {TICKER} / {CLASS_CODE}")
     print()
 
     token = api.access_token
@@ -97,6 +80,7 @@ def main() -> int:
     tape_messages = 0
     last_book = None
     last_tape = None
+    ws_connected = False
 
     print("WS CONNECT        ...")
     ws = None
@@ -111,6 +95,7 @@ def main() -> int:
                 "ca_certs": certifi.where(),
             },
         )
+        ws_connected = True
         ws.settimeout(1.0)
         print("WS CONNECT        OK")
 
@@ -118,12 +103,12 @@ def main() -> int:
             "subscribeType": 0,
             "dataType": 0,
             "depth": DEPTH,
-            "instruments": [{"ticker": ticker, "classCode": class_code}],
+            "instruments": [{"ticker": TICKER, "classCode": CLASS_CODE}],
         }
         tape_request = {
             "subscribeType": 0,
             "dataType": 2,
-            "instruments": [{"ticker": ticker, "classCode": class_code}],
+            "instruments": [{"ticker": TICKER, "classCode": CLASS_CODE}],
         }
 
         ws.send(json.dumps(book_request))
@@ -183,7 +168,7 @@ def main() -> int:
 
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
-        if ws is None:
+        if not ws_connected:
             print(f"WS CONNECT        FAIL: {type(exc).__name__}: {exc}")
     finally:
         if ws is not None:
@@ -194,10 +179,10 @@ def main() -> int:
 
     print()
     print("=== RESULT ===")
-    print(f"AUTH              OK")
-    print(f"WS CONNECT        {'OK' if ws is not None else 'FAIL'}")
-    print("BOOK SUBMIT       OK")
-    print("TAPE SUBMIT       OK")
+    print("AUTH              OK")
+    print(f"WS CONNECT        {'OK' if ws_connected else 'FAIL'}")
+    print("BOOK SUBMIT       OK" if ws_connected else "BOOK SUBMIT       NOT SENT")
+    print("TAPE SUBMIT       OK" if ws_connected else "TAPE SUBMIT       NOT SENT")
     print(f"BOOK ACK          {'OK' if book_ack else 'FAIL'}")
     print(f"BOOK MESSAGE      {book_messages}")
     print(f"LAST BOOK         {last_book or '—'}")
