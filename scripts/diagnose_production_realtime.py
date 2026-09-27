@@ -34,6 +34,7 @@ class Collector(QObject):
         super().__init__()
         self.worker = worker
         self.thread = thread
+        self.seconds = float(seconds)
         self.snapshots = []
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
