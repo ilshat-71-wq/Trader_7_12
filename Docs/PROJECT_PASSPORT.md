@@ -127,7 +127,10 @@ The checkpoint must record, when applicable:
 - important things that must not be changed.
 
 ### Current recovery checkpoint — 26.09.2026
-- GitHub `main` latest commit: `0ad611d789d45246792cf5faebb907ebb9dedd6c` — `Fix Final Radar day-change regression setup`.
+- GitHub `main` latest commit: `b5d8aaa8d6f18ce344dd2e32f2f67823174c9132` — `Add diagnostic BCS realtime probe`.
+- Added diagnostic-only `scripts/diagnose_bcs_realtime.py`: it reuses the existing local BCSAPI authorization, obtains a real ticker/classCode from BCS metadata, opens the documented BCS WebSocket, submits BOOK/TAPE subscriptions, records ACK/data/error response types, and never prints credentials or changes production Radar/realtime logic.
+- No local pytest/build/live result is claimed for the new probe yet; the required real check must be run on the user's iMac because the BCS refresh token is local-only.
+- Open realtime investigation remains: determine from live evidence whether the current production realtime failure is WS connection/subscription/data-path or downstream UI lifecycle, and whether `FLOW RT` is independent or derived from BOOK/TAPE. Do not change production realtime behavior until the probe provides evidence.
 - Immediately preceding merged checkpoint: `2e4e6d2f2e13f3ce985a45ba95f9efa34d0bab38` — `Fix Morning Radar and Futures confirmation gate`.
 - Current targeted regression result after the recent Final Radar work: `23 passed, 1 warning`.
 - Last previously confirmed full Program suite: `170 passed, 1 warning` before the latest commits; this is not to be presented as a fresh post-commit full-suite result until rerun.
