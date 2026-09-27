@@ -426,6 +426,24 @@ class OIWatchlistTraderWindow(TraderWindow):
     def _realtime_snapshot(self, item):
         self._realtime_next_retry_at = 0.0
         self._realtime_by_ticker[item.get("ticker")] = item
+
+        # Temporary production-path diagnostic: snapshot -> OI table matching.
+        ticker = str(item.get("ticker") or "").upper()
+        book = item.get("book_score")
+        tape = item.get("tape_score")
+        flow = item.get("flow_score")
+        matched_rows = []
+        for row in range(self.oi_table.rowCount()):
+            contract = self.oi_table.item(row, 2)
+            contract_text = contract.text().strip().upper() if contract else ""
+            if contract_text == ticker:
+                matched_rows.append(row)
+        print(
+            f"[RT UI] SNAPSHOT {ticker or '—'} "
+            f"BOOK={book} TAPE={tape} FLOW={flow} "
+            f"OI_MATCH_ROWS={matched_rows}"
+        )
+
         if hasattr(self, "entry_radar"):
             self.entry_radar.update_realtime(item)
         if hasattr(self, "move_radar"):
