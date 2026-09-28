@@ -5,7 +5,7 @@ create orders and does not recalculate the underlying signal model.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QHBoxLayout, QLabel, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget
 from ui_table import CopyableTableWidget
@@ -17,6 +17,9 @@ class EntryRadarWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        self._realtime_render_timer = QTimer(self)
+        self._realtime_render_timer.setSingleShot(True)
+        self._realtime_render_timer.timeout.connect(self._render)
         self._build()
 
     def _build(self):
