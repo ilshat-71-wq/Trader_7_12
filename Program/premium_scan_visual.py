@@ -33,9 +33,9 @@ class PremiumScanVisual(QWidget):
 
     def start(self):
         self.phase = 0.0
-        # 10 fps is visually smooth enough for a scan-state watch dial and
-        # avoids keeping the Qt GUI thread at unnecessary repaint load.
-        self.timer.start(100)
+        # 5 fps is sufficient for a scan-state watch dial and
+        # reduces GUI-thread repaint load while keeping the watch animation visibly alive.
+        self.timer.start(200)
         self.update()
 
     def stop(self):
