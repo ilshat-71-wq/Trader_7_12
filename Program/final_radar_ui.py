@@ -69,7 +69,7 @@ class FinalRadarWidget(QWidget):
 
         self.table = CopyableTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels([
-            "#", "Ticker", "Direction", "Phase", "Δ%", "ATR / USED",
+            "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "ATR / USED",
             "PROB", "Scans", "RT", "FUTURES",
         ])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -111,16 +111,48 @@ class FinalRadarWidget(QWidget):
         status = self.service.status()
         self.table.setRowCount(len(self._rows))
 
+        diagnostic = status.get("diagnostic") or {}
         if not self._rows:
             if status["scan_no"] == 0:
                 self.state.setText("WAITING FOR SCAN")
             elif status["max_confirmations"] < status["required_confirmations"]:
                 left = status["required_confirmations"] - status["max_confirmations"]
-                self.state.setText(f"NEED {left} MORE SCAN" if left == 1 else f"NEED {left} MORE SCANS")
+                self.state.setText(
+                    f"NEED {left} MORE SCAN" if left == 1 else f"NEED {left} MORE SCANS"
+                )
+            elif diagnostic.get("rt_block"):
+                rt = diagnostic.get("rt")
+                count = diagnostic.get("rt_count", 0)
+                self.state.setText(
+                    f"BLOCKED • RT {count}/3" if rt is None else
+                    f"BLOCKED • RT {rt:.0f} < {self.service.MIN_RT_SCORE:.0f}"
+                )
+            elif diagnostic.get("futures_block"):
+                self.state.setText(f"BLOCKED • FUTURES {diagnostic.get('futures')}")
             else:
                 self.state.setText("NO FINAL CANDIDATE")
         else:
             self.state.setText(f"{len(self._rows)} FINAL")
+
+        if diagnostic.get("ticker"):
+            rt = diagnostic.get("rt")
+            rt_text = (
+                f"{diagnostic.get('rt_count', 0)}/3"
+                if rt is None
+                else f"{rt:.0f} • {diagnostic.get('rt_count', 0)}/3"
+            )
+            fut = diagnostic.get("futures") or "—"
+            self.meta.setText(
+                f"SCAN {status['scan_no']} • STRICT {status['strict_candidates']} • "
+                f"TOP {diagnostic['ticker']} {diagnostic.get('direction') or '—'} "
+                f"{diagnostic.get('confirmations', 0)}/{status['required_confirmations']} • "
+                f"RT {rt_text} • FUTURES {fut}"
+            )
+        else:
+            self.meta.setText(
+                "FINAL 1–3 • SPOT + FUTURES OI/FLOW + REALTIME • "
+                "first scan + two confirmations • liquid instruments only • read-only"
+            )
 
         for row, item in enumerate(self._rows, 1):
             rt = item["final_realtime"]
