@@ -137,16 +137,16 @@ class MoveRadarWidget(QWidget):
         self._rows = [dict(x) for x in MoveRadarService.candidates(market_map)]
         self._render()
 
-    def update_realtime(self, snapshot):
+    def update_realtime(self, snapshot, render=True):
         ticker = str((snapshot or {}).get("ticker") or "").upper()
         if not ticker:
             return
         for item in self._rows:
             if str(item.get("spot_ticker") or "").upper() == ticker:
                 item["_realtime"] = dict(snapshot)
-        # Coalesce high-frequency websocket updates; the realtime state is
-        # retained immediately, while the table is repainted at most 4 Hz.
-        if not self._realtime_render_timer.isActive():
+        # The parent window already batches websocket updates. It can suppress
+        # this local timer and perform one table repaint for the whole batch.
+        if render and not self._realtime_render_timer.isActive():
             self._realtime_render_timer.start(250)
 
     def copy_view(self):
