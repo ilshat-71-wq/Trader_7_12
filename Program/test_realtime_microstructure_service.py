@@ -57,6 +57,10 @@ def test_subscription_success_is_counted_per_instrument():
     diagnostics = worker._realtime_diagnostics()
     assert diagnostics["orderbook_accepted"] == 1
     assert diagnostics["lasttrades_accepted"] == 1
+    assert diagnostics["orderbook_accepted_instruments"] == [("SBER", "TQBR")]
+    assert diagnostics["lasttrades_accepted_instruments"] == [("SBER", "TQBR")]
+    assert diagnostics["orderbook_missing_instruments"] == [("GAZP", "TQBR")]
+    assert diagnostics["lasttrades_missing_instruments"] == [("GAZP", "TQBR")]
     assert diagnostics["orderbook_messages"] == 0
     assert diagnostics["lasttrades_messages"] == 0
 
@@ -130,6 +134,12 @@ def test_subscription_timeout_diagnostic_contains_partial_ack_counts():
         f"TAPE {len(worker._subscription_accepted[2])}/{len(expected)}"
     )
     assert worker._last_error == "BCS subscription acknowledgement timeout: BOOK 1/2, TAPE 0/2"
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["orderbook_missing_instruments"] == [("SBER", "TQBR")]
+    assert diagnostics["lasttrades_missing_instruments"] == [
+        ("ONZ6", "SPBFUT"),
+        ("SBER", "TQBR"),
+    ]
 
 
 def test_live_data_is_not_claimed_before_first_order_book():
