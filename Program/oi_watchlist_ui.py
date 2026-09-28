@@ -463,11 +463,11 @@ class OIWatchlistTraderWindow(TraderWindow):
 
         for item in snapshots:
             if hasattr(self, "entry_radar"):
-                self.entry_radar.update_realtime(item)
+                self.entry_radar.update_realtime(item, render=False)
             if hasattr(self, "move_radar"):
-                self.move_radar.update_realtime(item)
+                self.move_radar.update_realtime(item, render=False)
             if hasattr(self, "final_radar"):
-                self.final_radar.update_realtime(item)
+                self.final_radar.update_realtime(item, render=False)
 
             ticker = str(item.get("ticker") or "").upper()
             book = item.get("book_score")
@@ -498,6 +498,14 @@ class OIWatchlistTraderWindow(TraderWindow):
                     table.item(row, 16).setText(book_text)
                     table.item(row, 17).setText(tape_text)
                     table.item(row, 18).setText(flow_text)
+
+        # One repaint per 250 ms batch instead of one timer/render pipeline
+        # per radar. This keeps all realtime state live without competing
+        # QTableWidget rebuilds on the Qt GUI thread.
+        if hasattr(self, "move_radar"):
+            self.move_radar._render()
+        if hasattr(self, "final_radar"):
+            self.final_radar._render(resize_columns=False)
 
     def _realtime_status(self, status):
         state = str(status.get("state") or "—")
