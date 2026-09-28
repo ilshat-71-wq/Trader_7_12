@@ -161,3 +161,43 @@ def test_live_data_is_not_claimed_before_first_order_book():
     })
     diagnostics = worker._realtime_diagnostics()
     assert diagnostics["live_data_seen"] is True
+
+def test_subscription_protocol_response_is_recorded_for_diagnostics():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "SBER", "classCode": "TQBR"}],
+    )
+    worker._handle({
+        "responseType": "LastTradesSuccess",
+        "subscribeType": 0,
+        "ticker": "SBER",
+        "classCode": "TQBR",
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["subscription_debug_messages"] == [{
+        "responseType": "LastTradesSuccess",
+        "subscribeType": 0,
+        "dataType": None,
+        "ticker": "SBER",
+        "classCode": "TQBR",
+    }]
+
+
+def test_orderbook_error_response_is_recorded_with_error_payload():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "SBER", "classCode": "TQBR"}],
+    )
+    worker._handle({
+        "responseType": "OrderBook",
+        "errors": [{"code": "NO_DATE", "message": "no order book data"}],
+    })
+    diagnostics = worker._realtime_diagnostics()
+    assert diagnostics["subscription_debug_messages"] == [{
+        "responseType": "OrderBook",
+        "subscribeType": None,
+        "dataType": None,
+        "ticker": "",
+        "classCode": "",
+        "errors": [{"code": "NO_DATE", "message": "no order book data"}],
+    }]
