@@ -163,12 +163,20 @@ class RealtimeMicrostructureWorker(QObject):
 
     def _realtime_diagnostics(self):
         expected = len(self.instruments)
+        expected_set = {(item["ticker"], item["classCode"]) for item in self.instruments}
+        orderbook_accepted = set(self._subscription_accepted[0])
+        lasttrades_accepted = set(self._subscription_accepted[2])
         return {
             "instruments": expected,
+            "requested_instruments": sorted(expected_set),
             "orderbook_requested": expected if self._subscription_requested[0] else 0,
-            "orderbook_accepted": len(self._subscription_accepted[0]),
+            "orderbook_accepted": len(orderbook_accepted),
+            "orderbook_accepted_instruments": sorted(orderbook_accepted),
+            "orderbook_missing_instruments": sorted(expected_set - orderbook_accepted),
             "lasttrades_requested": expected if self._subscription_requested[2] else 0,
-            "lasttrades_accepted": len(self._subscription_accepted[2]),
+            "lasttrades_accepted": len(lasttrades_accepted),
+            "lasttrades_accepted_instruments": sorted(lasttrades_accepted),
+            "lasttrades_missing_instruments": sorted(expected_set - lasttrades_accepted),
             "orderbook_messages": self._message_counts["OrderBook"],
             "lasttrades_messages": self._message_counts["LastTrades"],
             "subscription_errors": list(self._subscription_errors[-5:]),
@@ -354,10 +362,13 @@ class RealtimeMicrostructureWorker(QObject):
                                 self._subscription_accepted[0] >= expected
                                 and self._subscription_accepted[2] >= expected
                             ):
+                                book_missing = sorted(expected - self._subscription_accepted[0])
+                                tape_missing = sorted(expected - self._subscription_accepted[2])
                                 self._last_error = (
                                     "BCS subscription acknowledgement timeout: "
                                     f"BOOK {len(self._subscription_accepted[0])}/{len(expected)}, "
-                                    f"TAPE {len(self._subscription_accepted[2])}/{len(expected)}"
+                                    f"TAPE {len(self._subscription_accepted[2])}/{len(expected)}; "
+                                    f"BOOK_MISSING={book_missing}; TAPE_MISSING={tape_missing}"
                                 )
                                 self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
                                 raise RuntimeError(self._last_error)
