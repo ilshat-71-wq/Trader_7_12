@@ -7,7 +7,7 @@
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
 **Последний функциональный commit:** `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`  
-**Текущий GitHub `main` HEAD:** `0a391565395b30b61289c20371ec2fafcb044026` — `Update passport after Final Radar realtime diagnosis`  
+**Текущий GitHub `main` HEAD:** `e0451b5d212138f365a96e6383df57091e2bc6ab` — `Clean and finalize current passport checkpoint`  
 **Последний локально подтверждённый regression suite:** `149 passed, 1 warning` (23.09.2026)  
 **Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
@@ -128,9 +128,9 @@ The checkpoint must record, when applicable:
 - important things that must not be changed.
 
 ### Current recovery checkpoint — 28.09.2026
-- GitHub `main` HEAD is `0a391565395b30b61289c20371ec2fafcb044026` — `Update passport after Final Radar realtime diagnosis`.
+- GitHub `main` HEAD is `e0451b5d212138f365a96e6383df57091e2bc6ab` — `Clean and finalize current passport checkpoint`.
 - The immediately preceding functional checkpoint remains `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`.
-- GitHub audit confirms the repository default branch is `main`; no newer commit than `0a391565395b30b61289c20371ec2fafcb044026` was present before this passport update.
+- GitHub audit confirms the repository default branch is `main`; the passport was verified again after the update and now points to the current `main` HEAD.
 - The current passport is now synchronized with the GitHub `main` HEAD created by this update. This is a GitHub-side verification only; the physical working tree on the user's iMac still requires the documented local sync check.
 - No new post-`3032bb78` local pytest, source-app live check, or macOS build result has been verified. The latest confirmed local regression remains `149 passed, 1 warning` from 23.09.2026 and must not be presented as a post-fix result.
 - Verified realtime evidence remains: BCS WS auth/connection OK; BOOK/TAPE subscriptions ACKed; real BOOK and LastTrades messages received; production Qt diagnostic BOOK ACK 8/8, TAPE ACK 8/8, BOOK messages 16, LIVE DATA SEEN true, snapshot emits 16, snapshot received 15, no errors.
