@@ -130,23 +130,14 @@ The checkpoint must record, when applicable:
 ### Current recovery checkpoint — 28.09.2026
 - GitHub `main` HEAD is `0a391565395b30b61289c20371ec2fafcb044026` — `Update passport after Final Radar realtime diagnosis`.
 - The immediately preceding functional checkpoint remains `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`.
-- GitHub audit confirms the repository default branch is `main`; no newer commit than `0a391565395b30b61289c20371ec2fafcb044026` is present at the time of this passport update.
-- The current passport itself is therefore synchronized with GitHub `main`. This is a GitHub-side verification only; the physical working tree on the user's iMac still requires the documented local `git fetch / switch / pull / status / log` check.
-- No new post-`3032bb78` local pytest, source-app live check, or macOS build result has been verified through GitHub. The latest confirmed local regression remains `149 passed, 1 warning` from 23.09.2026; it must not be presented as a post-fix regression result.
-- The verified realtime evidence remains valid: BCS WS auth/connection OK; BOOK/TAPE subscriptions ACKed; real BOOK and LastTrades messages received; production Qt diagnostic BOOK ACK 8/8, TAPE ACK 8/8, BOOK messages 16, LIVE DATA SEEN true, snapshot emits 16, snapshot received 15, no errors.
-- The source-app failure on 27.09.2026 was identified before `_start_realtime()`: `AttributeError: 'FinalRadarWidget' object has no attribute 'record_futures_scan'`. The fix is already on `main` in `3032bb78`; no additional realtime-worker or Radar-algorithm change is justified by the existing evidence.
-- Next real acceptance remains: local sync → focused/full Program tests → source-app live check → verify `[RT UI] SNAPSHOT ... OI_MATCH_ROWS=[...]` and populated BOOK/TAPE/FLOW RT → macOS build → open the single `Trader_7_12 Pro.app`.
-- Until that real acceptance, application status remains **source checkpoint ready / local acceptance pending**.
+- GitHub audit confirms the repository default branch is `main`; no newer commit than `0a391565395b30b61289c20371ec2fafcb044026` was present before this passport update.
+- The current passport is now synchronized with the GitHub `main` HEAD created by this update. This is a GitHub-side verification only; the physical working tree on the user's iMac still requires the documented local sync check.
+- No new post-`3032bb78` local pytest, source-app live check, or macOS build result has been verified. The latest confirmed local regression remains `149 passed, 1 warning` from 23.09.2026 and must not be presented as a post-fix result.
+- Verified realtime evidence remains: BCS WS auth/connection OK; BOOK/TAPE subscriptions ACKed; real BOOK and LastTrades messages received; production Qt diagnostic BOOK ACK 8/8, TAPE ACK 8/8, BOOK messages 16, LIVE DATA SEEN true, snapshot emits 16, snapshot received 15, no errors.
+- The 27.09.2026 source-app failure occurred before `_start_realtime()`: `AttributeError: 'FinalRadarWidget' object has no attribute 'record_futures_scan'`. The root cause is fixed in `3032bb78` by adding the UI forwarding method; no further realtime-worker or Radar-algorithm change is justified by the existing evidence.
+- Next real acceptance: local sync → focused/full Program tests → source-app live check → verify `[RT UI] SNAPSHOT ... OI_MATCH_ROWS=[...]` and populated BOOK/TAPE/FLOW RT → macOS build → open the single `Trader_7_12 Pro.app`.
+- Until that acceptance, application status is **source checkpoint ready / local acceptance pending**.
 - Weekend/session limitations never justify weakening Radar or Final Radar gates.
-- GitHub `main` latest commit: `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`.
-- Realtime UI diagnostic commit immediately preceding it: `d918560d1d29ae56393baad1078a4c9efbd35c52` — `Add realtime UI handoff diagnostic trace`.
-- The live canonical BCS realtime probe was confirmed on the user's iMac: WS auth/connection OK, BOOK/TAPE subscriptions ACKed, real BOOK and LastTrades messages received, no errors. This proves the BCS WebSocket data path itself is working.
-- The production Qt realtime diagnostic was also confirmed: BOOK ACK 8/8, TAPE ACK 8/8, BOOK messages 16, LIVE DATA SEEN true, snapshot emits 16, snapshot received 15, no errors. This proves the production worker can deliver realtime snapshots through the Qt path.
-- During the source-app live check on 27.09.2026, the Futures OI workflow raised `AttributeError: 'FinalRadarWidget' object has no attribute 'record_futures_scan'` in `OIWatchlistTraderWindow._oi_finished()`. This happened before `_start_realtime()`, so it explains why the UI remained `—` for BOOK/TAPE/FLOW RT in that run.
-- Root cause: `FinalRadarService.record_futures_scan()` exists, but `FinalRadarWidget` lacked the corresponding UI forwarding method. Fixed in `3032bb78` by adding `record_futures_scan(self, results, day_key=None)` → service call + render.
-- No full local pytest/build result has been claimed after `3032bb78`; the required next acceptance is local pull → focused tests/full Program suite → source-app live check → macOS build → open the single `Trader_7_12 Pro.app`.
-- Open realtime check after this fix: verify `[RT UI] SNAPSHOT ... OI_MATCH_ROWS=[...]` lines and confirm BOOK/TAPE/FLOW RT populate the OI table. Do not change the realtime worker or Radar algorithm unless the next live evidence requires it.
-- Weekend control remains data/session-limited; insufficient SPOT coverage and missing realtime confirmation are not reasons to weaken Final Radar gates.
 
 ### Standing project rule
 **A new chat starts from GitHub `main` + this passport, not from memory alone.**
