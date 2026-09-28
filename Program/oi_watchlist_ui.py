@@ -493,6 +493,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             "realtime_lasttrades_accepted_instruments": status.get("lasttrades_accepted_instruments") or [],
             "realtime_lasttrades_missing_instruments": status.get("lasttrades_missing_instruments") or [],
             "realtime_subscription_errors": status.get("subscription_errors") or [],
+            "realtime_subscription_debug_messages": status.get("subscription_debug_messages") or [],
             "realtime_last_message_at": status.get("last_message_at"),
             "realtime_last_error": status.get("last_error") or status.get("error"),
         })
@@ -589,6 +590,21 @@ class OIWatchlistTraderWindow(TraderWindow):
             lines.append("Realtime BOOK missing: " + ", ".join(f"{ticker}/{class_code}" for ticker, class_code in book_missing))
         if tape_missing:
             lines.append("Realtime TAPE missing: " + ", ".join(f"{ticker}/{class_code}" for ticker, class_code in tape_missing))
+        debug_messages = d.get("realtime_subscription_debug_messages") or []
+        if debug_messages:
+            debug_text = []
+            for message in debug_messages[-8:]:
+                response_type = message.get("responseType") or "?"
+                ticker = message.get("ticker") or ""
+                class_code = message.get("classCode") or ""
+                errors = message.get("errors")
+                item = f"{response_type}"
+                if ticker or class_code:
+                    item += f" {ticker}/{class_code}"
+                if errors:
+                    item += f" errors={errors}"
+                debug_text.append(item)
+            lines.append("Realtime protocol: " + " | ".join(debug_text))
         if d.get('realtime_last_error'):
             lines.append(f"Realtime last error: {d.get('realtime_last_error')}")
         if d.get('error'):
