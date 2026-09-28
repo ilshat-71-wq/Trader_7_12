@@ -487,6 +487,11 @@ class OIWatchlistTraderWindow(TraderWindow):
             "realtime_lasttrades_accepted": lasttrades_accepted,
             "realtime_orderbook_messages": status.get("orderbook_messages", 0),
             "realtime_lasttrades_messages": status.get("lasttrades_messages", 0),
+            "realtime_requested_instruments": status.get("requested_instruments") or [],
+            "realtime_orderbook_accepted_instruments": status.get("orderbook_accepted_instruments") or [],
+            "realtime_orderbook_missing_instruments": status.get("orderbook_missing_instruments") or [],
+            "realtime_lasttrades_accepted_instruments": status.get("lasttrades_accepted_instruments") or [],
+            "realtime_lasttrades_missing_instruments": status.get("lasttrades_missing_instruments") or [],
             "realtime_subscription_errors": status.get("subscription_errors") or [],
             "realtime_last_message_at": status.get("last_message_at"),
             "realtime_last_error": status.get("last_error") or status.get("error"),
@@ -578,6 +583,12 @@ class OIWatchlistTraderWindow(TraderWindow):
         errors = d.get('realtime_subscription_errors') or []
         if errors:
             lines.append(f"Realtime errors: {len(errors)}")
+        book_missing = d.get('realtime_orderbook_missing_instruments') or []
+        tape_missing = d.get('realtime_lasttrades_missing_instruments') or []
+        if book_missing:
+            lines.append("Realtime BOOK missing: " + ", ".join(f"{ticker}/{class_code}" for ticker, class_code in book_missing))
+        if tape_missing:
+            lines.append("Realtime TAPE missing: " + ", ".join(f"{ticker}/{class_code}" for ticker, class_code in tape_missing))
         if d.get('realtime_last_error'):
             lines.append(f"Realtime last error: {d.get('realtime_last_error')}")
         if d.get('error'):
