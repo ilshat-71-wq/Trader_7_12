@@ -292,10 +292,53 @@ class FinalRadarService:
             (int(x.get("confirmations", 0)) for x in strict),
             default=0,
         )
+        final_rows = self.final_candidates()
+
+        # Operator diagnostics only: expose the strongest current candidate
+        # and the existing gates that keep it out of FINAL. No signal logic is
+        # changed here.
+        ranked = sorted(
+            strict,
+            key=lambda x: (
+                int(x.get("confirmations", 0)),
+                self._f(x.get("item", {}).get("signal_probability")) or 0.0,
+            ),
+            reverse=True,
+        )
+        top = ranked[0] if ranked else None
+        diagnostic = {
+            "ticker": top.get("ticker") if top else None,
+            "type": top.get("instrument_type") if top else None,
+            "direction": top.get("direction") if top else None,
+            "confirmations": int(top.get("confirmations", 0)) if top else 0,
+            "rt": None,
+            "rt_count": 0,
+            "rt_block": False,
+            "futures": None,
+            "futures_block": False,
+        }
+        if top:
+            item = top.get("item") or {}
+            rt_ticker = str(
+                item.get("futures_ticker")
+                if top.get("instrument_type") == "FUTURES"
+                else item.get("spot_ticker") or top.get("ticker")
+            ).upper()
+            rt = self._realtime_state(rt_ticker)
+            diagnostic["rt"] = round(rt["average"], 1) if rt else None
+            diagnostic["rt_count"] = rt["count"] if rt else 0
+            diagnostic["rt_block"] = rt is None or rt["average"] < self.MIN_RT_SCORE
+
+            if top.get("instrument_type") == "SPOT":
+                futures = self._futures_state(top.get("ticker"), top.get("direction"))
+                diagnostic["futures"] = futures.get("state")
+                diagnostic["futures_block"] = futures.get("state") in {"CONFLICT", "NO_MATCH"}
+
         return {
             "scan_no": self._scan_no,
             "strict_candidates": len(strict),
             "max_confirmations": confirmations,
             "required_confirmations": self.MIN_CONFIRMATIONS,
-            "final_count": len(self.final_candidates()),
+            "final_count": len(final_rows),
+            "diagnostic": diagnostic,
         }
