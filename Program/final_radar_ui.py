@@ -106,7 +106,7 @@ class FinalRadarWidget(QWidget):
         except (TypeError, ValueError):
             return "—"
 
-    def _render(self):
+    def _render(self, resize_columns=True):
         self._rows = self.service.final_candidates()
         status = self.service.status()
         self.table.setRowCount(len(self._rows))
@@ -154,7 +154,8 @@ class FinalRadarWidget(QWidget):
                 cell.setBackground(QBrush(QColor("#123f2a")))
                 if col == 2:
                     cell.setForeground(QColor("#69e59a" if item.get("signal") == "LONG" else "#ff7d7d"))
-        self.table.resizeColumnsToContents()
+        if resize_columns:
+            self.table.resizeColumnsToContents()
 
     def copy_table(self):
         lines = [
@@ -180,18 +181,17 @@ class FinalRadarWidget(QWidget):
 
     def record_spot_scan(self, market_map, day_key=None):
         self.service.record_spot_scan(market_map, day_key=day_key)
-        self._render()
+        self._render(resize_columns=True)
 
     def record_futures_scan(self, results, day_key=None):
         self.service.record_futures_scan(results, day_key=day_key)
-        self._render()
+        self._render(resize_columns=True)
 
-    def update_realtime(self, snapshot):
+    def update_realtime(self, snapshot, render=True):
         self.service.update_realtime(snapshot)
-        # Realtime state is retained immediately, but FINAL RADAR is a small
-        # presentation table. Coalesce high-frequency websocket events so a
-        # burst of BOOK/TAPE/FLOW updates never rebuilds the whole table per tick.
-        if not self._realtime_render_timer.isActive():
+        # The parent window batches websocket updates. Suppress this local
+        # timer when called from that batch and repaint once after the batch.
+        if render and not self._realtime_render_timer.isActive():
             self._realtime_render_timer.start(250)
 
     def update_futures(self, results):
