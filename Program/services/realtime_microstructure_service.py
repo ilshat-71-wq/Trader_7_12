@@ -59,6 +59,7 @@ class RealtimeMicrostructureWorker(QObject):
         self._subscription_accepted = {0: set(), 2: set()}
         self._message_counts = {"OrderBook": 0, "LastTrades": 0}
         self._subscription_errors = []
+        self._subscription_debug_messages = []
         self._last_message_at = None
         self._last_error = None
         self._live_data_seen = False
@@ -180,6 +181,7 @@ class RealtimeMicrostructureWorker(QObject):
             "orderbook_messages": self._message_counts["OrderBook"],
             "lasttrades_messages": self._message_counts["LastTrades"],
             "subscription_errors": list(self._subscription_errors[-5:]),
+            "subscription_debug_messages": list(self._subscription_debug_messages[-20:]),
             "last_message_at": self._last_message_at,
             "last_error": self._last_error,
             "live_data_seen": self._live_data_seen,
@@ -190,6 +192,25 @@ class RealtimeMicrostructureWorker(QObject):
         payload.update(self._realtime_diagnostics())
         payload.update(extra)
         self.status.emit(payload)
+
+    def _record_subscription_debug(self, payload):
+        response_type = str(payload.get("responseType") or "")
+        if not response_type:
+            return
+        message = {
+            "responseType": response_type,
+            "subscribeType": payload.get("subscribeType"),
+            "dataType": payload.get("dataType"),
+            "ticker": str(payload.get("ticker") or "").upper(),
+            "classCode": str(payload.get("classCode") or "").upper(),
+        }
+        if "depth" in payload:
+            message["depth"] = payload.get("depth")
+        if payload.get("errors"):
+            message["errors"] = payload.get("errors")
+        if message not in self._subscription_debug_messages:
+            self._subscription_debug_messages.append(message)
+            self._subscription_debug_messages = self._subscription_debug_messages[-20:]
 
     def _handle_subscription_response(self, payload):
         response_type = str(payload.get("responseType") or "")
@@ -263,6 +284,11 @@ class RealtimeMicrostructureWorker(QObject):
         if not isinstance(payload, dict):
             return
         self._last_message_at = self._now().isoformat()
+        response_type = str(payload.get("responseType") or "")
+        if response_type and response_type not in {"OrderBook", "LastTrades"}:
+            self._record_subscription_debug(payload)
+        elif payload.get("errors"):
+            self._record_subscription_debug(payload)
         if self._handle_subscription_response(payload):
             return
         response_type = str(payload.get("responseType") or "")
@@ -349,6 +375,7 @@ class RealtimeMicrostructureWorker(QObject):
                     self._subscription_accepted = {0: set(), 2: set()}
                     self._message_counts = {"OrderBook": 0, "LastTrades": 0}
                     self._subscription_errors = []
+                    self._subscription_debug_messages = []
                     self._last_message_at = None
                     self._last_error = None
                     self._live_data_seen = False
