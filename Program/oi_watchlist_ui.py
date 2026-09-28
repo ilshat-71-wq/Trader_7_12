@@ -64,6 +64,9 @@ class OIWatchlistTraderWindow(TraderWindow):
         self._realtime_by_ticker = {}
         self._realtime_prepared_results = []
         self._realtime_next_retry_at = 0.0
+        self._realtime_ui_timer = QTimer(self)
+        self._realtime_ui_timer.setSingleShot(True)
+        self._realtime_ui_timer.timeout.connect(self._flush_realtime_ui)
         self._realtime_watchdog = QTimer(self)
         self._realtime_watchdog.setInterval(3000)
         self._realtime_watchdog.timeout.connect(self._realtime_watchdog_tick)
@@ -424,54 +427,51 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_thread.start()
 
     def _realtime_snapshot(self, item):
+        ticker = str(item.get("ticker") or "").upper()
+        if not ticker:
+            return
         self._realtime_next_retry_at = 0.0
-        self._realtime_by_ticker[item.get("ticker")] = item
+        self._realtime_by_ticker[ticker] = dict(item)
+        if not self._realtime_ui_timer.isActive():
+            self._realtime_ui_timer.start(250)
 
-        # Temporary production-path diagnostic: snapshot -> OI table matching.
-        ticker = str(item.get("ticker") or "").upper()
-        book = item.get("book_score")
-        tape = item.get("tape_score")
-        flow = item.get("flow_score")
-        matched_rows = []
-        for row in range(self.oi_table.rowCount()):
-            contract = self.oi_table.item(row, 2)
-            contract_text = contract.text().strip().upper() if contract else ""
-            if contract_text == ticker:
-                matched_rows.append(row)
-        print(
-            f"[RT UI] SNAPSHOT {ticker or '—'} "
-            f"BOOK={book} TAPE={tape} FLOW={flow} "
-            f"OI_MATCH_ROWS={matched_rows}"
-        )
+    def _flush_realtime_ui(self):
+        snapshots = list(self._realtime_by_ticker.values())
+        if not snapshots:
+            return
 
-        if hasattr(self, "entry_radar"):
-            self.entry_radar.update_realtime(item)
-        if hasattr(self, "move_radar"):
-            self.move_radar.update_realtime(item)
-        if hasattr(self, "final_radar"):
-            self.final_radar.update_realtime(item)
-        ticker = str(item.get("ticker") or "").upper()
-        book = item.get("book_score")
-        tape = item.get("tape_score")
-        flow = item.get("flow_score")
-        book_text = f"{book:.0f}" if book is not None else "—"
-        tape_text = f"{tape:.0f}" if tape is not None else "—"
-        flow_text = f"{flow:.0f}" if flow is not None else "—"
-        for row in range(self.oi_table.rowCount()):
-            contract = self.oi_table.item(row, 2)
-            if contract and contract.text().strip().upper() == ticker:
-                self.oi_table.item(row, 10).setText(book_text)
-                self.oi_table.item(row, 11).setText(tape_text)
-                self.oi_table.item(row, 12).setText(flow_text)
-        for table in (getattr(self, "result_table", None), getattr(self, "weak_result_table", None)):
-            if table is None:
-                continue
-            for row in range(table.rowCount()):
-                cell = table.item(row, 1)
-                if cell and cell.text().strip().upper() == ticker:
-                    table.item(row, 16).setText(book_text)
-                    table.item(row, 17).setText(tape_text)
-                    table.item(row, 18).setText(flow_text)
+        for item in snapshots:
+            if hasattr(self, "entry_radar"):
+                self.entry_radar.update_realtime(item)
+            if hasattr(self, "move_radar"):
+                self.move_radar.update_realtime(item)
+            if hasattr(self, "final_radar"):
+                self.final_radar.update_realtime(item)
+
+            ticker = str(item.get("ticker") or "").upper()
+            book = item.get("book_score")
+            tape = item.get("tape_score")
+            flow = item.get("flow_score")
+            book_text = f"{book:.0f}" if book is not None else "—"
+            tape_text = f"{tape:.0f}" if tape is not None else "—"
+            flow_text = f"{flow:.0f}" if flow is not None else "—"
+
+            for row in range(self.oi_table.rowCount()):
+                contract = self.oi_table.item(row, 2)
+                if contract and contract.text().strip().upper() == ticker:
+                    self.oi_table.item(row, 10).setText(book_text)
+                    self.oi_table.item(row, 11).setText(tape_text)
+                    self.oi_table.item(row, 12).setText(flow_text)
+
+            for table in (getattr(self, "result_table", None), getattr(self, "weak_result_table", None)):
+                if table is None:
+                    continue
+                for row in range(table.rowCount()):
+                    cell = table.item(row, 1)
+                    if cell and cell.text().strip().upper() == ticker:
+                        table.item(row, 16).setText(book_text)
+                        table.item(row, 17).setText(tape_text)
+                        table.item(row, 18).setText(flow_text)
 
     def _realtime_status(self, status):
         state = str(status.get("state") or "—")
