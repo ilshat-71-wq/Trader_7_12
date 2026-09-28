@@ -25,6 +25,9 @@ class FinalRadarWidget(QWidget):
         super().__init__(parent)
         self.service = FinalRadarService()
         self._rows = []
+        self._realtime_render_timer = QTimer(self)
+        self._realtime_render_timer.setSingleShot(True)
+        self._realtime_render_timer.timeout.connect(self._render)
         self._build()
 
     def _build(self):
@@ -185,7 +188,11 @@ class FinalRadarWidget(QWidget):
 
     def update_realtime(self, snapshot):
         self.service.update_realtime(snapshot)
-        self._render()
+        # Realtime state is retained immediately, but FINAL RADAR is a small
+        # presentation table. Coalesce high-frequency websocket events so a
+        # burst of BOOK/TAPE/FLOW updates never rebuilds the whole table per tick.
+        if not self._realtime_render_timer.isActive():
+            self._realtime_render_timer.start(250)
 
     def update_futures(self, results):
         self.service.update_futures(results)
