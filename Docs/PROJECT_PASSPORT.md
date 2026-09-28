@@ -6,10 +6,10 @@
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** 2.5.1  
 **Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`  
-**Текущий GitHub `main` HEAD:** `e0451b5d212138f365a96e6383df57091e2bc6ab` — `Clean and finalize current passport checkpoint`  
-**Последний локально подтверждённый regression suite:** `149 passed, 1 warning` (23.09.2026)  
-**Последний regression-test commit:** `42c62f446a7d28240c68123aca8fe2f57e575bf0`  
+**Последний функциональный commit:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db` — `Add Final Radar operator diagnostics`  
+**Текущий GitHub `main` HEAD:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`  
+**Последний локально подтверждённый regression suite:** `186 passed, 1 warning` (28.09.2026)  
+**Последний regression-test commit:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
 
@@ -66,27 +66,16 @@ UI-изменения не меняют scanner calculations, qualification, ran
 
 ## 0.4 New-chat recovery protocol — CANONICAL
 
-**Purpose:** a new ChatGPT chat must recover the project from GitHub and the canonical passport instead of relying on conversational memory.
+**Purpose:** a new ChatGPT chat must recover the project from GitHub and this canonical passport. Conversational memory is auxiliary only.
 
 ### Source of truth
 1. GitHub repository: `ilshat-71-wq/Trader_7_12`
 2. Working branch: `main` — the only working branch.
 3. Canonical project passport: `Docs/PROJECT_PASSPORT.md`
 4. Current code on `main` is authoritative for implementation details.
-5. ChatGPT memory/context is auxiliary only; it must never override GitHub, the passport, tests, or verified live results.
+5. Verified local tests, live checks and build output are authoritative for acceptance claims.
 
-### Mandatory new-chat sequence
-When the user says to continue Trader_7_12 in a new chat, first:
-1. Read `Docs/PROJECT_PASSPORT.md` from GitHub `main`.
-2. Check the latest commit on `main`.
-3. Compare the passport checkpoint with the latest commit and current code where the difference matters.
-4. Restore the current project state: implemented, verified, known limitations, open investigation, and next step.
-5. Do not restart the project, re-ask already documented context, invent missing implementation details, or assume that an old chat state is still current.
-6. For any uncertainty, use the sequence: **memory/context → hypothesis → GitHub/code → tests → real check**.
-7. Never report an item as verified unless the relevant code/test/live/build evidence exists.
-
-### Mandatory local synchronization after a new-chat recovery
-On the user's Mac, the project must be synchronized to the same GitHub `main` before local acceptance:
+### Mandatory local synchronization
 ```bash
 cd ~/Documents/Trader_7_12 && \
 git fetch origin && \
@@ -96,15 +85,15 @@ echo "=== SYNC CHECK ===" && \
 git status --short --branch && \
 git log -1 --oneline
 ```
-Expected state: `main` tracks `origin/main`, working tree clean, and local HEAD equals the latest GitHub `main` commit.
 
-### Mandatory acceptance sequence
-After synchronization, use the project workflow:
+Expected: `main` tracks `origin/main`, working tree clean, local HEAD equals GitHub `main`.
+
+### Mandatory project workflow
 ```
-code/change
+change
 → tests
 → real check
-→ commit to main
+→ commit main
 → update PROJECT_PASSPORT.md
 → push main
 → local pull
@@ -113,35 +102,62 @@ code/change
 → app check
 ```
 
+### Current verified checkpoint — 28.09.2026
+
+**GitHub / source**
+- Current source before this passport-only update: `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`.
+- Final Radar operator diagnostics are implemented in `Program/services/final_radar_service.py` and `Program/final_radar_ui.py`.
+- Final Radar still uses the existing three-consecutive-scan confirmation model; the diagnostics patch does not weaken or alter scoring/gates.
+- Final Radar UI header is aligned to its 11 data columns.
+- Scan animation repaint cadence is 200 ms (5 fps), commit `7999b459efa594672c888afb41d15484efe60c63`; no scanner/data/realtime semantics were changed.
+
+**Tests**
+- Local full suite after pull: `186 passed, 1 warning in 2.05s`.
+- The only warning is the Python 3.14 / pytest-asyncio deprecation warning for `asyncio.get_event_loop_policy`.
+
+**macOS application**
+- Build completed successfully from source commit `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`.
+- Bundle version: `2.4.3`.
+- Artifact: `dist/Trader_7_12 Pro.app`.
+- Signed install: `~/Applications/Trader_7_12 Pro.app`.
+- Packaging: PyInstaller onedir + macOS `.app`.
+- Signing: ad-hoc.
+- One desktop application only.
+
+**Measured GUI performance**
+- Running built app for about 11 minutes: `20.2% CPU`, `1.8% MEM`, RSS `222272 KB`.
+- Sampling still shows `QPainter::drawEllipse` as the dominant GUI paint activity, while `QTableWidgetItem/setData/setBackground` are not dominant in the captured sample.
+- Current 200 ms animation cadence is accepted; do not optimize further without new measured evidence.
+
+**Latest real market evidence**
+- Last observed live scan: 28.09.2026, EVENING, REGIME DOWN.
+- SPOT: Universe 261, Analyzed 254, Coverage 97.3%, Liquidity passed 105, D1 qualified 1, Directional qualified 0, Strict 0, Watch 20, Market map 254.
+- Futures: Contracts 8/8 OI, Money Flow was `NO_DATA` after market close, realtime subscriptions were acknowledged; one observed closed-session run showed 8 instruments with BOOK 8/8 and TAPE 8/8.
+- This closed-session Money Flow `NO_DATA` is not treated as a production failure.
+- `No diagnostics available` was observed after market close; no conclusion is drawn about Final Radar runtime until a live trading-session scan produces strict candidates/diagnostics.
+
+**Final Radar acceptance state**
+- No current strict SPOT candidate was available in the closed-session scan, so there was no `1/3`, `2/3` or `3/3` confirmation to validate.
+- Next real acceptance is during an open trading session: verify `Strict` candidates and the intended `1/3 → 2/3 → 3/3` chain, plus realtime and Futures gates.
+- Do not weaken gates because of weekend/evening/missing-data conditions.
+
 ### Passport update rule
-After every material project change, update this same canonical passport. Do not create a second project passport, replacement concept document, or parallel status MD.
+After every material project change, update this same canonical passport. Do not create a second project passport or parallel status MD.
 
-The checkpoint must record, when applicable:
-- current GitHub `main` HEAD;
-- application/scanner versions;
-- latest confirmed tests;
-- latest real/live check;
-- latest successful macOS build;
-- current architecture and data-source constraints;
-- open investigations;
-- next concrete step;
-- important things that must not be changed.
+### Important things that must not be changed without evidence
+- REAL DATA ONLY; no synthetic values, tickers, classCodes, liquidity, OI or prices.
+- No futures-as-SPOT substitution.
+- No order execution, position sizing, SL/TP execution or portfolio management.
+- Do not weaken coverage, liquidity, D1/M5, Futures OI, Money Flow, realtime or Final Radar gates merely to obtain a candidate.
+- Realtime BOOK/TAPE/FLOW RT must remain an additional confirmation layer and must not rewrite D1/M5 signal semantics.
+- Keep one coherent macOS application.
+- Any performance optimization must preserve data/scoring/realtime semantics and be measured before/after.
 
-### Current recovery checkpoint — 28.09.2026
-- GitHub `main` HEAD is `e0451b5d212138f365a96e6383df57091e2bc6ab` — `Clean and finalize current passport checkpoint`.
-- The immediately preceding functional checkpoint remains `3032bb78a6cd351f3f8e811d0133ea0e6964dde9` — `Fix Final Radar futures scan UI handoff`.
-- GitHub audit confirms the repository default branch is `main`; the passport was verified again after the update and now points to the current `main` HEAD.
-- The current passport is now synchronized with the GitHub `main` HEAD created by this update. This is a GitHub-side verification only; the physical working tree on the user's iMac still requires the documented local sync check.
-- No new post-`3032bb78` local pytest, source-app live check, or macOS build result has been verified. The latest confirmed local regression remains `149 passed, 1 warning` from 23.09.2026 and must not be presented as a post-fix result.
-- Verified realtime evidence remains: BCS WS auth/connection OK; BOOK/TAPE subscriptions ACKed; real BOOK and LastTrades messages received; production Qt diagnostic BOOK ACK 8/8, TAPE ACK 8/8, BOOK messages 16, LIVE DATA SEEN true, snapshot emits 16, snapshot received 15, no errors.
-- The 27.09.2026 source-app failure occurred before `_start_realtime()`: `AttributeError: 'FinalRadarWidget' object has no attribute 'record_futures_scan'`. The root cause is fixed in `3032bb78` by adding the UI forwarding method; no further realtime-worker or Radar-algorithm change is justified by the existing evidence.
-- Next real acceptance: local sync → focused/full Program tests → source-app live check → verify `[RT UI] SNAPSHOT ... OI_MATCH_ROWS=[...]` and populated BOOK/TAPE/FLOW RT → macOS build → open the single `Trader_7_12 Pro.app`.
-- Until that acceptance, application status is **source checkpoint ready / local acceptance pending**.
-- Weekend/session limitations never justify weakening Radar or Final Radar gates.
+### Next concrete step
+Because this passport update creates a new GitHub `main` commit, the iMac must pull that final passport commit and rebuild once more. Then the bundle source commit and the canonical passport will be aligned to the same GitHub `main` state.
 
 ### Standing project rule
 **A new chat starts from GitHub `main` + this passport, not from memory alone.**
-
 
 ## 1. Назначение
 
@@ -561,14 +577,14 @@ Required final verification:
 Code signing: ad-hoc verified
 ```
 
-The current source checkpoint is ready for local iMac synchronization. A successful build/open on the iMac is the acceptance step; do not claim it is green until the local command actually returns the verification line.
+The source checkpoint `23cf3a3` has already been built and verified locally. This passport-only commit now requires one final pull/build so the bundle source commit and canonical passport commit are synchronized.
 
 ## 18. Tests
 
-Latest confirmed local regression after realtime checkpoint:
+Latest confirmed local regression:
 
 ```text
-149 passed, 1 warning in 2.45s
+186 passed, 1 warning in 2.05s
 ```
 
 Previous confirmed local regression before the realtime checkpoint:
@@ -605,7 +621,7 @@ NO PORTFOLIO MANAGEMENT
 
 ## 20. Current priorities — STRICT ORDER
 
-### P0 — iMac application synchronization
+### P0 — Final iMac synchronization after passport commit
 - pull the current `main`;
 - build the single `Trader_7_12 Pro.app`;
 - open that same application;
