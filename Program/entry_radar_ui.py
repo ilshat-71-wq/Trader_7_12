@@ -119,8 +119,10 @@ class EntryRadarWidget(QWidget):
             if str(item.get("futures_ticker") or "").upper() == ticker:
                 item["_realtime"] = dict(snapshot)
         # Realtime is intentionally informational here; it does not overwrite
-        # the D1/OI signal or confidence.
-        self._render()
+        # the D1/OI signal or confidence. Coalesce high-frequency websocket
+        # updates so the Qt main thread does not rebuild the whole table per tick.
+        if not self._realtime_render_timer.isActive():
+            self._realtime_render_timer.start(250)
 
     def _render(self):
         rows = sorted(
