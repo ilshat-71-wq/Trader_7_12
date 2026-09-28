@@ -62,6 +62,9 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_thread = None
         self.realtime_worker = None
         self._realtime_by_ticker = {}
+        self._realtime_oi_rows = {}
+        self._realtime_result_rows = {}
+        self._realtime_weak_result_rows = {}
         self._realtime_prepared_results = []
         self._realtime_next_retry_at = 0.0
         self._realtime_ui_timer = QTimer(self)
@@ -328,6 +331,7 @@ class OIWatchlistTraderWindow(TraderWindow):
                 ),
             ])
         self.oi_table.set_rows(rows)
+        self._rebuild_realtime_row_maps()
         self._latest_oi_results = [dict(x) for x in prepared_results]
         if hasattr(self, "final_radar"):
             info = self.session_service.get_session_info()
@@ -426,6 +430,22 @@ class OIWatchlistTraderWindow(TraderWindow):
         self.realtime_thread.finished.connect(self._realtime_thread_finished)
         self.realtime_thread.start()
 
+    def _rebuild_realtime_row_maps(self):
+        def build(table, ticker_column):
+            if table is None:
+                return {}
+            mapping = {}
+            for row in range(table.rowCount()):
+                cell = table.item(row, ticker_column)
+                ticker = cell.text().strip().upper() if cell else ""
+                if ticker:
+                    mapping[ticker] = row
+            return mapping
+
+        self._realtime_oi_rows = build(self.oi_table, 2)
+        self._realtime_result_rows = build(getattr(self, "result_table", None), 1)
+        self._realtime_weak_result_rows = build(getattr(self, "weak_result_table", None), 1)
+
     def _realtime_snapshot(self, item):
         ticker = str(item.get("ticker") or "").upper()
         if not ticker:
@@ -437,6 +457,7 @@ class OIWatchlistTraderWindow(TraderWindow):
 
     def _flush_realtime_ui(self):
         snapshots = list(self._realtime_by_ticker.values())
+        self._realtime_by_ticker.clear()
         if not snapshots:
             return
 
@@ -446,7 +467,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             if hasattr(self, "move_radar"):
                 self.move_radar.update_realtime(item)
             if hasattr(self, "final_radar"):
-                self.final_radar.service.update_realtime(item)
+                self.final_radar.update_realtime(item)
 
             ticker = str(item.get("ticker") or "").upper()
             book = item.get("book_score")
@@ -456,25 +477,27 @@ class OIWatchlistTraderWindow(TraderWindow):
             tape_text = f"{tape:.0f}" if tape is not None else "—"
             flow_text = f"{flow:.0f}" if flow is not None else "—"
 
-            for row in range(self.oi_table.rowCount()):
-                contract = self.oi_table.item(row, 2)
-                if contract and contract.text().strip().upper() == ticker:
-                    self.oi_table.item(row, 10).setText(book_text)
-                    self.oi_table.item(row, 11).setText(tape_text)
-                    self.oi_table.item(row, 12).setText(flow_text)
+            row = self._realtime_oi_rows.get(ticker)
+            if row is not None:
+                self.oi_table.item(row, 10).setText(book_text)
+                self.oi_table.item(row, 11).setText(tape_text)
+                self.oi_table.item(row, 12).setText(flow_text)
 
-            for table in (getattr(self, "result_table", None), getattr(self, "weak_result_table", None)):
-                if table is None:
-                    continue
-                for row in range(table.rowCount()):
-                    cell = table.item(row, 1)
-                    if cell and cell.text().strip().upper() == ticker:
-                        table.item(row, 16).setText(book_text)
-                        table.item(row, 17).setText(tape_text)
-                        table.item(row, 18).setText(flow_text)
+            row = self._realtime_result_rows.get(ticker)
+            if row is not None:
+                table = getattr(self, "result_table", None)
+                if table is not None:
+                    table.item(row, 16).setText(book_text)
+                    table.item(row, 17).setText(tape_text)
+                    table.item(row, 18).setText(flow_text)
 
-        if hasattr(self, "final_radar"):
-            self.final_radar._render()
+            row = self._realtime_weak_result_rows.get(ticker)
+            if row is not None:
+                table = getattr(self, "weak_result_table", None)
+                if table is not None:
+                    table.item(row, 16).setText(book_text)
+                    table.item(row, 17).setText(tape_text)
+                    table.item(row, 18).setText(flow_text)
 
     def _realtime_status(self, status):
         state = str(status.get("state") or "—")
