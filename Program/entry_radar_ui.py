@@ -111,17 +111,17 @@ class EntryRadarWidget(QWidget):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
-    def update_realtime(self, snapshot):
+    def update_realtime(self, snapshot, render=True):
         ticker = str((snapshot or {}).get("ticker") or "").upper()
         if not ticker:
             return
         for item in self._rows:
             if str(item.get("futures_ticker") or "").upper() == ticker:
                 item["_realtime"] = dict(snapshot)
-        # Realtime is intentionally informational here; it does not overwrite
-        # the D1/OI signal or confidence. Coalesce high-frequency websocket
-        # updates so the Qt main thread does not rebuild the whole table per tick.
-        if not self._realtime_render_timer.isActive():
+        # Realtime is informational here and is not displayed in this table.
+        # The parent window batches websocket updates and may request a render
+        # only when this presentation actually exposes realtime state.
+        if render and not self._realtime_render_timer.isActive():
             self._realtime_render_timer.start(250)
 
     def _render(self):
