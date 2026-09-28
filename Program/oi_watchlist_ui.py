@@ -446,7 +446,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             if hasattr(self, "move_radar"):
                 self.move_radar.update_realtime(item)
             if hasattr(self, "final_radar"):
-                self.final_radar.update_realtime(item)
+                self.final_radar.service.update_realtime(item)
 
             ticker = str(item.get("ticker") or "").upper()
             book = item.get("book_score")
@@ -472,6 +472,9 @@ class OIWatchlistTraderWindow(TraderWindow):
                         table.item(row, 16).setText(book_text)
                         table.item(row, 17).setText(tape_text)
                         table.item(row, 18).setText(flow_text)
+
+        if hasattr(self, "final_radar"):
+            self.final_radar._render()
 
     def _realtime_status(self, status):
         state = str(status.get("state") or "—")
