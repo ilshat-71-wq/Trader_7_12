@@ -563,10 +563,8 @@ class TraderWindow(QWidget):
     def _rows_for_results(self, results):
         rows = []
         for idx, item in enumerate(results or [], 1):
-            role = ROLE_LABELS.get(
-                str(item.get("selection_role") or "").upper(),
-                "CONTEXT",
-            )
+            selection_role = str(item.get("selection_role") or "").upper()
+            role = ROLE_LABELS.get(selection_role, "MAP")
             if item.get("qualification_status") == "WATCH_ONLY":
                 role = "WATCH"
 
