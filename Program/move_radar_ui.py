@@ -26,6 +26,9 @@ class MoveRadarWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        self._realtime_render_timer = QTimer(self)
+        self._realtime_render_timer.setSingleShot(True)
+        self._realtime_render_timer.timeout.connect(self._render)
         self._build()
 
     def _build(self):
@@ -141,7 +144,10 @@ class MoveRadarWidget(QWidget):
         for item in self._rows:
             if str(item.get("spot_ticker") or "").upper() == ticker:
                 item["_realtime"] = dict(snapshot)
-        self._render()
+        # Coalesce high-frequency websocket updates; the realtime state is
+        # retained immediately, while the table is repainted at most 4 Hz.
+        if not self._realtime_render_timer.isActive():
+            self._realtime_render_timer.start(250)
 
     def copy_view(self):
         headers = [self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount())]
