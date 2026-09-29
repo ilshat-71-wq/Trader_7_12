@@ -61,7 +61,8 @@ def test_slot_window_matches_scheduler_capture_window():
     service = MorningRadarService("/tmp/trader_test_morning_radar_window")
     assert service.slot_for(datetime(2026, 9, 23, 7, 0, 10, tzinfo=MSK)) == "07:00"
     assert service.slot_for(datetime(2026, 9, 23, 7, 4, 59, tzinfo=MSK)) == "07:00"
-    assert service.slot_for(datetime(2026, 9, 23, 7, 5, 0, tzinfo=MSK)) is None
+    assert service.slot_for(datetime(2026, 9, 23, 7, 5, 0, tzinfo=MSK)) == "07:00"
+    assert service.slot_for(datetime(2026, 9, 23, 7, 5, 1, tzinfo=MSK)) is None
 
 
 def test_0900_handoff_builds_real_futures_shortlist(tmp_path: Path):
