@@ -133,7 +133,7 @@ class CopyableTableWidget(QTableWidget):
                 .replace(",", "")
                 .replace(" ", "")
         )
-        match = re.match(r"^[^\\d\\w]*([-+]?\\d+(?:\\.\\d+)?)", normalized)
+        match = re.match(r"^[^\d\w]*([-+]?\d+(?:\.\d+)?)", normalized)
         if match:
             try:
                 return (0, float(match.group(0)))
