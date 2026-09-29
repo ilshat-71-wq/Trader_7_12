@@ -57,6 +57,43 @@ def test_schedule_is_exact_moscow_slots():
     assert service.slot_for(datetime(2026, 9, 23, 9, 50, 10, tzinfo=MSK)) == "09:50"
 
 
+def test_slot_window_matches_scheduler_capture_window():
+    service = MorningRadarService("/tmp/trader_test_morning_radar_window")
+    assert service.slot_for(datetime(2026, 9, 23, 7, 0, 10, tzinfo=MSK)) == "07:00"
+    assert service.slot_for(datetime(2026, 9, 23, 7, 4, 59, tzinfo=MSK)) == "07:00"
+    assert service.slot_for(datetime(2026, 9, 23, 7, 5, 0, tzinfo=MSK)) is None
+
+
+def test_0900_handoff_builds_real_futures_shortlist(tmp_path: Path):
+    service = MorningRadarService(str(tmp_path / "morning_radar"))
+    first = _snapshot()
+    first["generated_at"] = "2026-09-23T07:00:10+03:00"
+    first["futures_oi"] = [{
+        "futures_ticker": "SIZ6",
+        "change_percent": 1.2,
+        "oi_analysis": {"oi_change_percent": 3.0},
+        "money_flow_delta_pct": 20.0,
+        "money_flow_liquidity_score": 80.0,
+        "money_flow_position_action": "LONG_BUILDUP",
+        "money_flow_signal": "ACCUMULATION",
+    }]
+    service.record(first, slot="07:00")
+
+    second = dict(first)
+    second["generated_at"] = "2026-09-23T09:00:10+03:00"
+    second["futures_oi"] = [dict(first["futures_oi"][0])]
+    summary = service.record(second, slot="09:00")
+    handoff = service.summary("2026-09-23")["handoff"]
+
+    assert handoff["status"] == "READY"
+    assert handoff["captured"] is True
+    assert handoff["slot"] == "09:00"
+    assert handoff["rows"][0]["futures_ticker"] == "SIZ6"
+    assert handoff["rows"][0]["morning_handoff"] is True
+    assert handoff["rows"][0]["signal"] == "LONG"
+    assert handoff["rows"][0]["signal_probability"] >= 55.0
+
+
 def test_history_derives_interest_and_countertrend_persistence(tmp_path: Path):
     service = MorningRadarService(str(tmp_path / "morning_radar"))
     t1 = datetime(2026, 9, 23, 7, 0, 10, tzinfo=MSK)
