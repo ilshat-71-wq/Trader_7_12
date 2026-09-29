@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from services.signal_probability_service import SignalProbabilityService
+
 
 class MorningRadarService:
     """Persist scheduled real-data snapshots and transparent morning deltas."""
@@ -17,9 +19,11 @@ class MorningRadarService:
         time(7, 0), time(7, 15), time(7, 30), time(8, 0),
         time(9, 0), time(9, 45), time(9, 50),
     )
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
     MAX_DAYS = 14
     MAX_COUNTERTREND = 10
+    FUTURES_SHORTLIST_LIMIT = 5
+    HANDOFF_SLOT = "09:00"
 
     def __init__(self, data_dir: str | None = None):
         root = data_dir or os.getenv(
@@ -239,11 +243,12 @@ class MorningRadarService:
 
     @classmethod
     def slot_for(cls, value: datetime | None = None) -> str | None:
+        """Return the scheduled slot whose 5-minute capture window is active."""
         value = (value or datetime.now(cls.TIMEZONE)).astimezone(cls.TIMEZONE)
-        if value.second > 20:
-            return None
         for slot in cls.SLOTS:
-            if value.hour == slot.hour and value.minute == slot.minute:
+            candidate = datetime.combine(value.date(), slot, tzinfo=cls.TIMEZONE)
+            age_seconds = (value - candidate).total_seconds()
+            if 0 <= age_seconds <= 300:
                 return slot.strftime("%H:%M")
         return None
 
@@ -256,6 +261,50 @@ class MorningRadarService:
             if candidate > value:
                 return candidate
         return datetime.combine(today + timedelta(days=1), cls.SLOTS[0], tzinfo=cls.TIMEZONE)
+
+    @classmethod
+    def _futures_handoff(cls, record: dict | None, previous: dict | None) -> list[dict]:
+        """Build the real-data futures shortlist handed to Entry Radar at 09:00."""
+        if not record:
+            return []
+        model = SignalProbabilityService()
+        previous_by_contract = {
+            str(item.get("futures_ticker") or item.get("oi_root") or "").upper(): item
+            for item in (previous or {}).get("futures_oi") or []
+            if item.get("futures_ticker") or item.get("oi_root")
+        }
+        candidates = []
+        for item in record.get("futures_oi") or []:
+            ticker = str(item.get("futures_ticker") or item.get("oi_root") or "").upper()
+            if not ticker:
+                continue
+            if item.get("change_percent") is None and not (item.get("oi_analysis") or item.get("money_flow_signal")):
+                continue
+            result = model.futures(item)
+            if result["signal"] == "NEUTRAL" or result["probability"] < 55.0:
+                continue
+            previous_item = previous_by_contract.get(ticker)
+            previous_probability = model.futures(previous_item)["probability"] if previous_item else None
+            enriched = dict(item)
+            enriched.update({
+                "signal": result["signal"],
+                "signal_probability": result["probability"],
+                "signal_probability_delta": (
+                    round(result["probability"] - previous_probability, 1)
+                    if previous_probability is not None else None
+                ),
+                "morning_handoff": True,
+                "morning_handoff_slot": record.get("slot"),
+            })
+            candidates.append(enriched)
+        candidates.sort(
+            key=lambda item: (
+                float(item.get("signal_probability") or 0.0),
+                float(item.get("signal_probability_delta") or 0.0),
+            ),
+            reverse=True,
+        )
+        return candidates[:cls.FUTURES_SHORTLIST_LIMIT]
 
     def summary(self, trading_date: str | None = None) -> dict:
         payload = self.load(trading_date)
@@ -284,6 +333,24 @@ class MorningRadarService:
             persistent.append(item)
         latest["countertrend_watch"] = persistent
 
+        handoff_record = next(
+            (record for record in reversed(snapshots) if record.get("slot") == self.HANDOFF_SLOT),
+            None,
+        )
+        handoff_index = snapshots.index(handoff_record) if handoff_record in snapshots else -1
+        handoff_previous = snapshots[handoff_index - 1] if handoff_index > 0 else None
+        handoff_rows = self._futures_handoff(handoff_record, handoff_previous)
+        handoff = {
+            "status": (
+                "READY" if handoff_record and handoff_rows
+                else "NO_VALID_CANDIDATES" if handoff_record
+                else "WAITING_FOR_09:00"
+            ),
+            "slot": self.HANDOFF_SLOT,
+            "captured": bool(handoff_record),
+            "rows": handoff_rows,
+        }
+
         return {
             "version": self.VERSION,
             "trading_date": payload.get("trading_date"),
@@ -302,4 +369,5 @@ class MorningRadarService:
             "short_watch": persistent,
             "latest": latest,
             "history": snapshots,
+            "handoff": handoff,
         }
