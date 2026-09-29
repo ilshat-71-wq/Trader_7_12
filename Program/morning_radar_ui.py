@@ -46,6 +46,8 @@ class MorningRadarWorker(QObject):
 class MorningRadarWidget(QWidget):
     """Premium compact morning history: interest + countertrend weakness."""
 
+    handoff_ready = Signal(object)
+
     CLOUD_URL_ENV = "TRADER_CLOUD_URL"
     DEFAULT_CLOUD_URL = "http://127.0.0.1:8080"
 
@@ -169,6 +171,8 @@ class MorningRadarWidget(QWidget):
         self._payload = payload or {}
         handoff = self._payload.get("handoff") or {}
         self.handoff_rows = [dict(item) for item in (handoff.get("rows") or [])]
+        if str(handoff.get("status") or "") == "READY":
+            self.handoff_ready.emit(list(self.handoff_rows))
         captured = self._payload.get("completed_slots") or []
         complete = "09:50" in captured
         self.state.setText("COMPLETE • 09:50" if complete else f"{len(captured)}/7 SLOTS")
