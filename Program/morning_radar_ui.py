@@ -54,6 +54,7 @@ class MorningRadarWidget(QWidget):
         self._thread = None
         self._worker = None
         self._payload = None
+        self.handoff_rows = []
         self.signal_probability = SignalProbabilityService()
         self._build()
 
@@ -166,6 +167,8 @@ class MorningRadarWidget(QWidget):
 
     def _finished(self, payload):
         self._payload = payload or {}
+        handoff = self._payload.get("handoff") or {}
+        self.handoff_rows = [dict(item) for item in (handoff.get("rows") or [])]
         captured = self._payload.get("completed_slots") or []
         complete = "09:50" in captured
         self.state.setText("COMPLETE • 09:50" if complete else f"{len(captured)}/7 SLOTS")
@@ -189,11 +192,12 @@ class MorningRadarWidget(QWidget):
         short_count = len(countertrend)
         persistent_short = sum(1 for x in countertrend if int(x.get("short_watch_persistence") or 0) >= 2)
         rising_interest = sum(1 for x in radar_rows if (x.get("interest") or {}).get("state") == "RISING")
+        handoff_status = str(handoff.get("status") or "WAITING_FOR_09:00")
         self.summary.setText(
             f"REGIME {regime} • IMOEX2 {benchmark if benchmark is not None else '—'}% • "
             f"INTEREST ↑ {rising_interest} • SHORT WATCH {short_count} • "
             f"PERSISTENT SHORT {persistent_short} • "
-            f"SNAPSHOTS {len(history)}.  "
+            f"SNAPSHOTS {len(history)} • HANDOFF {handoff_status}.  "
             "Interest uses changes in existing 15m/rate/acceleration fields; "
             "SHORT WATCH is a separate weakness lane, not a trade order."
         )
