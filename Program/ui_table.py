@@ -1,5 +1,7 @@
 """Reusable professional Qt tables for Trader_7_12 Pro."""
 
+import re
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
@@ -70,8 +72,31 @@ class _SortableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+RADAR_BUTTON_STYLE = """
+QPushButton {
+    background: #30383f;
+    color: #f0f2f4;
+    border: 1px solid #4a555f;
+    border-radius: 7px;
+    padding: 8px 13px;
+    min-height: 18px;
+    font-weight: 700;
+}
+QPushButton:hover {
+    background: #39434c;
+}
+QPushButton:pressed {
+    background: #2a3238;
+}
+QPushButton:disabled {
+    color: #7f8a94;
+    background: #272e34;
+    border-color: #3a434b;
+}
+"""
+
 class CopyableTableWidget(QTableWidget):
-    """Read-only Qt table with professional row-copy shortcuts and context menu."""
+    """Read-only Qt table with professional copy and reliable header sorting."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -81,6 +106,69 @@ class CopyableTableWidget(QTableWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_copy_menu)
+
+        self._sort_column = -1
+        self._sort_order = Qt.SortOrder.AscendingOrder
+        header = self.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.setHighlightSections(False)
+        header.setSortIndicatorShown(True)
+        header.sectionClicked.connect(self._sort_by_column)
+
+    @staticmethod
+    def _sort_key(item):
+        if item is None:
+            return (2, "")
+        numeric_value = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(numeric_value, (int, float)):
+            return (0, numeric_value)
+
+        text = item.text().strip()
+        if not text or text in {"—", "-"}:
+            return (2, "")
+        normalized = (
+            text.replace("−", "-")
+                .replace("₽", "")
+                .replace("%", "")
+                .replace(",", "")
+                .replace(" ", "")
+        )
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", normalized)
+        if match:
+            try:
+                return (0, float(match.group(0)))
+            except ValueError:
+                pass
+        return (1, text.casefold())
+
+    def _sort_by_column(self, column):
+        if column == self._sort_column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = column
+            self._sort_order = Qt.SortOrder.AscendingOrder
+
+        self.horizontalHeader().setSortIndicator(column, self._sort_order)
+
+        rows = []
+        for row in range(self.rowCount()):
+            cells = [self.takeItem(row, col) for col in range(self.columnCount())]
+            rows.append((self._sort_key(cells[column] if column < len(cells) else None), cells))
+
+        rows.sort(
+            key=lambda entry: entry[0],
+            reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
+        )
+
+        self.setUpdatesEnabled(False)
+        for row, (_, cells) in enumerate(rows):
+            for col, item in enumerate(cells):
+                self.setItem(row, col, item)
+        self.setUpdatesEnabled(True)
 
     def _selected_rows(self):
         return sorted({index.row() for index in self.selectedIndexes()})
