@@ -123,9 +123,9 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.session_handoff_timer = QTimer(self)
         self.session_handoff_timer.timeout.connect(self._check_session_handoff)
         self.session_handoff_timer.start(1_000)
-        # Always load the persisted morning result once on startup. After 09:00
-        # periodic refresh is stopped, but the completed morning snapshot must
-        # remain visible when the app is opened later in the day.
+        # Load the persisted morning result once on startup. The UI keeps
+        # refreshing through the 09:50 final morning slot; after that the
+        # completed morning result remains visible for the rest of the day.
         QTimer.singleShot(1200, self.morning_radar.refresh)
         QTimer.singleShot(1300, self._check_session_handoff)
 
@@ -135,7 +135,8 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _refresh_morning_if_open(self):
         now = self._moscow_time()
-        if (now.hour == 8) or (now.hour == 9 and now.minute <= 50):
+        total_minutes = now.hour * 60 + now.minute
+        if 6 * 60 + 50 <= total_minutes <= 9 * 60 + 50:
             self.morning_radar.refresh()
 
     def _apply_morning_handoff(self, rows):
