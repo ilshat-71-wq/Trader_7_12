@@ -95,6 +95,35 @@ def test_0900_handoff_builds_real_futures_shortlist(tmp_path: Path):
     assert handoff["rows"][0]["signal_probability"] >= 55.0
 
 
+def test_0900_handoff_can_contain_spot_and_futures(tmp_path: Path):
+    service = MorningRadarService(str(tmp_path / "morning_radar"))
+    first = _snapshot()
+    first["radar"][0]["liquidity_gate"] = True
+    first["generated_at"] = "2026-09-23T08:45:10+03:00"
+    first["futures_oi"] = [{
+        "futures_ticker": "SIZ6",
+        "change_percent": 1.2,
+        "oi_analysis": {"oi_change_percent": 3.0},
+        "money_flow_delta_pct": 20.0,
+        "money_flow_liquidity_score": 80.0,
+        "money_flow_position_action": "LONG_BUILDUP",
+        "money_flow_signal": "ACCUMULATION",
+    }]
+    service.record(first, slot="08:00")
+
+    second = dict(first)
+    second["generated_at"] = "2026-09-23T09:00:10+03:00"
+    second["radar"] = [dict(first["radar"][0])]
+    second["futures_oi"] = [dict(first["futures_oi"][0])]
+    service.record(second, slot="09:00")
+
+    handoff = service.summary("2026-09-23")["handoff"]
+    assert handoff["status"] == "READY"
+    assert {row["instrument_type"] for row in handoff["rows"]} == {"SPOT", "FUTURES"}
+    assert any(row.get("spot_ticker") == "ABC" for row in handoff["rows"])
+    assert any(row.get("futures_ticker") == "SIZ6" for row in handoff["rows"])
+
+
 def test_history_derives_interest_and_countertrend_persistence(tmp_path: Path):
     service = MorningRadarService(str(tmp_path / "morning_radar"))
     t1 = datetime(2026, 9, 23, 7, 0, 10, tzinfo=MSK)
