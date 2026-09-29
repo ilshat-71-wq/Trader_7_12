@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check pytest requests
+        run: python -m pip install --disable-pip-version-check pytest requests PySide6 websocket-client
 
       - name: Compile repository Python
         run: python -m compileall -q Program
