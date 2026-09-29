@@ -134,7 +134,7 @@ class EntryRadarWidget(QWidget):
             self.table.horizontalHeaderItem(i).text()
             for i in range(self.table.columnCount())
         ]
-        lines = ["ENTRY RADAR", "	".join(headers)]
+        lines = ["ENTRY RADAR", "\\t".join(headers)]
         for row in range(self.table.rowCount()):
             lines.append(
                 "	".join(
@@ -142,8 +142,7 @@ class EntryRadarWidget(QWidget):
                     for col in range(self.table.columnCount())
                 )
             )
-        QApplication.clipboard().setText("
-".join(lines))
+        QApplication.clipboard().setText("\\n".join(lines))
         self.copy_button.setText("COPIED ✓")
         QTimer.singleShot(1400, lambda: self.copy_button.setText("COPY"))
 
