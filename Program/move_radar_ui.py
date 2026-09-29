@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui_table import CopyableTableWidget
+from ui_table import CopyableTableWidget, RADAR_BUTTON_STYLE
 
 from services.move_radar_service import MoveRadarService
 
@@ -44,6 +44,8 @@ class MoveRadarWidget(QWidget):
             QHeaderView::section { background:#252c33; color:#b9c2ca; padding:7px;
                                    border:0; border-bottom:1px solid #414a52; font-weight:700; }
         """)
+
+        self.setStyleSheet(self.styleSheet() + RADAR_BUTTON_STYLE)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)

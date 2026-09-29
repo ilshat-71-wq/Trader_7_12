@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
-from ui_table import CopyableTableWidget
+from ui_table import CopyableTableWidget, RADAR_BUTTON_STYLE
 
 from services.signal_probability_service import SignalProbabilityService
 
@@ -73,6 +73,8 @@ class MorningRadarWidget(QWidget):
             QHeaderView::section { background:#252c33; color:#b9c2ca; padding:7px;
                                    border:0; border-bottom:1px solid #414a52; font-weight:700; }
         """)
+        self.setStyleSheet(self.styleSheet() + RADAR_BUTTON_STYLE)
+
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
@@ -112,9 +114,9 @@ class MorningRadarWidget(QWidget):
         watch_title = QLabel("TODAY'S WATCHLIST")
         watch_title.setStyleSheet("font-size:12px;font-weight:800;color:#e8ecef;padding-top:2px;")
         root.addWidget(watch_title)
-        self.watchlist_table = CopyableTableWidget(0, 7)
+        self.watchlist_table = CopyableTableWidget(0, 8)
         self.watchlist_table.setHorizontalHeaderLabels([
-            "#", "Instrument", "Direction", "Strength", "Interest", "Setup", "Entry"
+            "#", "Type", "Instrument", "Direction", "Strength", "Interest", "Setup", "Entry"
         ])
         self.watchlist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.watchlist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -122,7 +124,7 @@ class MorningRadarWidget(QWidget):
         self.watchlist_table.verticalHeader().setVisible(False)
         self.watchlist_table.horizontalHeader().setStretchLastSection(True)
         self.watchlist_table.setToolTip(
-            "WHO TO WATCH before the main futures session. Strength = existing futures model confidence. "
+            "WHO TO WATCH before the main session. Type separates SPOT from FUTURES. Strength = existing model confidence. "
             "Interest = change in that confidence between morning snapshots. Setup describes the current structure; "
             "Entry stays in ENTRY RADAR after the 09:00 handoff."
         )
@@ -206,35 +208,88 @@ class MorningRadarWidget(QWidget):
             "SHORT WATCH is a separate weakness lane, not a trade order."
         )
 
-        # Futures-first compact watchlist: it answers WHO is interesting
-        # before the main session. The detailed SPOT history remains below.
+        # Unified watchlist: real SPOT + real FUTURES candidates.
         latest_futures = list(latest.get("futures_oi") or [])
         previous_futures = list((history[-2] if len(history) > 1 else {}).get("futures_oi") or [])
         previous_by_contract = {
             str(x.get("futures_ticker") or x.get("oi_root") or "").upper(): x
             for x in previous_futures
         }
+
         future_rows = []
         for item in latest_futures:
             model = self.signal_probability.futures(item)
             key = str(item.get("futures_ticker") or item.get("oi_root") or "").upper()
             previous = previous_by_contract.get(key)
-            previous_prob = self.signal_probability.futures(previous)["probability"] if previous else None
+            previous_prob = (
+                self.signal_probability.futures(previous)["probability"]
+                if previous else None
+            )
             enriched = dict(item)
             enriched.update({
+                "instrument_type": "FUTURES",
                 "signal": model["signal"],
                 "signal_probability": model["probability"],
-                "signal_probability_delta": round(model["probability"] - previous_prob, 1) if previous_prob is not None else None,
+                "signal_probability_delta": (
+                    round(model["probability"] - previous_prob, 1)
+                    if previous_prob is not None else None
+                ),
             })
-            future_rows.append(enriched)
-        future_rows.sort(key=lambda x: float(x.get("signal_probability") or 0.0), reverse=True)
-        watch_rows = future_rows[:5]
+            if enriched["signal"] != "NEUTRAL" and enriched.get("signal_probability", 0) >= 55:
+                future_rows.append(enriched)
+
+        spot_rows = []
+        seen = set()
+        for item in stocks:
+            ticker = str(item.get("spot_ticker") or item.get("ticker") or "").upper()
+            signal = str(item.get("signal") or "").upper()
+            try:
+                probability = float(item.get("signal_probability"))
+            except (TypeError, ValueError):
+                probability = None
+            if (
+                not ticker or ticker in seen or signal not in {"LONG", "SHORT"}
+                or probability is None or probability < 55.0
+            ):
+                continue
+            seen.add(ticker)
+            enriched = dict(item)
+            enriched["instrument_type"] = "SPOT"
+            spot_rows.append(enriched)
+
+        future_rows.sort(
+            key=lambda x: (
+                float(x.get("signal_probability") or 0.0),
+                float(x.get("signal_probability_delta") or 0.0),
+            ),
+            reverse=True,
+        )
+        spot_rows.sort(
+            key=lambda x: float(x.get("signal_probability") or 0.0),
+            reverse=True,
+        )
+
+        watch_rows = spot_rows[:5] + future_rows[:5]
+        watch_rows.sort(
+            key=lambda x: float(x.get("signal_probability") or 0.0),
+            reverse=True,
+        )
+
         self.watchlist_table.setRowCount(len(watch_rows))
         for r, item in enumerate(watch_rows, 1):
             signal = str(item.get("signal") or "").upper()
-            direction = {"LONG": "🟢 LONG", "SHORT": "🔴 SHORT", "NEUTRAL": "⚪ NEUTRAL"}.get(signal, "⚪ —")
-            strength = f"{float(item.get('signal_probability')):.0f}" if item.get("signal_probability") is not None else "—"
+            direction = {
+                "LONG": "🟢 LONG",
+                "SHORT": "🔴 SHORT",
+                "NEUTRAL": "⚪ NEUTRAL",
+            }.get(signal, "⚪ —")
+            strength = (
+                f"{float(item.get('signal_probability')):.0f}"
+                if item.get("signal_probability") is not None else "—"
+            )
             delta = item.get("signal_probability_delta")
+            if delta is None and item.get("instrument_type") == "SPOT":
+                delta = (item.get("interest") or {}).get("probability_delta_pp")
             if delta is None:
                 interest = "NEW"
             elif float(delta) > 1.0:
@@ -243,25 +298,61 @@ class MorningRadarWidget(QWidget):
                 interest = "↓"
             else:
                 interest = "→"
+
             action = str(item.get("money_flow_position_action") or "").upper()
-            setup = "DEVELOPING" if interest == "↑" else ("WATCH" if interest in {"→", "NEW"} else "WEAKENING")
-            if action == "LONG_LIQUIDATION":
+            short_watch = bool(item.get("short_watch"))
+            if short_watch:
+                setup = "SHORT WATCH"
+            elif action == "LONG_LIQUIDATION":
                 setup = "LIQUIDATION"
             elif action == "SHORT_COVERING":
                 setup = "COVERING"
-            values = [str(r), str(item.get("futures_ticker") or item.get("oi_root") or "—"), direction, strength, interest, setup, "—"]
+            elif interest == "↑":
+                setup = "DEVELOPING"
+            elif interest == "↓":
+                setup = "WEAKENING"
+            else:
+                setup = "WATCH"
+
+            instrument_type = str(item.get("instrument_type") or "SPOT")
+            instrument = (
+                item.get("futures_ticker") or item.get("oi_root")
+                if instrument_type == "FUTURES"
+                else item.get("spot_ticker") or item.get("ticker")
+            )
+            entry = "—"
+            values = [
+                str(r), instrument_type, str(instrument or "—"), direction,
+                strength, interest, setup, entry,
+            ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter if col in (0, 2, 3, 4, 5, 6) else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                cell.setTextAlignment(
+                    Qt.AlignmentFlag.AlignCenter
+                    if col in (0, 1, 3, 4, 5, 6, 7)
+                    else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                )
                 self.watchlist_table.setItem(r - 1, col, cell)
+
             bg = QColor("#123f2a") if interest == "↑" else QColor("#252b31")
-            if setup == "LIQUIDATION":
+            if setup == "LIQUIDATION" or setup == "SHORT WATCH":
                 bg = QColor("#3a272b")
             for col in range(self.watchlist_table.columnCount()):
                 self.watchlist_table.item(r - 1, col).setBackground(bg)
-            self.watchlist_table.item(r - 1, 2).setForeground(QColor("#69e59a" if signal == "LONG" else "#ff7d7d" if signal == "SHORT" else "#c9d0d6"))
-            self.watchlist_table.item(r - 1, 3).setForeground(QColor("#e8ecef"))
-            self.watchlist_table.item(r - 1, 4).setForeground(QColor("#69e59a" if interest == "↑" else "#ff7d7d" if interest == "↓" else "#d4af55"))
+            self.watchlist_table.item(r - 1, 3).setForeground(
+                QColor(
+                    "#69e59a" if signal == "LONG"
+                    else "#ff7d7d" if signal == "SHORT"
+                    else "#c9d0d6"
+                )
+            )
+            self.watchlist_table.item(r - 1, 5).setForeground(
+                QColor(
+                    "#69e59a" if interest == "↑"
+                    else "#ff7d7d" if interest == "↓"
+                    else "#d4af55"
+                )
+            )
 
         rows = sorted(
             stocks,

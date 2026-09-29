@@ -269,30 +269,72 @@ class MorningRadarService:
         return datetime.combine(today + timedelta(days=1), cls.SLOTS[0], tzinfo=cls.TIMEZONE)
 
     @classmethod
-    def _futures_handoff(cls, record: dict | None, previous: dict | None) -> list[dict]:
-        """Build the real-data futures shortlist handed to Entry Radar at 09:00."""
+    def _entry_handoff(cls, record: dict | None, previous: dict | None) -> list[dict]:
+        """Build the real-data mixed SPOT + FUTURES shortlist handed to Entry Radar."""
         if not record:
             return []
+
         model = SignalProbabilityService()
-        previous_by_contract = {
+        previous_futures = {
             str(item.get("futures_ticker") or item.get("oi_root") or "").upper(): item
             for item in (previous or {}).get("futures_oi") or []
             if item.get("futures_ticker") or item.get("oi_root")
         }
-        candidates = []
+
+        spot_candidates = []
+        seen_spot = set()
+        spot_rows = (
+            list(record.get("countertrend_watch") or [])
+            + list(record.get("radar") or [])
+        )
+        for item in spot_rows:
+            ticker = str(item.get("spot_ticker") or item.get("ticker") or "").upper()
+            signal = str(item.get("signal") or "").upper()
+            try:
+                probability = float(item.get("signal_probability"))
+            except (TypeError, ValueError):
+                probability = None
+            if (
+                not ticker
+                or ticker in seen_spot
+                or signal not in {"LONG", "SHORT"}
+                or probability is None
+                or probability < 55.0
+                or item.get("liquidity_gate") is not True
+            ):
+                continue
+            seen_spot.add(ticker)
+            enriched = dict(item)
+            interest = item.get("interest") or {}
+            enriched.update({
+                "instrument_type": "SPOT",
+                "spot_ticker": ticker,
+                "signal_probability_delta": interest.get("probability_delta_pp"),
+                "morning_handoff": True,
+                "morning_handoff_slot": record.get("slot"),
+                "morning_source": "SPOT_RADAR",
+            })
+            spot_candidates.append(enriched)
+
+        futures_candidates = []
         for item in record.get("futures_oi") or []:
             ticker = str(item.get("futures_ticker") or item.get("oi_root") or "").upper()
             if not ticker:
                 continue
-            if item.get("change_percent") is None and not (item.get("oi_analysis") or item.get("money_flow_signal")):
+            if item.get("change_percent") is None and not (
+                item.get("oi_analysis") or item.get("money_flow_signal")
+            ):
                 continue
             result = model.futures(item)
             if result["signal"] == "NEUTRAL" or result["probability"] < 55.0:
                 continue
-            previous_item = previous_by_contract.get(ticker)
-            previous_probability = model.futures(previous_item)["probability"] if previous_item else None
+            previous_item = previous_futures.get(ticker)
+            previous_probability = (
+                model.futures(previous_item)["probability"] if previous_item else None
+            )
             enriched = dict(item)
             enriched.update({
+                "instrument_type": "FUTURES",
                 "signal": result["signal"],
                 "signal_probability": result["probability"],
                 "signal_probability_delta": (
@@ -301,8 +343,28 @@ class MorningRadarService:
                 ),
                 "morning_handoff": True,
                 "morning_handoff_slot": record.get("slot"),
+                "morning_source": "FUTURES_OI",
             })
-            candidates.append(enriched)
+            futures_candidates.append(enriched)
+
+        spot_candidates.sort(
+            key=lambda item: (
+                float(item.get("signal_probability") or 0.0),
+                float(item.get("signal_probability_delta") or 0.0),
+            ),
+            reverse=True,
+        )
+        futures_candidates.sort(
+            key=lambda item: (
+                float(item.get("signal_probability") or 0.0),
+                float(item.get("signal_probability_delta") or 0.0),
+            ),
+            reverse=True,
+        )
+
+        # Keep both markets represented in the handoff whenever real candidates
+        # exist. No synthetic match is created between SPOT and Futures.
+        candidates = spot_candidates[:5] + futures_candidates[:5]
         candidates.sort(
             key=lambda item: (
                 float(item.get("signal_probability") or 0.0),
@@ -310,7 +372,7 @@ class MorningRadarService:
             ),
             reverse=True,
         )
-        return candidates[:cls.FUTURES_SHORTLIST_LIMIT]
+        return candidates
 
     def summary(self, trading_date: str | None = None) -> dict:
         payload = self.load(trading_date)
@@ -345,7 +407,7 @@ class MorningRadarService:
         )
         handoff_index = snapshots.index(handoff_record) if handoff_record in snapshots else -1
         handoff_previous = snapshots[handoff_index - 1] if handoff_index > 0 else None
-        handoff_rows = self._futures_handoff(handoff_record, handoff_previous)
+        handoff_rows = self._entry_handoff(handoff_record, handoff_previous)
         handoff = {
             "status": (
                 "READY" if handoff_record and handoff_rows

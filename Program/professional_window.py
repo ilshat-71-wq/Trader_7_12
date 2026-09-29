@@ -112,6 +112,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
         self._configure_professional_tabs()
         self._morning_handoff_requested = False
+        self._morning_entry_rows = []
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
         self._build_move_radar_tab()
@@ -139,9 +140,44 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         if 6 * 60 + 50 <= total_minutes <= 9 * 60 + 50:
             self.morning_radar.refresh()
 
+    @staticmethod
+    def _entry_key(item):
+        instrument_type = str(
+            item.get("instrument_type")
+            or item.get("final_instrument_type")
+            or ""
+        ).upper()
+        ticker = (
+            item.get("futures_ticker") or item.get("futures_root")
+            if instrument_type == "FUTURES"
+            else item.get("spot_ticker") or item.get("ticker")
+        )
+        if not instrument_type:
+            instrument_type = "FUTURES" if item.get("futures_ticker") else "SPOT"
+        return instrument_type, str(ticker or "").upper()
+
+    def _set_entry_results(self, futures_rows=None):
+        merged = {}
+        for item in self._morning_entry_rows:
+            key = self._entry_key(item)
+            if key[1]:
+                merged[key] = dict(item)
+        for item in (futures_rows if futures_rows is not None else self._latest_oi_results):
+            key = self._entry_key(item)
+            if key[1]:
+                value = dict(item)
+                value["instrument_type"] = "FUTURES"
+                merged[key] = value
+        self.entry_radar.set_results(list(merged.values()))
+
     def _apply_morning_handoff(self, rows):
-        if rows:
-            self.entry_radar.set_results(rows)
+        self._morning_entry_rows = [dict(item) for item in (rows or [])]
+        self._set_entry_results()
+
+    def _refresh_entry_sources(self):
+        self.morning_radar.refresh()
+        if self.scanner_enabled:
+            self._start_oi_scan()
 
     def _check_session_handoff(self):
         now = self._moscow_time()
@@ -179,6 +215,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _build_entry_radar_tab(self):
         self.entry_radar = EntryRadarWidget()
+        self.entry_radar.refresh_requested.connect(self._refresh_entry_sources)
         self.market_tabs.addTab(self.entry_radar, "ENTRY RADAR")
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 2)
         for index, title in enumerate(("RADAR", "MORNING RADAR", "ENTRY RADAR", "FUTURES OI", "DIAGNOSTICS")):
@@ -301,7 +338,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _oi_finished(self, results, diagnostics):
         super()._oi_finished(results, diagnostics)
-        self.entry_radar.set_results(getattr(self, "_latest_oi_results", results) or results)
+        self._set_entry_results(self._latest_oi_results)
         self._play_completion_sound()
 
     def _oi_failed(self, error):
