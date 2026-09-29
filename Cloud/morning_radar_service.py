@@ -92,7 +92,10 @@ class MorningRadarService:
             "daily_qualified", "liquidity_gate", "qualification_status",
             "selection_role", "watch_reason",
         )
-        return {key: row.get(key) for key in keys if key in row}
+        result = {key: row.get(key) for key in keys if key in row}
+        if "spot_ticker" not in result and row.get("ticker"):
+            result["spot_ticker"] = row.get("ticker")
+        return result
 
     @classmethod
     def _compact_countertrend(cls, row: dict) -> dict:
@@ -103,7 +106,10 @@ class MorningRadarService:
             "signal", "signal_probability", "daily_relative_mean_pp",
             "daily_qualified", "liquidity_gate",
         )
-        return {key: row.get(key) for key in keys if key in row}
+        result = {key: row.get(key) for key in keys if key in row}
+        if "spot_ticker" not in result and row.get("ticker"):
+            result["spot_ticker"] = row.get("ticker")
+        return result
 
     @classmethod
     def _snapshot_record(cls, snapshot: dict, slot: str | None) -> dict:
