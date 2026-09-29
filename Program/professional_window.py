@@ -111,6 +111,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_enabled = self.settings.value("sound/enabled", True, type=bool)
         self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
         self._configure_professional_tabs()
+        self._morning_handoff_requested = False
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
         self._build_move_radar_tab()
@@ -133,17 +134,29 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         return datetime.now(ZoneInfo('Europe/Moscow'))
 
     def _refresh_morning_if_open(self):
-        if self._moscow_time().hour < 9:
+        now = self._moscow_time()
+        if (now.hour == 8) or (now.hour == 9 and now.minute <= 50):
             self.morning_radar.refresh()
 
+    def _apply_morning_handoff(self, rows):
+        if rows:
+            self.entry_radar.set_results(rows)
+
     def _check_session_handoff(self):
-        if self._moscow_time().hour < 9:
+        now = self._moscow_time()
+        if now.hour < 9:
             return
-        self.morning_radar_refresh_timer.stop()
         entry_index = self.market_tabs.indexOf(self.entry_radar)
         if entry_index >= 0:
             self.market_tabs.setCurrentIndex(entry_index)
-        self.session_handoff_timer.stop()
+        if not self._morning_handoff_requested:
+            self._morning_handoff_requested = True
+            # Force a fresh Cloud history read exactly at the main-session
+            # boundary so the 09:00 persisted snapshot can be handed off.
+            self.morning_radar.refresh()
+        if now.hour > 9 or (now.hour == 9 and now.minute > 50):
+            self.morning_radar_refresh_timer.stop()
+            self.session_handoff_timer.stop()
 
     def _configure_professional_tabs(self):
         if self.market_tabs.count() >= 3:
@@ -154,6 +167,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
 
     def _build_morning_radar_tab(self):
         self.morning_radar = MorningRadarWidget()
+        self.morning_radar.handoff_ready.connect(self._apply_morning_handoff)
         self.market_tabs.addTab(self.morning_radar, "MORNING RADAR")
         self.market_tabs.tabBar().moveTab(self.market_tabs.count() - 1, 1)
         if self.market_tabs.count() >= 4:
