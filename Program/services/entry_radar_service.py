@@ -30,7 +30,12 @@ class EntryRadarService:
                 return "WATCH"
             if not item.get("daily_qualified"):
                 return "WATCH"
-            if item.get("h1_level_context") not in {"NEAR_H1_SUPPORT", "NEAR_H1_RESISTANCE"}:
+            h1_context = str(item.get("h1_level_context") or "").upper()
+            h1_aligned = (
+                (signal == "LONG" and h1_context == "NEAR_H1_SUPPORT")
+                or (signal == "SHORT" and h1_context == "NEAR_H1_RESISTANCE")
+            )
+            if not h1_aligned:
                 return "WATCH"
             if item.get("setup_state") not in {"WATCH", "CONFIRMED"}:
                 return "WATCH"
