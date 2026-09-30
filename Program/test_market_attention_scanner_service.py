@@ -72,7 +72,7 @@ def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
 def test_strong_on_up_market_is_market_leader(monkeypatch):
     scanner = _scanner(monkeypatch, [_row("STRONG", 1.8, 2_000_000), _row("WEAK", 0.2, 1_900_000)], 0.7)
     result = scanner.scan(limit=2)
-    assert result[0]["selection_role"] == "MARKET_LEADER"
+    assert result[0]["selection_role"] == "LONG_CANDIDATE"
     assert result[0]["spot_ticker"] == "STRONG"
     assert result[0]["relative_strength"] == 1.1
 
@@ -82,8 +82,8 @@ def test_multiple_strong_instruments_on_up_market_are_long_candidates(monkeypatc
     scanner = _scanner(monkeypatch, rows, 0.7)
     result = scanner.scan(limit=3)
     assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
-    assert all(x["selection_role"] == "MARKET_LEADER" for x in result)
-    assert all(x["market_state"] == "STRONG" for x in result)
+    assert all(x["selection_role"] == "LONG_CANDIDATE" for x in result)
+    assert all(x["direction"] == "LONG" for x in result)
 
 
 def test_d1_weak_is_a_short_candidate_even_when_market_is_up(monkeypatch):
@@ -91,8 +91,8 @@ def test_d1_weak_is_a_short_candidate_even_when_market_is_up(monkeypatch):
     result = scanner.scan(limit=3)
     assert {x["spot_ticker"] for x in result} == {"STRONG", "WEAK"}
     weak = next(x for x in result if x["spot_ticker"] == "WEAK")
-    assert weak["selection_role"] == "MARKET_LAGGARD"
-    assert weak["market_state"] == "WEAK"
+    assert weak["selection_role"] == "SHORT_CANDIDATE"
+    assert weak["direction"] == "SHORT"
 
 
 def test_d1_strong_remains_long_candidate_on_down_market(monkeypatch):
@@ -101,10 +101,10 @@ def test_d1_strong_remains_long_candidate_on_down_market(monkeypatch):
     assert {x["spot_ticker"] for x in result} == {"STRONG", "WEAK"}
     strong = next(x for x in result if x["spot_ticker"] == "STRONG")
     weak = next(x for x in result if x["spot_ticker"] == "WEAK")
-    assert strong["selection_role"] == "MARKET_LEADER"
-    assert strong["market_state"] == "STRONG"
-    assert weak["selection_role"] == "MARKET_LAGGARD"
-    assert weak["market_state"] == "WEAK"
+    assert strong["selection_role"] == "LONG_CANDIDATE"
+    assert strong["direction"] == "LONG"
+    assert weak["selection_role"] == "SHORT_CANDIDATE"
+    assert weak["direction"] == "SHORT"
 
 
 def test_multiple_weak_instruments_on_down_market_are_short_candidates(monkeypatch):
@@ -112,8 +112,8 @@ def test_multiple_weak_instruments_on_down_market_are_short_candidates(monkeypat
     scanner = _scanner(monkeypatch, rows, -0.6)
     result = scanner.scan(limit=3)
     assert [x["spot_ticker"] for x in result] == ["A", "B", "C"]
-    assert all(x["selection_role"] == "MARKET_LAGGARD" for x in result)
-    assert all(x["market_state"] == "WEAK" for x in result)
+    assert all(x["selection_role"] == "SHORT_CANDIDATE" for x in result)
+    assert all(x["direction"] == "SHORT" for x in result)
 
 
 def test_d1_trend_does_not_require_large_current_relative_strength(monkeypatch):
@@ -128,8 +128,8 @@ def test_d1_direction_is_primary_over_intraday_relative_strength(monkeypatch):
     monkeypatch.setattr(scanner, "_daily_profile", lambda item, *args: _qualified_profile("LONG"))
     result = scanner.scan(limit=3)
     assert result
-    assert all(x["market_state"] == "STRONG" for x in result)
-    assert all(x["selection_role"] == "MARKET_LEADER" for x in result)
+    assert all(x["direction"] == "LONG" for x in result)
+    assert all(x["selection_role"] == "LONG_CANDIDATE" for x in result)
 
 
 def test_d1_benchmark_unavailable_creates_watch_only(monkeypatch):
@@ -197,7 +197,7 @@ def test_neutral_market_does_not_disable_d1_candidates(monkeypatch):
     assert scanner._last_scan_diagnostics["market_regime"] == "NEUTRAL"
     assert scanner._last_scan_diagnostics["strict_selected"] == len(result)
     assert scanner._last_scan_diagnostics["context_selected"] == 0
-    assert all(x["selection_role"] in {"MARKET_LEADER", "MARKET_LAGGARD"} for x in result)
+    assert all(x["selection_role"] in {"LONG_CANDIDATE", "SHORT_CANDIDATE"} for x in result)
 
 
 def test_acceleration_requires_two_complete_windows():
