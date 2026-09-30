@@ -32,6 +32,7 @@ class RealtimeMicrostructureWorker(QObject):
     WS_URL = "wss://ws.broker.ru/trade-api-market-data-connector/api/v1/market-data/ws"
     DEPTH = 20
     MAX_INSTRUMENTS = 100
+    CONNECTION_INSTRUMENTS = 50
     TRADE_WINDOW_SECONDS = 60
     EMIT_MIN_INTERVAL_SECONDS = 0.15
     RECONNECT_SECONDS = 2.0
@@ -55,6 +56,7 @@ class RealtimeMicrostructureWorker(QObject):
         self._last_emit = {}
         self._connected_at = None
         self._ws = None
+        self._ws_connections = []
         self._ws_lock = threading.Lock()
         self._subscription_requested = {0: False, 2: False}
         self._subscription_accepted = {0: set(), 2: set()}
@@ -69,8 +71,10 @@ class RealtimeMicrostructureWorker(QObject):
         self._stop_event.set()
         # Interrupt blocking recv() so Qt can shut the worker down cleanly.
         with self._ws_lock:
-            ws = self._ws
-        if ws is not None:
+            sockets = list(self._ws_connections)
+            if self._ws is not None and self._ws not in sockets:
+                sockets.append(self._ws)
+        for ws in sockets:
             try:
                 ws.close()
             except Exception:
@@ -334,9 +338,11 @@ class RealtimeMicrostructureWorker(QObject):
         self._subscription_requested[data_type] = True
 
     def _subscribe(self, ws):
-        # BCS is more reliable when the two 100-instrument subscriptions
-        # are serialized: complete BOOK acknowledgement first, then TAPE.
+        # BCS limits a market-data connection to 100 instruments total.
+        # BOOK + TAPE for 100 instruments therefore use two connections,
+        # 50 instruments per connection.
         self._subscribe_data_type(ws, 0)
+        self._subscribe_data_type(ws, 2)
 
     def run(self):
         if not self.instruments:
@@ -349,64 +355,94 @@ class RealtimeMicrostructureWorker(QObject):
             )
             self.finished.emit()
             return
+
         try:
             if not self.api.authorize():
                 self.failed.emit("BCS realtime authorization failed.")
                 self.finished.emit()
                 return
+
+            chunks = [
+                self.instruments[i:i + self.CONNECTION_INSTRUMENTS]
+                for i in range(0, len(self.instruments), self.CONNECTION_INSTRUMENTS)
+            ]
+
             while not self._stop_event.is_set():
-                ws = None
+                sockets = []
                 try:
-                    # Re-check/refresh the access token before each connection.
-                    # A stale token must never trap realtime in a reconnect loop.
+                    # Re-check/refresh the access token before each connection epoch.
                     if not self.api.authorize():
-                        raise RuntimeError("BCS realtime authorization failed during reconnect")
+                        raise RuntimeError(
+                            "BCS realtime authorization failed during reconnect"
+                        )
                     token = self.api.access_token
-                    ws = websocket.create_connection(
-                        self.WS_URL,
-                        header=[f"Authorization: Bearer {token}"],
-                        timeout=10,
-                        enable_multithread=True,
-                        sslopt={
-                            "cert_reqs": ssl.CERT_REQUIRED,
-                            "ca_certs": certifi.where(),
-                        },
-                    )
-                    ws.settimeout(1.0)
-                    with self._ws_lock:
-                        self._ws = ws
-                    self._connected_at = self._now()
+
+                    expected = {
+                        (item["ticker"], item["classCode"])
+                        for item in self.instruments
+                    }
+
                     self._subscription_requested = {0: False, 2: False}
                     self._subscription_accepted = {0: set(), 2: set()}
                     self._message_counts = {"OrderBook": 0, "LastTrades": 0}
                     self._subscription_errors = []
                     self._subscription_debug_messages = []
-                    # A reconnect starts a new live-data epoch. Never reuse old BCS data.
                     self._books.clear()
                     self._trades.clear()
                     self._last_emit.clear()
                     self._last_message_at = None
                     self._last_error = None
                     self._live_data_seen = False
-                    self._emit_realtime_status("CONNECTED", connected_at=self._connected_at.isoformat())
-                    self._subscribe(ws)
-                    expected = {(item["ticker"], item["classCode"]) for item in self.instruments}
-                    subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
-                    while not self._stop_event.is_set():
-                        if (
-                            self._subscription_requested[0]
-                            and not self._subscription_requested[2]
-                            and self._subscription_accepted[0] >= expected
-                        ):
-                            # Do not put BOOK and TAPE 100-instrument requests
-                            # back-to-back. Start TAPE only after all BOOK ACKs
-                            # have arrived from BCS.
-                            self._subscribe_data_type(ws, 2)
-                            subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
 
+                    for chunk in chunks:
+                        ws = websocket.create_connection(
+                            self.WS_URL,
+                            header=[f"Authorization: Bearer {token}"],
+                            timeout=10,
+                            enable_multithread=True,
+                            sslopt={
+                                "cert_reqs": ssl.CERT_REQUIRED,
+                                "ca_certs": certifi.where(),
+                            },
+                        )
+                        ws.settimeout(0.5)
+                        sockets.append(ws)
+
+                    with self._ws_lock:
+                        self._ws_connections = list(sockets)
+                        self._ws = sockets[0] if sockets else None
+
+                    self._connected_at = self._now()
+                    self._emit_realtime_status(
+                        "CONNECTED",
+                        connected_at=self._connected_at.isoformat(),
+                        realtime_connections=len(sockets),
+                        realtime_connection_instruments=len(chunks[0]) if chunks else 0,
+                    )
+
+                    for ws, chunk in zip(sockets, chunks):
+                        original = self.instruments
+                        self.instruments = chunk
+                        try:
+                            self._subscribe(ws)
+                        finally:
+                            self.instruments = original
+
+                    # Subscription diagnostics are global across all realtime
+                    # connections, so restore the complete instrument universe.
+                    self.instruments = original
+                    subscription_deadline = (
+                        time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
+                    )
+
+                    while not self._stop_event.is_set():
                         if time.monotonic() >= subscription_deadline:
-                            book_missing = sorted(expected - self._subscription_accepted[0])
-                            tape_missing = sorted(expected - self._subscription_accepted[2])
+                            book_missing = sorted(
+                                expected - self._subscription_accepted[0]
+                            )
+                            tape_missing = sorted(
+                                expected - self._subscription_accepted[2]
+                            )
                             self._last_error = (
                                 "BCS subscription acknowledgement timeout: "
                                 f"BOOK {len(self._subscription_accepted[0])}/{len(expected)}, "
@@ -415,27 +451,41 @@ class RealtimeMicrostructureWorker(QObject):
                             )
                             self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
                             raise RuntimeError(self._last_error)
-                        try:
-                            raw = ws.recv()
-                            if raw is None:
-                                raise RuntimeError("BCS WebSocket closed")
-                            if isinstance(raw, bytes):
-                                raw = raw.decode("utf-8", errors="replace")
-                            self._handle(json.loads(raw))
-                            if (
-                                self._subscription_requested[0]
-                                and self._subscription_requested[2]
-                                and self._subscription_accepted[0] >= expected
-                                and self._subscription_accepted[2] >= expected
-                            ):
-                                self._emit_realtime_status("SUBSCRIBED")
-                                subscription_deadline = float("inf")
-                        except Exception as exc:
-                            if self._stop_event.is_set():
-                                break
-                            if websocket is not None and isinstance(exc, websocket.WebSocketTimeoutException):
-                                continue
-                            raise
+
+                        received = False
+                        for ws in sockets:
+                            try:
+                                raw = ws.recv()
+                                if raw is None:
+                                    raise RuntimeError("BCS WebSocket closed")
+                                if isinstance(raw, bytes):
+                                    raw = raw.decode("utf-8", errors="replace")
+                                self._handle(json.loads(raw))
+                                received = True
+                            except Exception as exc:
+                                if self._stop_event.is_set():
+                                    break
+                                if websocket is not None and isinstance(
+                                    exc, websocket.WebSocketTimeoutException
+                                ):
+                                    continue
+                                raise
+
+                        if (
+                            self._subscription_requested[0]
+                            and self._subscription_requested[2]
+                            and self._subscription_accepted[0] >= expected
+                            and self._subscription_accepted[2] >= expected
+                        ):
+                            self._emit_realtime_status(
+                                "SUBSCRIBED",
+                                realtime_connections=len(sockets),
+                            )
+                            subscription_deadline = float("inf")
+
+                        if not received:
+                            time.sleep(0.02)
+
                 except Exception as exc:
                     if not self._stop_event.is_set():
                         self._last_error = f"{type(exc).__name__}: {exc}"
@@ -446,13 +496,14 @@ class RealtimeMicrostructureWorker(QObject):
                         time.sleep(self.RECONNECT_SECONDS)
                 finally:
                     with self._ws_lock:
-                        if self._ws is ws:
-                            self._ws = None
-                    if ws is not None:
+                        self._ws_connections = []
+                        self._ws = None
+                    for ws in sockets:
                         try:
                             ws.close()
                         except Exception:
                             pass
+
         finally:
             self.status.emit({"state": "STOPPED"})
             self.finished.emit()
