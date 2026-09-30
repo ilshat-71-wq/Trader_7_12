@@ -1,15 +1,15 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 28.09.2026  
+**Дата актуализации:** 01.10.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
-**Radar pipeline:** 2.5.1  
-**Futures OI scanner:** 2.7.20  
-**Последний функциональный commit:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db` — `Add Final Radar operator diagnostics`  
-**Текущий GitHub `main` HEAD:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`  
-**Последний локально подтверждённый regression suite:** `186 passed, 1 warning` (28.09.2026)  
-**Последний regression-test commit:** `23cf3a3bf3f2e14ca0704f62ba10586a039ed4db`  
+**Radar pipeline:** D1-first production chain (current implementation)  
+**Futures OI scanner:** current production implementation  
+**Последний функциональный commit:** `15273355d530b6d4f211725faf6c4a912881305f` — `Fix Radar benchmark to real IMOEX index`  
+**Текущий GitHub `main` HEAD:** `15273355d530b6d4f211725faf6c4a912881305f`  
+**Последний локально подтверждённый regression suite:** `197 passed, 1 warning` (30.09.2026)  
+**Последний regression-test commit:** `15273355d530b6d4f211725faf6c4a912881305f`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
 
@@ -62,6 +62,49 @@ d086abb5 — Fix SPOT market map diagnostics entry
 UI-изменения не меняют scanner calculations, qualification, ranking, market-map source или BCS market-data semantics.
 
 Текущая точка должна сначала пройти локальные `py_compile` / `pytest` и macOS build после синхронизации рабочей машины.
+
+
+## 0.4.1 Current verified checkpoint — 01.10.2026
+
+### Git / benchmark fix
+- GitHub `main` = `15273355d530b6d4f211725faf6c4a912881305f`.
+- Exact production fix: `BENCHMARKS = ("IMOEX", "IRUS2")`.
+- Previous incorrect production benchmark was `IMOEX2`; real BCS index catalog is `IMOEX / INDX`.
+- No new scanner or architecture was introduced.
+
+### Real BCS verification
+- BCS authorization: successful.
+- Real `IMOEX / INDX` D1 history: 28 candles returned.
+- `DailyTrendProfileService` version 2.2 was tested directly with real TQBR D1 candles and real IMOEX D1 candles.
+- Confirmed real D1 qualified examples:
+  - ARSA: LONG, 3 days, +16.56%, STRONGER, qualified=True.
+  - OZON: LONG, 3 days, +3.44%, STRONGER, qualified=True.
+  - LKOH: LONG, 3 days, +3.05%, STRONGER, qualified=True.
+  - GMKN: SHORT, 3 days, -2.09%, WEAKER, qualified=True.
+- This proves the D1 → IMOEX relative-strength qualification layer works with real BCS data.
+
+### Production Radar runtime state
+- `MarketAttentionScannerService.scan()` was tested at 01:13 MSK while `MarketSessionService` reported `CLOSED`, `market_open=False`, `session_start=None`.
+- Therefore `scan() -> []` at that time is not treated as a Radar failure.
+- The next required proof is one production scan during an open trading session, followed by H1 → M5 → M1 verification.
+- Do not manufacture an off-session scan or weaken session/data gates to obtain rows.
+
+### Realtime
+- Latest technically confirmed realtime state remains: 100 subscribed instruments, BOOK 100/100, TAPE 100/100, with BCS protocol acknowledgements.
+- Realtime remains confirmation only; it must not rewrite D1/M5 direction semantics.
+
+### Local working tree warning
+- Local iMac currently has an uncommitted change: `Program/test_daily_trend_profile_service.py`.
+- Do not commit or discard it blindly.
+- GitHub `main` itself is clean at `1527335`; resolve the local test-file change deliberately before the next local sync/build.
+
+### Required next live acceptance
+1. Open trading session.
+2. Run production `MarketAttentionScannerService.scan()`.
+3. Confirm real D1-qualified rows and their D1 directions reach production Radar.
+4. Confirm H1 alignment.
+5. Confirm M5/M1 entry chain.
+6. Run full app check only after the real production scan is verified.
 
 
 ## 0.4 New-chat recovery protocol — CANONICAL
@@ -206,7 +249,7 @@ GOLD → `GLDRUB_TOM` при наличии real BCS SPOT. USDRUB → real SPOT.
 ```text
 BASE/SPOT
 → D1 structure
-→ D1 RS vs IMOEX2
+→ D1 RS vs IMOEX
 → current M5
 → session price/change
 → session ₽×V
@@ -232,7 +275,7 @@ STRONG:
 
 WEAK — зеркально. Смешанная структура не получает STRONG/WEAK.
 
-D1 — quality/context gate; он не подменяет current relative-strength logic.
+D1 — primary directional quality gate. Current intraday RS is confirmation, not D1 direction.
 
 ## 6. Liquidity / flow
 
