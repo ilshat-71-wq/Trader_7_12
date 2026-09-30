@@ -201,3 +201,22 @@ def test_orderbook_error_response_is_recorded_with_error_payload():
         "classCode": "",
         "errors": [{"code": "NO_DATE", "message": "no order book data"}],
     }]
+
+
+
+def test_realtime_subscription_timeout_is_long_enough_for_bcs_book_ack():
+    assert RealtimeMicrostructureWorker.SUBSCRIPTION_TIMEOUT_SECONDS == 15.0
+
+
+def test_reconnect_epoch_does_not_reuse_old_book_or_trades():
+    worker = RealtimeMicrostructureWorker(
+        None,
+        [{"ticker": "SBER", "classCode": "TQBR"}],
+    )
+    worker._books["SBER"] = {"responseType": "OrderBook", "ticker": "SBER"}
+    worker._trades["SBER"].append((__import__("time").time(), "BUY", 1000, None))
+    worker._books.clear()
+    worker._trades.clear()
+    worker._last_emit.clear()
+    assert worker._books == {}
+    assert list(worker._trades["SBER"]) == []
