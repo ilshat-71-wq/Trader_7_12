@@ -76,7 +76,7 @@ class SpotFirstPullbackService:
             return []
         tz = self.history_service.MOSCOW_TZ
         start_moscow = datetime.combine(trading_date, time(0, 0), tzinfo=tz)
-        start_moscow = start_moscow.replace(day=max(1, start_moscow.day))
+        start_moscow = start_moscow - __import__("datetime").timedelta(days=self.H1_LOOKBACK_DAYS)
         start_utc = start_moscow.astimezone(timezone.utc)
         end_utc = self.history_service.now().astimezone(timezone.utc)
         candles = self.history_service.load(
