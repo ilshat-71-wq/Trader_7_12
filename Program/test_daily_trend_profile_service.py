@@ -58,7 +58,7 @@ def test_strong_structure_with_mixed_daily_rs_does_not_qualify():
     market = [candle("2026-08-28", 100, 103, 99, 102), candle("2026-08-31", 102, 104, 101, 105), candle("2026-09-01", 105, 108, 104, 108)]
     result = DailyTrendProfileService.analyze(asset, market, before_date=date(2026, 9, 2))
     assert result["structure_direction"] == "LONG"
-    assert result["relative_direction"] == "WEAKER"
+    assert result["relative_direction"] == "MIXED"
     assert result["direction"] == "NEUTRAL"
 
 
