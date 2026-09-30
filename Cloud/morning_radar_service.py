@@ -104,7 +104,8 @@ class MorningRadarService:
             "money_per_minute", "recent_money_per_minute", "recent_money",
             "money_acceleration", "attention_score", "directional_score",
             "signal", "signal_probability", "daily_relative_mean_pp",
-            "daily_qualified", "liquidity_gate",
+            "d1_trend_direction", "d1_trend_days", "d1_trend_return_percent",
+            "d1_relative_consistent", "daily_qualified", "liquidity_gate",
         )
         result = {key: row.get(key) for key in keys if key in row}
         if "spot_ticker" not in result and row.get("ticker"):
