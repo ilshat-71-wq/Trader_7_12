@@ -648,6 +648,10 @@ class MarketAttentionScannerService:
                     row["daily_relative_direction"] = profile.get("relative_direction", "UNAVAILABLE")
                     row["daily_relative_mean_pp"] = profile.get("relative_mean_pp", 0.0)
                     row["daily_qualified"] = bool(profile.get("qualified"))
+                    row["d1_trend_direction"] = profile.get("direction", "NEUTRAL")
+                    row["d1_trend_days"] = profile.get("days", 0)
+                    row["d1_trend_return_percent"] = profile.get("return_percent", 0.0)
+                    row["d1_relative_consistent"] = bool(profile.get("relative_consistent"))
         else:
             for row in results:
                 row["daily_profile"] = self._empty_daily_profile("D1_BENCHMARK_UNAVAILABLE")
@@ -656,6 +660,10 @@ class MarketAttentionScannerService:
                 row["daily_relative_direction"] = "UNAVAILABLE"
                 row["daily_relative_mean_pp"] = 0.0
                 row["daily_qualified"] = False
+                row["d1_trend_direction"] = "NEUTRAL"
+                row["d1_trend_days"] = 0
+                row["d1_trend_return_percent"] = 0.0
+                row["d1_relative_consistent"] = False
                 skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
         timings["d1"] = round(perf_counter() - phase_started, 3)
 
@@ -701,10 +709,11 @@ class MarketAttentionScannerService:
                 current_direction = "SHORT"
             else:
                 current_direction = "NEUTRAL"
+            d1_direction = str(row.get("d1_trend_direction") or "NEUTRAL").upper()
             row["intraday_direction"] = current_direction
-            row["direction"] = current_direction
+            row["direction"] = d1_direction
             row["directional_qualified"] = (
-                current_direction in {"LONG", "SHORT"}
+                d1_direction in {"LONG", "SHORT"}
                 and row.get("daily_qualified", False)
                 and row.get("liquidity_gate", False)
             )
@@ -712,10 +721,9 @@ class MarketAttentionScannerService:
         valid = [x for x in results if x.get("directional_qualified")]
         valid.sort(key=lambda x: (x["directional_score"], abs(x["relative_strength"]), x["attention_score"], x["recent_money_per_minute"]), reverse=True)
         selected = []
-        if market_regime in {"UP", "DOWN"}:
-            role = "LONG_CANDIDATE" if market_regime == "UP" else "SHORT_CANDIDATE"
-            for row in valid[:max(0, int(limit or 0))]:
-                selected.append(dict(row, selection_role=role, rank=len(selected) + 1))
+        for row in valid[:max(0, int(limit or 0))]:
+            role = "LONG_CANDIDATE" if row.get("direction") == "LONG" else "SHORT_CANDIDATE"
+            selected.append(dict(row, selection_role=role, rank=len(selected) + 1))
 
         strict_selected_count = len(selected)
 
@@ -897,8 +905,8 @@ class MarketAttentionScannerService:
             "short_candidate": next((x["spot_ticker"] for x in selected if x.get("selection_role") == "SHORT_CANDIDATE"), None),
             "group_status": {g: ("AVAILABLE" if any(x.get("market_group") == g for x in universe) else "UNAVAILABLE") for g in ("STOCK", "GOLD", "OIL", "GAS", "USDRUB")},
             "data_policy": "SPOT_BASE_ONLY_NO_FUTURES",
-            "direction_policy": "MARKET_REGIME_PLUS_CURRENT_RELATIVE_STRENGTH_PLUS_D1_QUALITY_PLUS_ABSOLUTE_LIQUIDITY",
-            "market_direction_rule": "UP_MARKET_PLUS_STRONGER_THAN_MARKET_TO_LONG; DOWN_MARKET_PLUS_WEAKER_THAN_MARKET_TO_SHORT; NEUTRAL_MARKET_NO_STRICT_DIRECTION",
+            "direction_policy": "D1_TREND_2_TO_3_COMPLETED_DAYS_PLUS_D1_RELATIVE_STRENGTH_PLUS_ABSOLUTE_LIQUIDITY; INTRADAY_RS_IS_CONFIRMATION_NOT_DIRECTION",
+            "market_direction_rule": "D1_STRONG_TO_LONG; D1_WEAK_TO_SHORT; MARKET_REGIME_DOES_NOT_OVERRIDE_D1_TREND",
             "watch_policy": "READ_ONLY_FALLBACK_WITH_SAME_MARKET_REGIME_AND_RS_DIRECTION",
             "timings_seconds": timings,
         }
