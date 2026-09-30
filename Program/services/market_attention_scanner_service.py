@@ -9,6 +9,8 @@ from services.history_candle_service import HistoryCandleService
 from services.market_session_service import MarketSessionService
 from services.daily_trend_profile_service import DailyTrendProfileService
 from services.signal_probability_service import SignalProbabilityService
+from services.spot_first_pullback_service import SpotFirstPullbackService
+from services.spot_m1_entry_service import SpotM1EntryService
 
 
 class MarketAttentionScannerService:
@@ -44,6 +46,8 @@ class MarketAttentionScannerService:
         self._last_scan_diagnostics = {}
         self.signal_probability = SignalProbabilityService()
         self._previous_signal_probabilities = {}
+        self.spot_setup = SpotFirstPullbackService(self.history, self.session)
+        self.m1_entry = SpotM1EntryService(self.history, self.session)
 
     @staticmethod
     def _f(value, default=0.0):
@@ -296,6 +300,67 @@ class MarketAttentionScannerService:
             ),
         })
         self._previous_signal_probabilities[key] = signal["probability"]
+        return result
+
+    @staticmethod
+    def _empty_entry_pipeline(reason):
+        return {
+            "h1_support": 0.0,
+            "h1_resistance": 0.0,
+            "h1_nearest_level": 0.0,
+            "h1_nearest_level_type": "NONE",
+            "h1_level_distance_percent": 0.0,
+            "h1_level_context": "UNAVAILABLE",
+            "h1_candle_count": 0,
+            "h1_level_bonus": 0.0,
+            "setup": "NONE",
+            "setup_direction": "NONE",
+            "setup_state": "WAIT",
+            "setup_phase": reason,
+            "setup_quality_score": 0.0,
+            "entry_trigger": 0.0,
+            "setup_candle_count": 0,
+            "m1_entry_state": "UNAVAILABLE",
+            "m1_volume_state": "UNAVAILABLE",
+            "m1_volume_ratio": 0.0,
+            "m1_entry_triggered": False,
+            "m1_candle_count": 0,
+        }
+
+    def _analyze_entry_pipeline(self, row, trading_date, session_name, now):
+        direction = str(row.get("daily_profile", {}).get("direction") or row.get("daily_structure") or "").upper()
+        if direction not in {"LONG", "SHORT"}:
+            return self._empty_entry_pipeline("NO_D1_DIRECTION")
+        ticker = row["spot_ticker"]
+        class_code = row["spot_class_code"]
+        setup = self.spot_setup.analyze(
+            ticker,
+            class_code,
+            direction=direction,
+            session=session_name,
+            trading_date=trading_date,
+            spot_price=row.get("price"),
+        )
+        result = dict(setup)
+        trigger = self._f(setup.get("entry_trigger"))
+        if trigger > 0 and setup.get("setup_state") in {"WATCH", "CONFIRMED"}:
+            m1 = self.m1_entry.analyze(
+                ticker,
+                class_code,
+                direction=direction,
+                entry_trigger=trigger,
+                trading_date=trading_date,
+                session=session_name,
+                now=now,
+            )
+        else:
+            m1 = self.m1_entry.empty("M5_SETUP_NOT_READY")
+        result.update(m1)
+        result["pipeline_ready"] = bool(
+            setup.get("h1_level_context") in {"NEAR_H1_SUPPORT", "NEAR_H1_RESISTANCE"}
+            and setup.get("setup_state") in {"WATCH", "CONFIRMED"}
+            and m1.get("m1_entry_state") in {"ARMED", "CONFIRMED"}
+        )
         return result
 
     def _quote_session_return(self, ticker, class_code, now):
@@ -593,6 +658,31 @@ class MarketAttentionScannerService:
                 row["daily_qualified"] = False
                 skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
         timings["d1"] = round(perf_counter() - phase_started, 3)
+
+        # Canonical SPOT pipeline after D1 qualification:
+        # D1 trend -> H1 structural level -> M5 setup -> M1 volume trigger.
+        # Only real, liquid D1 candidates enter this narrower pipeline.
+        phase_started = perf_counter()
+        setup_candidates = [
+            row for row in results
+            if row.get("daily_qualified") and row.get("liquidity_gate")
+        ]
+        setup_workers = min(self.MAX_WORKERS, max(1, len(setup_candidates)))
+        with ThreadPoolExecutor(max_workers=setup_workers, thread_name_prefix="attention-setup") as pool:
+            future_items = {
+                pool.submit(self._analyze_entry_pipeline, row, trading_date, session_name, now): row
+                for row in setup_candidates
+            }
+            for future in as_completed(future_items):
+                row = future_items[future]
+                try:
+                    row.update(future.result())
+                except Exception:
+                    row.update(self._empty_entry_pipeline("SETUP_ERROR"))
+        for row in results:
+            if row not in setup_candidates:
+                row.update(self._empty_entry_pipeline("D1_NOT_QUALIFIED"))
+        timings["entry_pipeline"] = round(perf_counter() - phase_started, 3)
 
         phase_started = perf_counter()
         rs_magnitudes = [abs(self._f(x.get("relative_strength"))) for x in results]
