@@ -303,6 +303,10 @@ class MorningRadarWidget(QWidget):
             short_watch = bool(item.get("short_watch"))
             if short_watch:
                 setup = "SHORT WATCH"
+            elif str(item.get("instrument_type") or "").upper() == "SPOT":
+                h1 = str(item.get("h1_level_context") or "UNAVAILABLE")
+                m5 = str(item.get("setup_state") or "WAIT")
+                setup = f"{h1.replace('NEAR_H1_', 'H1_')} • M5 {m5}"
             elif action == "LONG_LIQUIDATION":
                 setup = "LIQUIDATION"
             elif action == "SHORT_COVERING":

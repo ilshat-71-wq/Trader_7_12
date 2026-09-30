@@ -113,6 +113,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self._configure_professional_tabs()
         self._morning_handoff_requested = False
         self._morning_entry_rows = []
+        self._spot_entry_rows = []
         self._build_morning_radar_tab()
         self._build_entry_radar_tab()
         self._build_move_radar_tab()
@@ -159,6 +160,10 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
     def _set_entry_results(self, futures_rows=None):
         merged = {}
         for item in self._morning_entry_rows:
+            key = self._entry_key(item)
+            if key[1]:
+                merged[key] = dict(item)
+        for item in self._spot_entry_rows:
             key = self._entry_key(item)
             if key[1]:
                 merged[key] = dict(item)
@@ -329,10 +334,19 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         QTimer.singleShot(300, self.sound.play)
 
     def _scan_finished(self, results, diagnostics):
-        # Radar/SPOT finished. OIWatchlistTraderWindow starts Futures OI here.
-        # Do not play the completion sound yet: the full workflow is still running.
+        # Radar/SPOT finished. Keep the live D1->H1->M5->M1 candidates in
+        # Entry Radar; Futures OI is merged later by _oi_finished().
         self._stop_scan_sound()
         super()._scan_finished(results, diagnostics)
+        market_map = diagnostics.get("market_map") if isinstance(diagnostics, dict) else None
+        self._spot_entry_rows = []
+        for item in (market_map if isinstance(market_map, list) else results or []):
+            if item.get("daily_qualified") and item.get("liquidity_gate"):
+                row = dict(item)
+                row["instrument_type"] = "SPOT"
+                row["signal"] = row.get("d1_trend_direction") or row.get("direction") or "NEUTRAL"
+                self._spot_entry_rows.append(row)
+        self._set_entry_results()
         if self.oi_thread is None or not self.oi_thread.isRunning():
             self._play_completion_sound()
 
