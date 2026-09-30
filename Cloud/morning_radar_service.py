@@ -294,12 +294,12 @@ class MorningRadarService:
                 probability = float(item.get("signal_probability"))
             except (TypeError, ValueError):
                 probability = None
+            d1_direction = str(item.get("d1_trend_direction") or "").upper()
             if (
                 not ticker
                 or ticker in seen_spot
-                or signal not in {"LONG", "SHORT"}
-                or probability is None
-                or probability < 55.0
+                or d1_direction not in {"LONG", "SHORT"}
+                or item.get("daily_qualified") is not True
                 or item.get("liquidity_gate") is not True
             ):
                 continue
@@ -309,6 +309,8 @@ class MorningRadarService:
             enriched.update({
                 "instrument_type": "SPOT",
                 "spot_ticker": ticker,
+                "signal": d1_direction,
+                "trend_direction": d1_direction,
                 "signal_probability_delta": interest.get("probability_delta_pp"),
                 "morning_handoff": True,
                 "morning_handoff_slot": record.get("slot"),
