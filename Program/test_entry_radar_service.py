@@ -23,3 +23,29 @@ def test_entry_radar_states_match_design():
 
 def test_entry_radar_requires_zone():
     assert EntryRadarService.state(item(85, low=None, high=None)) == "WATCH"
+
+
+def spot_item(m1_state, triggered=True, setup_state="WATCH", h1="NEAR_H1_SUPPORT"):
+    return {
+        "instrument_type": "SPOT",
+        "spot_ticker": "SBER",
+        "signal": "LONG",
+        "signal_probability": 88.0,
+        "daily_qualified": True,
+        "h1_level_context": h1,
+        "setup_state": setup_state,
+        "m1_entry_state": m1_state,
+        "m1_entry_triggered": triggered,
+    }
+
+
+def test_spot_entry_uses_d1_h1_m5_m1_pipeline():
+    assert EntryRadarService.state(spot_item("CONFIRMED")) == "ENTER"
+    assert EntryRadarService.state(spot_item("ARMED", triggered=False)) == "WAIT"
+    assert EntryRadarService.state(spot_item("WAIT")) == "WATCH"
+
+
+def test_spot_entry_never_uses_synthetic_zone():
+    item = spot_item("CONFIRMED")
+    assert "money_flow_zone_low" not in item
+    assert EntryRadarService.state(item) == "ENTER"
