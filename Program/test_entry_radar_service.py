@@ -49,3 +49,8 @@ def test_spot_entry_never_uses_synthetic_zone():
     item = spot_item("CONFIRMED")
     assert "money_flow_zone_low" not in item
     assert EntryRadarService.state(item) == "ENTER"
+
+
+def test_spot_entry_requires_directionally_aligned_h1_level():
+    assert EntryRadarService.state(spot_item("CONFIRMED", h1="NEAR_H1_RESISTANCE")) == "WATCH"
+    assert EntryRadarService.state(spot_item("CONFIRMED", signal="SHORT", h1="NEAR_H1_RESISTANCE")) == "ENTER"
