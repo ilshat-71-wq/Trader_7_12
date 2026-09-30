@@ -678,8 +678,9 @@ class TraderWindow(QWidget):
         )
 
         # The SPOT tabs are a market map, not a copy of the selected radar.
-        # Keep realtime bounded to the strongest current relative-strength rows
-        # from the same market map, rather than subscribing to the full universe.
+        # Keep realtime within the single-connection BCS market-data limit:
+        # 92 SPOT + up to 8 active Futures = up to 100 instruments.
+        # Prioritize current Move Radar candidates, then strongest absolute move.
         raw_market_map = diagnostics.get("market_map")
         market_map = (
             raw_market_map
@@ -714,7 +715,7 @@ class TraderWindow(QWidget):
                     abs(entry[0]),
                 ),
                 reverse=True,
-            )[:30]
+            )[:92]
         ]
 
         # STRONGER/WEAKER are an independent relative-strength market map.
