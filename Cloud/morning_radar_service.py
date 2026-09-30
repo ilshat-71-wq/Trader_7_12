@@ -85,6 +85,8 @@ class MorningRadarService:
     def _compact_row(cls, row: dict) -> dict:
         keys = (
             "spot_ticker", "change_percent", "relative_strength",
+            "d1_trend_direction", "d1_trend_days", "d1_trend_return_percent",
+            "d1_relative_consistent", "daily_qualified",
             "money_per_minute", "recent_money_per_minute", "recent_money",
             "session_money", "money_acceleration", "attention_score",
             "directional_score", "signal", "signal_probability",
