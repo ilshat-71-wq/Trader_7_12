@@ -25,11 +25,11 @@ def test_entry_radar_requires_zone():
     assert EntryRadarService.state(item(85, low=None, high=None)) == "WATCH"
 
 
-def spot_item(m1_state, triggered=True, setup_state="WATCH", h1="NEAR_H1_SUPPORT"):
+def spot_item(m1_state, triggered=True, setup_state="WATCH", h1="NEAR_H1_SUPPORT", signal="LONG"):
     return {
         "instrument_type": "SPOT",
         "spot_ticker": "SBER",
-        "signal": "LONG",
+        "signal": signal,
         "signal_probability": 88.0,
         "daily_qualified": True,
         "h1_level_context": h1,
