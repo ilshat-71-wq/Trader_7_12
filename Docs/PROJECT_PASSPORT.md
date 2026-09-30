@@ -7,7 +7,7 @@
 **Radar pipeline:** D1-first production chain (current implementation)  
 **Futures OI scanner:** current production implementation  
 **Последний функциональный commit:** `15273355d530b6d4f211725faf6c4a912881305f` — `Fix Radar benchmark to real IMOEX index`  
-**Текущий GitHub `main` HEAD:** `15273355d530b6d4f211725faf6c4a912881305f`  
+**Текущий GitHub `main` HEAD:** `97e874f3c71b47745ecfac54c811c5e8bf9bf31d`  
 **Последний локально подтверждённый regression suite:** `197 passed, 1 warning` (30.09.2026)  
 **Последний regression-test commit:** `15273355d530b6d4f211725faf6c4a912881305f`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
