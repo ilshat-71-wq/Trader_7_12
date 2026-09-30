@@ -1,8 +1,9 @@
 """Trader_7_12 Pro — canonical completed-D1 trend profile.
 
 The scanner's directional idea starts on the daily timeframe. This service
-measures the last 2–3 completed daily candles and deliberately avoids any
-futures data or trading decisions.
+measures the last 2–3 completed daily candles, allowing a persistent directional
+bias without requiring every candle to be a perfect trend bar. It deliberately
+avoids any futures data or trading decisions.
 """
 
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo
 class DailyTrendProfileService:
     """Deterministic, network-free analysis of completed daily candles."""
 
-    VERSION = "2.1"
+    VERSION = "2.2"
     MIN_DAYS = 2
     MAX_DAYS = 3
     ATR_PERIOD = 14
@@ -101,8 +102,18 @@ class DailyTrendProfileService:
         falling_highs = all(a > b for a, b in zip(highs, highs[1:]))
         falling_lows = all(a > b for a, b in zip(lows, lows[1:]))
         return_percent = (closes[-1] / closes[0] - 1.0) * 100.0
-        strong = green_days == len(selected) and rising_highs and rising_lows
-        weak = red_days == len(selected) and falling_highs and falling_lows
+        directional_up_days = green_days
+        directional_down_days = red_days
+        strong = (
+            directional_up_days >= 2
+            and return_percent > 0
+            and (rising_highs or rising_lows)
+        )
+        weak = (
+            directional_down_days >= 2
+            and return_percent < 0
+            and (falling_highs or falling_lows)
+        )
         direction = "LONG" if strong else "SHORT" if weak else "NEUTRAL"
         state = "STRONG_STRUCTURE" if strong else "WEAK_STRUCTURE" if weak else "MIXED"
         return {"state": state, "direction": direction, "days": len(selected), "green_days": green_days,
@@ -199,9 +210,16 @@ class DailyTrendProfileService:
         if daily_relative:
             values = [x["relative_strength"] for x in daily_relative]
             relative_mean = sum(values) / len(values)
-            relative_consistent = all(x > 0 for x in values) or all(x < 0 for x in values)
-            if relative_consistent:
-                relative_direction = "STRONGER" if all(x > 0 for x in values) else "WEAKER"
+            positive_days = sum(1 for x in values if x > 0)
+            negative_days = sum(1 for x in values if x < 0)
+            relative_consistent = (
+                positive_days > negative_days
+                or negative_days > positive_days
+            )
+            if positive_days > negative_days and relative_mean > 0:
+                relative_direction = "STRONGER"
+            elif negative_days > positive_days and relative_mean < 0:
+                relative_direction = "WEAKER"
             else:
                 relative_direction = "MIXED"
 
