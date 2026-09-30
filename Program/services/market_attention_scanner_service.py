@@ -30,7 +30,7 @@ class MarketAttentionScannerService:
     SCAN_START = time(6, 50)
     PREFERRED_START = time(9, 50)
     PREFERRED_END = time(13, 0)
-    BENCHMARKS = ("IMOEX2", "IRUS2")
+    BENCHMARKS = ("IMOEX", "IRUS2")
     MACRO_ALIASES = {
         "GOLD": ("GLDRUB_TOM",),
         "USDRUB": ("USDRUB_TOM", "USDRUB_TOD", "USD000UTSTOM"),
