@@ -396,7 +396,7 @@ class OIWatchlistTraderWindow(TraderWindow):
             if ticker and class_code and (ticker, class_code) not in seen:
                 instruments.append({"ticker": ticker, "classCode": class_code})
                 seen.add((ticker, class_code))
-        for item in getattr(self, "_spot_results_for_realtime", [])[:10]:
+        for item in getattr(self, "_spot_results_for_realtime", [])[:92]:
             ticker = str(item.get("spot_ticker") or "").upper()
             class_code = str(item.get("spot_class_code") or item.get("class_code") or "TQBR").upper()
             if ticker and class_code and (ticker, class_code) not in seen:
@@ -412,7 +412,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         self._realtime_next_retry_at = time.monotonic() + 10.0
         self._oi_diagnostics.update({
             "realtime_source": "BCS_WEBSOCKET_MARKET_DATA",
-            "realtime_policy": "READ_ONLY_REALTIME_BOOK_TAPE; TOP_SPOT_10_PLUS_ACTIVE_FUTURES",
+            "realtime_policy": "READ_ONLY_REALTIME_BOOK_TAPE; TOP_SPOT_92_PLUS_ACTIVE_FUTURES; MAX_100_PER_WS",
             "realtime_subscriptions": len(instruments),
         })
         self._append_oi_diagnostics()
