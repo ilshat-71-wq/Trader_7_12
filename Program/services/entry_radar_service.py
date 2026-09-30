@@ -22,6 +22,25 @@ class EntryRadarService:
         zone_high = item.get("money_flow_zone_high")
         has_zone = zone_low is not None and zone_high is not None
 
+        # SPOT follows the real D1 -> H1 -> M5 -> M1 pipeline.
+        # A synthetic money-flow zone is never required or created for SPOT.
+        is_spot = str(item.get("instrument_type") or "").upper() == "SPOT" or bool(item.get("spot_ticker"))
+        if is_spot:
+            if signal not in {"LONG", "SHORT"} or probability is None:
+                return "WATCH"
+            if not item.get("daily_qualified"):
+                return "WATCH"
+            if item.get("h1_level_context") not in {"NEAR_H1_SUPPORT", "NEAR_H1_RESISTANCE"}:
+                return "WATCH"
+            if item.get("setup_state") not in {"WATCH", "CONFIRMED"}:
+                return "WATCH"
+            m1_state = str(item.get("m1_entry_state") or "UNAVAILABLE").upper()
+            if m1_state == "CONFIRMED" and item.get("m1_entry_triggered"):
+                return "ENTER"
+            if m1_state == "ARMED":
+                return "WAIT"
+            return "WATCH"
+
         if not signal or signal == "NEUTRAL" or probability is None:
             return "WATCH"
         if action == "LONG_LIQUIDATION" or action == "SHORT_COVERING" and signal == "SHORT":
