@@ -35,7 +35,8 @@ class RealtimeMicrostructureWorker(QObject):
     TRADE_WINDOW_SECONDS = 60
     EMIT_MIN_INTERVAL_SECONDS = 0.15
     RECONNECT_SECONDS = 2.0
-    SUBSCRIPTION_TIMEOUT_SECONDS = 5.0
+    SUBSCRIPTION_TIMEOUT_SECONDS = 15.0
+    SUBSCRIPTION_PACING_SECONDS = 0.15
 
     def __init__(self, api, instruments):
         super().__init__()
@@ -332,6 +333,8 @@ class RealtimeMicrostructureWorker(QObject):
                 message["depth"] = self.DEPTH
             ws.send(json.dumps(message))
             self._subscription_requested[data_type] = True
+            if data_type == 0:
+                time.sleep(self.SUBSCRIPTION_PACING_SECONDS)
 
     def run(self):
         if not self.instruments:
@@ -376,6 +379,10 @@ class RealtimeMicrostructureWorker(QObject):
                     self._message_counts = {"OrderBook": 0, "LastTrades": 0}
                     self._subscription_errors = []
                     self._subscription_debug_messages = []
+                    # A reconnect starts a new live-data epoch. Never reuse old BCS data.
+                    self._books.clear()
+                    self._trades.clear()
+                    self._last_emit.clear()
                     self._last_message_at = None
                     self._last_error = None
                     self._live_data_seen = False
