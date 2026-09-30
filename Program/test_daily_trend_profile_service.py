@@ -27,11 +27,30 @@ def test_three_red_falling_structure_and_daily_underperformance_is_short():
 
 
 def test_mixed_candles_do_not_qualify():
-    asset = [candle("2026-08-28", 100, 104, 99, 103), candle("2026-08-31", 103, 107, 102, 102), candle("2026-09-01", 102, 110, 101, 109)]
+    asset = [candle("2026-08-28", 100, 104, 99, 103), candle("2026-08-31", 103, 107, 102, 102), candle("2026-09-01", 102, 106, 101, 105)]
     market = [candle("2026-08-28", 100, 103, 99, 102), candle("2026-08-31", 102, 104, 101, 103), candle("2026-09-01", 103, 105, 102, 104)]
     result = DailyTrendProfileService.analyze(asset, market, before_date=date(2026, 9, 2))
     assert result["direction"] == "NEUTRAL"
     assert result["qualified"] is False
+
+
+def test_two_of_three_directional_days_with_one_rising_structure_side_can_qualify():
+    asset = [
+        candle("2026-08-28", 100, 104, 99, 103),
+        candle("2026-08-31", 103, 107, 101, 102),
+        candle("2026-09-01", 102, 110, 102, 109),
+    ]
+    market = [
+        candle("2026-08-28", 100, 103, 99, 102),
+        candle("2026-08-31", 102, 104, 101, 103),
+        candle("2026-09-01", 103, 105, 102, 104),
+    ]
+    result = DailyTrendProfileService.analyze(asset, market, before_date=date(2026, 9, 2))
+    assert result["structure_direction"] == "LONG"
+    assert result["green_days"] == 2
+    assert result["rising_highs"] is True
+    assert result["direction"] == "LONG"
+    assert result["relative_direction"] == "STRONGER"
 
 
 def test_strong_structure_with_mixed_daily_rs_does_not_qualify():
@@ -39,7 +58,7 @@ def test_strong_structure_with_mixed_daily_rs_does_not_qualify():
     market = [candle("2026-08-28", 100, 103, 99, 102), candle("2026-08-31", 102, 104, 101, 105), candle("2026-09-01", 105, 108, 104, 108)]
     result = DailyTrendProfileService.analyze(asset, market, before_date=date(2026, 9, 2))
     assert result["structure_direction"] == "LONG"
-    assert result["relative_direction"] == "MIXED"
+    assert result["relative_direction"] == "WEAKER"
     assert result["direction"] == "NEUTRAL"
 
 
