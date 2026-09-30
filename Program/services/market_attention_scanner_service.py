@@ -356,8 +356,13 @@ class MarketAttentionScannerService:
         else:
             m1 = self.m1_entry.empty("M5_SETUP_NOT_READY")
         result.update(m1)
+        h1_context = str(setup.get("h1_level_context") or "").upper()
+        h1_aligned = (
+            (direction == "LONG" and h1_context == "NEAR_H1_SUPPORT")
+            or (direction == "SHORT" and h1_context == "NEAR_H1_RESISTANCE")
+        )
         result["pipeline_ready"] = bool(
-            setup.get("h1_level_context") in {"NEAR_H1_SUPPORT", "NEAR_H1_RESISTANCE"}
+            h1_aligned
             and setup.get("setup_state") in {"WATCH", "CONFIRMED"}
             and m1.get("m1_entry_state") in {"ARMED", "CONFIRMED"}
         )
