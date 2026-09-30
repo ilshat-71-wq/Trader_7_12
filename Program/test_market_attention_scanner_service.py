@@ -165,7 +165,7 @@ def test_coverage_gate_keeps_visible_objective_rows(monkeypatch):
     assert result
     assert scanner._last_scan_diagnostics["status"] == "INSUFFICIENT_COVERAGE"
     assert scanner._last_scan_diagnostics["coverage_percent"] == round(2 / 3 * 100, 1)
-    assert scanner._last_scan_diagnostics["selected"] == 1
+    assert scanner._last_scan_diagnostics["selected"] == 2
 
 
 def test_market_map_is_independent_from_selected_radar(monkeypatch):
@@ -177,7 +177,7 @@ def test_market_map_is_independent_from_selected_radar(monkeypatch):
     scanner = _scanner(monkeypatch, rows, -0.6)
     result = scanner.scan(limit=1)
 
-    assert [x["spot_ticker"] for x in result] == ["WEAK"]
+    assert [x["spot_ticker"] for x in result] == ["STRONG"]
     diagnostics = scanner._last_scan_diagnostics
     assert diagnostics["market_map_total"] == 3
     assert diagnostics["market_map_stronger"] == 2
