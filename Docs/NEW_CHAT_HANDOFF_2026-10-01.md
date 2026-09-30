@@ -3,7 +3,7 @@
 **Дата:** 01.10.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Рабочая ветка:** `main`  
-**GitHub main:** `bbdc9ec9fa42b8a2cc9542be26b418c5e533b68b`  
+**GitHub main:** `97e874f3c71b47745ecfac54c811c5e8bf9bf31d`  
 **Предыдущий функциональный checkpoint:** `15273355d530b6d4f211725faf6c4a912881305f`
 
 ## 1. Как продолжать
