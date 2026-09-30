@@ -320,21 +320,23 @@ class RealtimeMicrostructureWorker(QObject):
             self._trades[ticker].append((time.time(), side, value, payload.get("dateTime")))
             self._emit_snapshot(ticker, class_code)
 
-    def _subscribe(self, ws):
+    def _subscribe_data_type(self, ws, data_type):
         if not self.instruments:
             return
-        for data_type in (0, 2):
-            message = {
-                "subscribeType": 0,
-                "dataType": data_type,
-                "instruments": self.instruments,
-            }
-            if data_type == 0:
-                message["depth"] = self.DEPTH
-            ws.send(json.dumps(message))
-            self._subscription_requested[data_type] = True
-            if data_type == 0:
-                time.sleep(self.SUBSCRIPTION_PACING_SECONDS)
+        message = {
+            "subscribeType": 0,
+            "dataType": data_type,
+            "instruments": self.instruments,
+        }
+        if data_type == 0:
+            message["depth"] = self.DEPTH
+        ws.send(json.dumps(message))
+        self._subscription_requested[data_type] = True
+
+    def _subscribe(self, ws):
+        # BCS is more reliable when the two 100-instrument subscriptions
+        # are serialized: complete BOOK acknowledgement first, then TAPE.
+        self._subscribe_data_type(ws, 0)
 
     def run(self):
         if not self.instruments:
@@ -388,26 +390,31 @@ class RealtimeMicrostructureWorker(QObject):
                     self._live_data_seen = False
                     self._emit_realtime_status("CONNECTED", connected_at=self._connected_at.isoformat())
                     self._subscribe(ws)
+                    expected = {(item["ticker"], item["classCode"]) for item in self.instruments}
                     subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
                     while not self._stop_event.is_set():
+                        if (
+                            self._subscription_requested[0]
+                            and not self._subscription_requested[2]
+                            and self._subscription_accepted[0] >= expected
+                        ):
+                            # Do not put BOOK and TAPE 100-instrument requests
+                            # back-to-back. Start TAPE only after all BOOK ACKs
+                            # have arrived from BCS.
+                            self._subscribe_data_type(ws, 2)
+                            subscription_deadline = time.monotonic() + self.SUBSCRIPTION_TIMEOUT_SECONDS
+
                         if time.monotonic() >= subscription_deadline:
-                            expected = {(item["ticker"], item["classCode"]) for item in self.instruments}
-                            if not (
-                                self._subscription_accepted[0] >= expected
-                                and self._subscription_accepted[2] >= expected
-                            ):
-                                book_missing = sorted(expected - self._subscription_accepted[0])
-                                tape_missing = sorted(expected - self._subscription_accepted[2])
-                                self._last_error = (
-                                    "BCS subscription acknowledgement timeout: "
-                                    f"BOOK {len(self._subscription_accepted[0])}/{len(expected)}, "
-                                    f"TAPE {len(self._subscription_accepted[2])}/{len(expected)}; "
-                                    f"BOOK_MISSING={book_missing}; TAPE_MISSING={tape_missing}"
-                                )
-                                self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
-                                raise RuntimeError(self._last_error)
-                            self._emit_realtime_status("SUBSCRIBED")
-                            subscription_deadline = float("inf")
+                            book_missing = sorted(expected - self._subscription_accepted[0])
+                            tape_missing = sorted(expected - self._subscription_accepted[2])
+                            self._last_error = (
+                                "BCS subscription acknowledgement timeout: "
+                                f"BOOK {len(self._subscription_accepted[0])}/{len(expected)}, "
+                                f"TAPE {len(self._subscription_accepted[2])}/{len(expected)}; "
+                                f"BOOK_MISSING={book_missing}; TAPE_MISSING={tape_missing}"
+                            )
+                            self._emit_realtime_status("SUBSCRIPTION_TIMEOUT")
+                            raise RuntimeError(self._last_error)
                         try:
                             raw = ws.recv()
                             if raw is None:
@@ -415,6 +422,14 @@ class RealtimeMicrostructureWorker(QObject):
                             if isinstance(raw, bytes):
                                 raw = raw.decode("utf-8", errors="replace")
                             self._handle(json.loads(raw))
+                            if (
+                                self._subscription_requested[0]
+                                and self._subscription_requested[2]
+                                and self._subscription_accepted[0] >= expected
+                                and self._subscription_accepted[2] >= expected
+                            ):
+                                self._emit_realtime_status("SUBSCRIBED")
+                                subscription_deadline = float("inf")
                         except Exception as exc:
                             if self._stop_event.is_set():
                                 break
