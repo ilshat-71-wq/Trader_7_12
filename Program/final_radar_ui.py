@@ -114,7 +114,6 @@ class FinalRadarWidget(QWidget):
         status = self.service.status()
         self.table.setRowCount(len(self._rows))
 
-        diagnostic = status.get("diagnostic") or {}
         if not self._rows:
             if status["scan_no"] == 0:
                 self.state.setText("WAITING FOR SCAN")
@@ -146,13 +145,17 @@ class FinalRadarWidget(QWidget):
             rt = item["final_realtime"]
             futures = item["final_futures"]
             rt_text = f"{rt['average']:.0f} • {rt['count']}/3"
+            instrument_type = str(item.get("final_instrument_type") or "—")
             fut_text = "—"
-            if futures["state"] == "CONFIRMED":
+            if instrument_type == "FUTURES":
+                fut_text = f"✓ OI/FLOW • {futures['probability']:.0f}%"
+            elif futures["state"] == "CONFIRMED":
                 fut_text = f"✓ {futures['contract']} • {futures['probability']:.0f}%"
+            elif futures["state"] == "CONFLICT":
+                fut_text = "CONFLICT"
             elif futures["state"] == "NO_MATCH":
                 fut_text = "NO MATCH"
 
-            instrument_type = str(item.get("final_instrument_type") or "—")
             is_futures = instrument_type == "FUTURES"
             values = [
                 str(row),
