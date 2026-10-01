@@ -61,7 +61,7 @@ def _qualified_profile(direction="LONG"):
 def _scanner(monkeypatch, rows, benchmark=0.0, session=None):
     scanner = MarketInformationScannerService(api=FakeAPI(), session_service=session or FakeSession(), history_service=object())
     monkeypatch.setattr(scanner, "build_universe", lambda: [dict(x) for x in rows])
-    monkeypatch.setattr(scanner, "_benchmark", lambda *args: ("IMOEX2", "INDX", benchmark) if benchmark is not None else (None, None, None))
+    monkeypatch.setattr(scanner, "_benchmark", lambda *args: ("IMOEX", "INDX", benchmark) if benchmark is not None else (None, None, None))
     monkeypatch.setattr(scanner, "_benchmark_daily", lambda *args: [{"time": "2026-08-31T00:00:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
                                                                        {"time": "2026-09-01T00:00:00Z", "open": 100, "high": 101, "low": 99, "close": 100}])
     monkeypatch.setattr(scanner, "_analyze_one", lambda item, *args: dict(item))
