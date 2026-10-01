@@ -17,7 +17,6 @@ class FinalRadarService:
     MIN_DIRECTIONAL_ACCEL = 20.0
     MIN_RT_COMPONENTS = 2
     MIN_RT_SCORE = 55.0
-    MAX_RESULTS = 50
 
     def __init__(self):
         self._day_key = None
@@ -287,7 +286,7 @@ class FinalRadarService:
                 str(item.get("final_ticker") or "").upper(),
             )
         )
-        return rows[: self.MAX_RESULTS]
+        return rows
 
     def status(self):
         strict = [
