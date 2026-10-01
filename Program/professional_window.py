@@ -112,6 +112,7 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.sound_on_finish = self.settings.value("sound/on_finish", True, type=bool)
         self._configure_professional_tabs()
         self._morning_handoff_requested = False
+        self._entry_handoff_done = False
         self._morning_entry_rows = []
         self._spot_entry_rows = []
         self._build_morning_radar_tab()
@@ -188,9 +189,13 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         now = self._moscow_time()
         if now.hour < 9:
             return
-        entry_index = self.market_tabs.indexOf(self.entry_radar)
-        if entry_index >= 0:
-            self.market_tabs.setCurrentIndex(entry_index)
+        # Select ENTRY RADAR once at the main-session handoff. Do not force
+        # the tab every second: the operator must be free to switch tabs.
+        if not self._entry_handoff_done:
+            entry_index = self.market_tabs.indexOf(self.entry_radar)
+            if entry_index >= 0:
+                self.market_tabs.setCurrentIndex(entry_index)
+            self._entry_handoff_done = True
         if not self._morning_handoff_requested:
             self._morning_handoff_requested = True
             # Force a fresh Cloud history read exactly at the main-session
