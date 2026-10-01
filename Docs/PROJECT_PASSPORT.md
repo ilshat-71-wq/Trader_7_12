@@ -6,10 +6,10 @@
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** D1-first production chain (current implementation)  
 **Futures OI scanner:** current production implementation  
-**Последний функциональный commit:** `15273355d530b6d4f211725faf6c4a912881305f` — `Fix Radar benchmark to real IMOEX index`  
-**Текущий GitHub `main` HEAD:** `97e874f3c71b47745ecfac54c811c5e8bf9bf31d`  
+**Последний функциональный commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701` — `Test FINAL Radar futures confirmation display`  
+**Текущий GitHub `main` HEAD:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701`  
 **Последний локально подтверждённый regression suite:** `197 passed, 1 warning` (30.09.2026)  
-**Последний regression-test commit:** `15273355d530b6d4f211725faf6c4a912881305f`  
+**Последний regression-test commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
 
@@ -63,6 +63,21 @@ UI-изменения не меняют scanner calculations, qualification, ran
 
 Текущая точка должна сначала пройти локальные `py_compile` / `pytest` и macOS build после синхронизации рабочей машины.
 
+
+## 0.4.2 FINAL RADAR correction — 01.10.2026
+
+### Final Radar
+- Исправлено представление FUTURES-кандидата в FINAL RADAR: собственный фьючерс теперь отображается как подтверждённый Futures-контур с контрактом и его текущей вероятностью, вместо misleading FUTURES —.
+- Для FUTURES-кандидата это не новый сигнал и не новый сканер: FINAL использует уже рассчитанные signal / signal_probability того же Futures OI / Money Flow результата.
+- RT-порог 55 не ослаблялся и не изменялся.
+- Realtime FINAL продолжает использовать реальные BOOK/TAPE/FLOW snapshot того же тикера и среднее доступных компонентов при наличии минимум двух компонентов.
+- Добавлен regression test: для NGV6 при BOOK 56 / TAPE 100 / FLOW 78 FINAL RT должен быть 78.0, а собственный Futures должен быть CONFIRMED с контрактом NGV6.
+- Важно: ранее наблюдавшийся FINAL RT 41 не был доказан как ошибка расчёта. По текущему коду это значение соответствует последнему realtime snapshot, который FINAL успел получить в момент отображения. При последующем живом snapshot NGV6 = 56/100/78 FINAL должен пересчитать RT в 78.
+- Поэтому порог 55 не менялся: при актуальном NGV6 realtime 78 > 55.
+
+### Git
+- 55874c791e888260e7ef47c6f402f92d92adac93 — исправление FUTURES-представления в FINAL RADAR.
+- fb3a67fd7d03af40f5c0c83e9f54af1297d8a701 — regression test для собственного Futures confirmation.
 
 ## 0.4.1 Current verified checkpoint — 01.10.2026
 
@@ -222,7 +237,7 @@ NEUTRAL → строгий directional candidate не создаём
 RS = PRICE Δ% − IDX Δ%
 ```
 
-Benchmark: `IMOEX2`; `IRUS2` — fallback только если IMOEX2 unavailable/unfit. Meaningful RS threshold: `0.10 pp`.
+Benchmark: `IMOEX` / `INDX`. `IMOEX2` не используется в production Radar. Meaningful RS threshold: `0.10 pp`.
 
 ## 3. BASE universe
 
