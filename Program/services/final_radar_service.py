@@ -17,7 +17,7 @@ class FinalRadarService:
     MIN_DIRECTIONAL_ACCEL = 20.0
     MIN_RT_COMPONENTS = 2
     MIN_RT_SCORE = 55.0
-    MAX_RESULTS = 3
+    MAX_RESULTS = 50
 
     def __init__(self):
         self._day_key = None
@@ -254,8 +254,13 @@ class FinalRadarService:
                 continue
 
             if state["instrument_type"] == "SPOT":
+                # Matching futures are context only. FINAL is allowed to show a
+                # valid SPOT candidate independently; a missing/conflicting
+                # future must not suppress the stock from the operator view.
                 futures = self._futures_state(ticker, direction)
             else:
+                # Futures FINAL confirmation is the candidate's own established
+                # OI + Money Flow chain. Do not invent a second signal.
                 probability = self._f(item.get("signal_probability"))
                 futures = {
                     "state": "CONFIRMED" if probability is not None and probability >= 65.0 else "CONFLICT",
@@ -263,8 +268,6 @@ class FinalRadarService:
                     "signal": direction,
                     "probability": probability,
                 }
-            if futures["state"] in {"CONFLICT", "NO_MATCH"}:
-                continue
 
             rows.append({
                 **item,
@@ -275,18 +278,16 @@ class FinalRadarService:
                 "final_futures": futures,
             })
 
-        def sort_key(item):
-            rt = item["final_realtime"]
-            prob = self._f(item.get("signal_probability")) or 0.0
-            accel = abs(self._f(item.get("directional_acceleration")) or 0.0)
-            return (
-                -int(item.get("final_confirmations", 0)),
-                -prob,
-                -rt["average"],
-                -accel,
+        # FINAL is an operator list, not a winner/ranking. Keep deterministic
+        # grouping by instrument type and ticker only; never rank by probability,
+        # realtime score, acceleration, or confirmations.
+        rows.sort(
+            key=lambda item: (
+                0 if item.get("final_instrument_type") == "SPOT" else 1,
+                str(item.get("final_ticker") or "").upper(),
             )
-
-        return sorted(rows, key=sort_key)[: self.MAX_RESULTS]
+        )
+        return rows[: self.MAX_RESULTS]
 
     def status(self):
         strict = [
@@ -298,55 +299,26 @@ class FinalRadarService:
             default=0,
         )
         final_rows = self.final_candidates()
-
-        # Operator diagnostics only: expose the strongest current candidate
-        # and the existing gates that keep it out of FINAL. No signal logic is
-        # changed here.
-        ranked = sorted(
-            strict,
-            key=lambda x: (
-                int(x.get("confirmations", 0)),
-                self._f(x.get("item", {}).get("signal_probability")) or 0.0,
-            ),
-            reverse=True,
+        spot_final = sum(
+            1 for x in final_rows if x.get("final_instrument_type") == "SPOT"
         )
-        top = ranked[0] if ranked else None
-        diagnostic = {
-            "ticker": top.get("ticker") if top else None,
-            "type": top.get("instrument_type") if top else None,
-            "direction": top.get("direction") if top else None,
-            "confirmations": int(top.get("confirmations", 0)) if top else 0,
-            "rt": None,
-            "rt_count": 0,
-            "rt_block": False,
-            "futures": None,
-            "futures_block": False,
-        }
-        if top:
-            item = top.get("item") or {}
-            rt_ticker = str(
+        futures_final = sum(
+            1 for x in final_rows if x.get("final_instrument_type") == "FUTURES"
+        )
+        rt_ready = 0
+        rt_blocked = 0
+        for state in strict:
+            item = state.get("item") or {}
+            ticker = str(
                 item.get("futures_ticker")
-                if top.get("instrument_type") == "FUTURES"
-                else item.get("spot_ticker") or top.get("ticker")
+                if state.get("instrument_type") == "FUTURES"
+                else item.get("spot_ticker") or state.get("ticker")
             ).upper()
-            rt = self._realtime_state(rt_ticker)
-            diagnostic["rt"] = round(rt["average"], 1) if rt else None
-            diagnostic["rt_count"] = rt["count"] if rt else 0
-            diagnostic["rt_block"] = rt is None or rt["average"] < self.MIN_RT_SCORE
-
-            if top.get("instrument_type") == "SPOT":
-                futures = self._futures_state(top.get("ticker"), top.get("direction"))
+            rt = self._realtime_state(ticker)
+            if rt is not None and rt["average"] >= self.MIN_RT_SCORE:
+                rt_ready += 1
             else:
-                item = top.get("item") or {}
-                probability = self._f(item.get("signal_probability"))
-                futures = {
-                    "state": "CONFIRMED" if probability is not None and probability >= 65.0 else "CONFLICT",
-                    "contract": item.get("futures_ticker") or item.get("oi_root") or top.get("ticker"),
-                    "signal": top.get("direction"),
-                    "probability": probability,
-                }
-            diagnostic["futures"] = futures.get("state")
-            diagnostic["futures_block"] = futures.get("state") in {"CONFLICT", "NO_MATCH"}
+                rt_blocked += 1
 
         return {
             "scan_no": self._scan_no,
@@ -354,5 +326,8 @@ class FinalRadarService:
             "max_confirmations": confirmations,
             "required_confirmations": self.MIN_CONFIRMATIONS,
             "final_count": len(final_rows),
-            "diagnostic": diagnostic,
+            "final_spot_count": spot_final,
+            "final_futures_count": futures_final,
+            "rt_ready": rt_ready,
+            "rt_blocked": rt_blocked,
         }
