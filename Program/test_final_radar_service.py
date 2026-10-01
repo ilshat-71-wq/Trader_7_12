@@ -47,7 +47,7 @@ def test_missing_realtime_does_not_promote():
     assert service.final_candidates() == []
 
 
-def test_conflicting_futures_blocks_final():
+def test_conflicting_futures_are_context_and_do_not_block_spot_final():
     service = FinalRadarService()
     for _ in range(3):
         service.record_spot_scan([spot()], "2026-09-25")
@@ -58,7 +58,10 @@ def test_conflicting_futures_blocks_final():
         "signal": "SHORT",
         "signal_probability": 80,
     }])
-    assert service.final_candidates() == []
+    rows = service.final_candidates()
+    assert len(rows) == 1
+    assert rows[0]["final_instrument_type"] == "SPOT"
+    assert rows[0]["final_futures"]["state"] == "CONFLICT"
 
 
 def test_day_change_resets_confirmation():
@@ -171,9 +174,37 @@ def test_short_candidate_with_positive_acceleration_is_rejected():
     assert service.final_candidates() == []
 
 
-def test_missing_futures_match_blocks_spot_final():
+def test_missing_futures_match_does_not_block_spot_final():
     service = FinalRadarService()
     for _ in range(3):
         service.record_spot_scan([spot("VGSB")], "2026-09-25")
     service.update_realtime({"ticker": "VGSB", "book_score": 70, "tape_score": 80, "flow_score": 75})
-    assert service.final_candidates() == []
+    rows = service.final_candidates()
+    assert len(rows) == 1
+    assert rows[0]["final_futures"]["state"] == "NO_MATCH"
+
+
+def test_final_contains_multiple_spot_and_futures_candidates_without_ranking():
+    service = FinalRadarService()
+    spot_a = spot("AAA1", prob=95.0, accel=800.0)
+    spot_b = spot("BBB1", prob=82.0, accel=300.0)
+    fut_a = future("NGV6", prob=88.0, underlying="NG")
+    fut_b = future("ONZ6", prob=86.0, underlying="ON")
+    for _ in range(3):
+        service.record_spot_scan([spot_a, spot_b], "2026-09-25")
+        service.record_futures_scan([fut_a, fut_b], "2026-09-25")
+    for ticker in ("AAA1", "BBB1", "NGV6", "ONZ6"):
+        service.update_realtime({
+            "ticker": ticker,
+            "book_score": 70,
+            "tape_score": 80,
+            "flow_score": 75,
+        })
+    rows = service.final_candidates()
+    assert len(rows) == 4
+    assert [row["final_instrument_type"] for row in rows] == [
+        "SPOT", "SPOT", "FUTURES", "FUTURES"
+    ]
+    assert [row["final_ticker"] for row in rows] == [
+        "AAA1", "BBB1", "NGV6", "ONZ6"
+    ]
