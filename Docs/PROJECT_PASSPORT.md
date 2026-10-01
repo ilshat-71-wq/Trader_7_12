@@ -677,6 +677,37 @@ NO SL/TP EXECUTION
 NO PORTFOLIO MANAGEMENT
 ```
 
+## 13.2 FINAL RADAR — CURRENT ARCHITECTURE CHECKPOINT — 01.10.2026
+
+FINAL RADAR is an operator confirmation list containing both independent instrument types:
+
+SPOT
+D1 → M5 → liquidity → RS → realtime → 3 consecutive scans
+
+FUTURES
+OI → Money Flow → BOOK/TAPE/FLOW RT → 3 consecutive scans
+
+                 FINAL RADAR
+          SPOT + FUTURES candidates
+                    ↓
+               USER DECIDES
+
+Rules fixed in source:
+- FINAL does not choose one instrument, name a winner, or rank candidates by probability/RT/acceleration.
+- SPOT and FUTURES candidates are shown independently in the same FINAL table.
+- A matching futures contract is context for a SPOT row; missing/conflicting futures no longer suppresses an otherwise valid SPOT FINAL.
+- A FUTURES row uses its own real OI + Money Flow candidate data; it must not display FUTURES — merely because the candidate itself is a future.
+- Realtime gate remains unchanged: at least 2 live BOOK/TAPE/FLOW components and average >= 55.
+- Three consecutive qualifying scans remain mandatory.
+- No execution, order recommendation, position sizing, SL/TP, or portfolio management is added.
+
+Source commits for this checkpoint:
+- 54165bb — independent SPOT/FUTURES FINAL service logic.
+- 95b54f4 — neutral FINAL UI showing SPOT/FUTURES counts without a TOP/winner.
+- 47180c4 — regression coverage for independent and mixed SPOT/FUTURES FINAL candidates.
+
+Local pytest/build verification is intentionally still pending on the user's iMac; do not mark this checkpoint as locally verified until that real check is completed.
+
 ## 20. Current priorities — STRICT ORDER
 
 ### P0 — Final iMac synchronization after passport commit
