@@ -62,8 +62,8 @@ class FinalRadarWidget(QWidget):
         root.addLayout(head)
 
         self.meta = QLabel(
-            "FINAL 1–3 • SPOT + FUTURES OI/FLOW + REALTIME • "
-            "first scan + two confirmations • liquid instruments only • read-only"
+            "FINAL • SPOT + FUTURES • REALTIME • "
+            "3 consecutive confirmations • liquid instruments only • read-only"
         )
         self.meta.setObjectName("frMeta")
         self.meta.setWordWrap(True)
@@ -83,8 +83,9 @@ class FinalRadarWidget(QWidget):
             "FINAL RADAR promotes only liquid candidates that survive three consecutive "
             "strict scans and have real-time confirmation from at least two live "
             "BOOK/TAPE/FLOW components. SPOT uses the established SPOT liquidity gate; "
-            "futures use existing OI/Money Flow liquidity data. A conflicting matching "
-            "future blocks a SPOT candidate. This is a read-only shortlist, not an order signal."
+            "futures use existing OI/Money Flow liquidity data. Matching futures are "
+            "context for SPOT and do not suppress an otherwise valid SPOT candidate. "
+            "This is a read-only confirmation list, not an order signal."
         )
         root.addWidget(self.table, 1)
 
@@ -122,39 +123,24 @@ class FinalRadarWidget(QWidget):
                 self.state.setText(
                     f"NEED {left} MORE SCAN" if left == 1 else f"NEED {left} MORE SCANS"
                 )
-            elif diagnostic.get("rt_block"):
-                rt = diagnostic.get("rt")
-                count = diagnostic.get("rt_count", 0)
-                self.state.setText(
-                    f"BLOCKED • RT {count}/3" if rt is None else
-                    f"BLOCKED • RT {rt:.0f} < {self.service.MIN_RT_SCORE:.0f}"
-                )
-            elif diagnostic.get("futures_block"):
-                self.state.setText(f"BLOCKED • FUTURES {diagnostic.get('futures')}")
+            elif status.get("rt_ready", 0) == 0 and status.get("strict_candidates", 0):
+                self.state.setText(f"BLOCKED • RT < {self.service.MIN_RT_SCORE:.0f}")
             else:
                 self.state.setText("NO FINAL CANDIDATE")
         else:
-            self.state.setText(f"{len(self._rows)} FINAL")
+            self.state.setText(
+                f"{len(self._rows)} FINAL • "
+                f"SPOT {status.get('final_spot_count', 0)} • "
+                f"FUTURES {status.get('final_futures_count', 0)}"
+            )
 
-        if diagnostic.get("ticker"):
-            rt = diagnostic.get("rt")
-            rt_text = (
-                f"{diagnostic.get('rt_count', 0)}/3"
-                if rt is None
-                else f"{rt:.0f} • {diagnostic.get('rt_count', 0)}/3"
-            )
-            fut = diagnostic.get("futures") or "—"
-            self.meta.setText(
-                f"SCAN {status['scan_no']} • STRICT {status['strict_candidates']} • "
-                f"TOP {diagnostic['ticker']} {diagnostic.get('direction') or '—'} "
-                f"{diagnostic.get('confirmations', 0)}/{status['required_confirmations']} • "
-                f"RT {rt_text} • FUTURES {fut}"
-            )
-        else:
-            self.meta.setText(
-                "FINAL 1–3 • SPOT + FUTURES OI/FLOW + REALTIME • "
-                "first scan + two confirmations • liquid instruments only • read-only"
-            )
+        self.meta.setText(
+            f"SCAN {status['scan_no']} • STRICT {status['strict_candidates']} • "
+            f"FINAL SPOT {status.get('final_spot_count', 0)} • "
+            f"FINAL FUTURES {status.get('final_futures_count', 0)} • "
+            f"RT READY {status.get('rt_ready', 0)} • "
+            f"RT BLOCKED {status.get('rt_blocked', 0)}"
+        )
 
         for row, item in enumerate(self._rows, 1):
             rt = item["final_realtime"]
