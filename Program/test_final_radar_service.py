@@ -102,6 +102,23 @@ def test_liquid_futures_can_promote_to_final():
     assert rows[0]["final_instrument_type"] == "FUTURES"
     assert rows[0]["futures_ticker"] == "NGV6"
 
+def test_futures_final_exposes_own_futures_confirmation():
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_futures_scan([future(contract="NGV6", prob=88.3)], "2026-09-25")
+    service.update_realtime({
+        "ticker": "NGV6",
+        "book_score": 56,
+        "tape_score": 100,
+        "flow_score": 78,
+    })
+    rows = service.final_candidates()
+    assert len(rows) == 1
+    assert rows[0]["final_realtime"]["average"] == 78.0
+    assert rows[0]["final_futures"]["state"] == "CONFIRMED"
+    assert rows[0]["final_futures"]["contract"] == "NGV6"
+    assert rows[0]["final_futures"]["probability"] == 88.3
+
 
 def test_illiquid_futures_never_promote():
     service = FinalRadarService()
