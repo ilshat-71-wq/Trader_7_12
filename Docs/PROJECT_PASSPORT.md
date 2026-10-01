@@ -705,6 +705,8 @@ Source commits for this checkpoint:
 - 54165bb — independent SPOT/FUTURES FINAL service logic.
 - 95b54f4 — neutral FINAL UI showing SPOT/FUTURES counts without a TOP/winner.
 - 47180c4 — regression coverage for independent and mixed SPOT/FUTURES FINAL candidates.
+- 3399c83 — remove FINAL result cap; all qualified current FINAL candidates are retained.
+- d324f68 — clarify the FUTURES row confirmation display.
 
 Local pytest/build verification is intentionally still pending on the user's iMac; do not mark this checkpoint as locally verified until that real check is completed.
 
