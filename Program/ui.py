@@ -245,10 +245,10 @@ class TraderWindow(QWidget):
 
         self.spot_tabs = QTabWidget()
         self.spot_tabs.setDocumentMode(True)
-        self.spot_tabs.addTab(self.result_table, "STRONGER THAN IMOEX2")
-        self.spot_tabs.addTab(self.weak_result_table, "WEAKER THAN IMOEX2")
+        self.spot_tabs.addTab(self.result_table, "STRONGER THAN IMOEX")
+        self.spot_tabs.addTab(self.weak_result_table, "WEAKER THAN IMOEX")
         self.spot_tabs.setToolTip(
-            "SPOT split by relative strength versus IMOEX2"
+            "SPOT split by relative strength versus IMOEX"
         )
 
         self.result_panel = QWidget()
@@ -746,13 +746,13 @@ class TraderWindow(QWidget):
         regime = str(diagnostics.get("market_regime") or "NEUTRAL").upper()
         if regime == "UP":
             regime_note = (
-                "INDEX UP: STRONGER = stocks rising more than IMOEX2; "
-                "WEAKER = stocks rising less than IMOEX2 or falling."
+                "INDEX UP: STRONGER = stocks rising more than IMOEX; "
+                "WEAKER = stocks rising less than IMOEX or falling."
             )
         elif regime == "DOWN":
             regime_note = (
-                "INDEX DOWN: STRONGER = stocks rising or falling less than IMOEX2; "
-                "WEAKER = stocks falling more than IMOEX2."
+                "INDEX DOWN: STRONGER = stocks rising or falling less than IMOEX; "
+                "WEAKER = stocks falling more than IMOEX."
             )
         else:
             regime_note = (
@@ -761,14 +761,14 @@ class TraderWindow(QWidget):
             )
 
         self.result_table.setToolTip(
-            f"SPOT STRONGER THAN IMOEX2 — {regime_note} "
+            f"SPOT STRONGER THAN IMOEX — {regime_note} "
             "Green row = stock is rising; red row = stock is falling. "
             "ATR / USED = completed D1 ATR(14) as % of reference price • intraday move used as % of ATR; informational only. "
             "BOOK/TAPE/FLOW RT — live BCS WebSocket observed pressure scores; not probabilities. "
             "DAY ₽ — accumulated monetary turnover since 07:00 MSK."
         )
         self.weak_result_table.setToolTip(
-            f"SPOT WEAKER THAN IMOEX2 — {regime_note} "
+            f"SPOT WEAKER THAN IMOEX — {regime_note} "
             "Green row = stock is rising; red row = stock is falling. "
             "ATR / USED = completed D1 ATR(14) as % of reference price • intraday move used as % of ATR; informational only. "
             "SIGNAL/PROB/ΔPROB retain their own LONG/SHORT/NEUTRAL colors. "
