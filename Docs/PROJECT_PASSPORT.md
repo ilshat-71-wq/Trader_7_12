@@ -7,7 +7,7 @@
 **Radar pipeline:** D1-first production chain (current implementation)  
 **Futures OI scanner:** current production implementation  
 **Последний функциональный commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701` — `Test FINAL Radar futures confirmation display`  
-**Текущий GitHub `main` HEAD:** `22f16092cb52c14d9f8aedd8e623e2b439643836`  
+**Текущий GitHub `main` HEAD:** `419a9ba16e5a46c30bd7a4c05c3286f030ec6d12`  
 **Последний локально подтверждённый regression suite:** `197 passed, 1 warning` (30.09.2026)  
 **Последний regression-test commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
