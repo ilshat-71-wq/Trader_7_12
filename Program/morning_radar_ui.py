@@ -200,7 +200,7 @@ class MorningRadarWidget(QWidget):
         rising_interest = sum(1 for x in radar_rows if (x.get("interest") or {}).get("state") == "RISING")
         handoff_status = str(handoff.get("status") or "WAITING_FOR_09:00")
         self.summary.setText(
-            f"REGIME {regime} • IMOEX2 {benchmark if benchmark is not None else '—'}% • "
+            f"REGIME {regime} • IMOEX {benchmark if benchmark is not None else '—'}% • "
             f"INTEREST ↑ {rising_interest} • SHORT WATCH {short_count} • "
             f"PERSISTENT SHORT {persistent_short} • "
             f"SNAPSHOTS {len(history)} • HANDOFF {handoff_status}.  "
