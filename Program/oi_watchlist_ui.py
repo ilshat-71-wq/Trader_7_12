@@ -483,21 +483,26 @@ class OIWatchlistTraderWindow(TraderWindow):
                 self.oi_table.item(row, 11).setText(tape_text)
                 self.oi_table.item(row, 12).setText(flow_text)
 
+            # SPOT market-map columns: PROB=15, ΔPROB=16, BOOK=17, TAPE=18, FLOW RT=19.
+            # Keep these explicit so the realtime layer cannot silently shift
+            # into analytical columns when the table gains fields.
+            spot_rt_columns = (17, 18, 19)
+
             row = self._realtime_result_rows.get(ticker)
             if row is not None:
                 table = getattr(self, "result_table", None)
                 if table is not None:
-                    table.item(row, 16).setText(book_text)
-                    table.item(row, 17).setText(tape_text)
-                    table.item(row, 18).setText(flow_text)
+                    table.item(row, spot_rt_columns[0]).setText(book_text)
+                    table.item(row, spot_rt_columns[1]).setText(tape_text)
+                    table.item(row, spot_rt_columns[2]).setText(flow_text)
 
             row = self._realtime_weak_result_rows.get(ticker)
             if row is not None:
                 table = getattr(self, "weak_result_table", None)
                 if table is not None:
-                    table.item(row, 16).setText(book_text)
-                    table.item(row, 17).setText(tape_text)
-                    table.item(row, 18).setText(flow_text)
+                    table.item(row, spot_rt_columns[0]).setText(book_text)
+                    table.item(row, spot_rt_columns[1]).setText(tape_text)
+                    table.item(row, spot_rt_columns[2]).setText(flow_text)
 
         # One repaint per 250 ms batch instead of one timer/render pipeline
         # per radar. This keeps all realtime state live without competing
