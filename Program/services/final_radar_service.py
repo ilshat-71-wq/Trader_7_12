@@ -253,11 +253,16 @@ class FinalRadarService:
             if rt is None or rt["average"] < self.MIN_RT_SCORE:
                 continue
 
-            futures = (
-                self._futures_state(ticker, direction)
-                if state["instrument_type"] == "SPOT"
-                else {"state": "—"}
-            )
+            if state["instrument_type"] == "SPOT":
+                futures = self._futures_state(ticker, direction)
+            else:
+                probability = self._f(item.get("signal_probability"))
+                futures = {
+                    "state": "CONFIRMED" if probability is not None and probability >= 65.0 else "CONFLICT",
+                    "contract": item.get("futures_ticker") or item.get("oi_root") or ticker,
+                    "signal": direction,
+                    "probability": probability,
+                }
             if futures["state"] in {"CONFLICT", "NO_MATCH"}:
                 continue
 
@@ -331,8 +336,17 @@ class FinalRadarService:
 
             if top.get("instrument_type") == "SPOT":
                 futures = self._futures_state(top.get("ticker"), top.get("direction"))
-                diagnostic["futures"] = futures.get("state")
-                diagnostic["futures_block"] = futures.get("state") in {"CONFLICT", "NO_MATCH"}
+            else:
+                item = top.get("item") or {}
+                probability = self._f(item.get("signal_probability"))
+                futures = {
+                    "state": "CONFIRMED" if probability is not None and probability >= 65.0 else "CONFLICT",
+                    "contract": item.get("futures_ticker") or item.get("oi_root") or top.get("ticker"),
+                    "signal": top.get("direction"),
+                    "probability": probability,
+                }
+            diagnostic["futures"] = futures.get("state")
+            diagnostic["futures_block"] = futures.get("state") in {"CONFLICT", "NO_MATCH"}
 
         return {
             "scan_no": self._scan_no,
