@@ -6,8 +6,8 @@ from api.bcs_underlying_catalog import (
 
 
 def test_bcs_currency_and_gold_instruments_are_exact():
-    assert preferred_instruments("USDRUB")[0] == {"ticker": "USDRUB_TOM", "classCode": "CETS"}
-    assert preferred_instruments("EURRUB")[0] == {"ticker": "EURRUB_TOM", "classCode": "CETS"}
+    assert preferred_instruments("USDRUB")[0] == {"ticker": "USD000SMALL", "classCode": "CETS_FX"}
+    assert preferred_instruments("EURRUB")[0] == {"ticker": "EUR_RUB__TOM", "classCode": "CETS"}
     assert preferred_instruments("CNYRUB")[0] == {"ticker": "CNYRUB_TOM", "classCode": "CETS"}
     assert preferred_instruments("GLDRUB_TOM")[0] == {"ticker": "GLDRUB_TOM", "classCode": "CETS_MTL"}
 
