@@ -233,7 +233,7 @@ class TraderWindow(QWidget):
 
         columns = [
             "#", "Ticker", "Role", "D1", "D1-RS", "IDX Δ%", "Price Δ%", "ATR / USED",
-            "RS", "₽/min", "DAY ₽", "15m", "Accel", "Score",
+            "RS", "₽/min", "TODAY ₽×V", "15m", "Accel", "Score",
             "SIGNAL", "PROB", "ΔPROB", "BOOK", "TAPE", "FLOW RT",
         ]
         widths = [
@@ -586,7 +586,7 @@ class TraderWindow(QWidget):
                     ),
                     numeric(_number(rs, 2)),
                     numeric(_money(item.get("money_per_minute"))),
-                    numeric(_money(item.get("day_money", item.get("session_money")))),
+                    numeric(_money(item.get("session_money"))),
                     numeric(_money(item.get("recent_money"))),
                     numeric(f"{_number(item.get('money_acceleration'), 1)}%"),
                     numeric(_number(item.get("directional_score"), 1)),
@@ -659,7 +659,7 @@ class TraderWindow(QWidget):
 
         line1 = (
             f"{session_name} • {info.get('date', '—')} • "
-            f"MSK {info.get('time', '—')} • INTRADAY 07:00→NOW"
+            f"MSK {info.get('time', '—')} • INTRADAY 06:50→NOW"
         )
         line2 = (
             f"{diagnostics.get('status') or '—'} • {benchmark} • "

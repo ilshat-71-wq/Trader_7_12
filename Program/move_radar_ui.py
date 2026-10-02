@@ -71,10 +71,10 @@ class MoveRadarWidget(QWidget):
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = CopyableTableWidget(0, 11)
+        self.table = CopyableTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels([
             "Ticker", "Phase", "Direction", "Price Δ%", "ATR / USED",
-            "RS", "₽/min", "15m", "Accel", "PROB", "RT",
+            "RS", "TODAY ₽×V", "₽/min", "15m", "Accel", "PROB", "RT",
         ])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -190,6 +190,7 @@ class MoveRadarWidget(QWidget):
                     f"{self._fmt(item.get('atr_used_percent'), 0)}%"
                 ),
                 self._fmt(item.get("relative_strength"), 2, signed=True),
+                self._money(item.get("session_money")),
                 self._money(item.get("money_per_minute")),
                 self._money(item.get("recent_money")),
                 self._fmt(item.get("money_acceleration"), 1, signed=True),
@@ -199,7 +200,7 @@ class MoveRadarWidget(QWidget):
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setTextAlignment(
-                    Qt.AlignmentFlag.AlignCenter if col in (1, 2, 3, 4, 5, 7, 8, 9, 10)
+                    Qt.AlignmentFlag.AlignCenter if col in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
                     else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 self.table.setItem(row, col, cell)

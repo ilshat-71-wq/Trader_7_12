@@ -69,9 +69,9 @@ class FinalRadarWidget(QWidget):
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = CopyableTableWidget(0, 11)
+        self.table = CopyableTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels([
-            "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "ATR / USED",
+            "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "TODAY ₽×V", "ATR / USED",
             "PROB", "Scans", "RT", "FUTURES",
         ])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -80,7 +80,7 @@ class FinalRadarWidget(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setShowGrid(False)
         self.table.setToolTip(
-            "FINAL RADAR promotes only liquid candidates that survive three consecutive "
+            "TODAY ₽×V = accumulated real turnover from the trading-day open: SPOT session money, FUTURES MOEX VALTODAY. FINAL RADAR promotes only liquid candidates that survive three consecutive "
             "strict scans and have real-time confirmation from at least two live "
             "BOOK/TAPE/FLOW components. SPOT uses the established SPOT liquidity gate; "
             "futures use existing OI/Money Flow liquidity data. Matching futures are "
@@ -106,6 +106,20 @@ class FinalRadarWidget(QWidget):
                 if signed
                 else f"{number:,.{digits}f}".replace(",", " ")
             )
+        except (TypeError, ValueError):
+            return "—"
+
+    @staticmethod
+    def _money(value):
+        try:
+            value = float(value)
+            if value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.2f}B"
+            if value >= 1_000_000:
+                return f"{value / 1_000_000:.2f}M"
+            if value >= 1_000:
+                return f"{value / 1_000:.1f}K"
+            return f"{value:.0f}"
         except (TypeError, ValueError):
             return "—"
 
@@ -164,6 +178,7 @@ class FinalRadarWidget(QWidget):
                 "🟢 LONG" if item.get("signal") == "LONG" else "🔴 SHORT",
                 "OI/FLOW" if is_futures else str(item.get("move_phase") or "—"),
                 self._fmt(item.get("change_percent"), 2, True),
+                self._money(item.get("turnover_rub") if is_futures else item.get("session_money")),
                 "—" if is_futures else f"{self._fmt(item.get('atr_percent'), 1)}% • {self._fmt(item.get('atr_used_percent'), 0)}%",
                 f"{self._fmt(item.get('signal_probability'), 1)}%",
                 f"{item.get('final_confirmations', 0)}/3",
@@ -187,7 +202,7 @@ class FinalRadarWidget(QWidget):
             self.meta.text(),
             "",
             "\t".join([
-                "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "ATR / USED",
+                "#", "Type", "Instrument", "Direction", "Phase", "Δ%", "TODAY ₽×V", "ATR / USED",
                 "PROB", "Scans", "RT", "FUTURES"
             ]),
         ]

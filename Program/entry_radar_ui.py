@@ -77,9 +77,9 @@ class EntryRadarWidget(QWidget):
         self.meta.setWordWrap(True)
         root.addWidget(self.meta)
 
-        self.table = CopyableTableWidget(0, 6)
+        self.table = CopyableTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels([
-            "Type", "Инструмент", "Направление", "Confidence", "Entry", "Entry Zone"
+            "Type", "Инструмент", "Направление", "TODAY ₽×V", "Confidence", "Entry", "Entry Zone"
         ])
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
@@ -90,7 +90,7 @@ class EntryRadarWidget(QWidget):
         self.table.setShowGrid(False)
         self.table.setToolTip(
             "Type = SPOT or FUTURES. Instrument is the real market ticker/contract. "
-            "Confidence = existing model confidence + change. Entry = existing read-only entry-state logic. "
+            "TODAY ₽×V = accumulated real turnover from the trading-day open: SPOT session money, FUTURES MOEX VALTODAY. Confidence = existing model confidence + change. Entry = existing read-only entry-state logic. "
             "Entry Zone is shown only when the source provides a real working zone. "
             "Missing zone remains WATCH; no synthetic level is created."
         )
@@ -104,6 +104,20 @@ class EntryRadarWidget(QWidget):
         self.note.setWordWrap(True)
         self.note.setStyleSheet("font-size:10px;color:#7f8a94;padding:4px;")
         root.addWidget(self.note)
+
+    @staticmethod
+    def _money(value):
+        try:
+            value = float(value)
+            if value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.2f}B"
+            if value >= 1_000_000:
+                return f"{value / 1_000_000:.2f}M"
+            if value >= 1_000:
+                return f"{value / 1_000:.1f}K"
+            return f"{value:.0f}"
+        except (TypeError, ValueError):
+            return "—"
 
     @staticmethod
     def _instrument_type(item):
@@ -176,10 +190,12 @@ class EntryRadarWidget(QWidget):
             instrument_type = self._instrument_type(item)
             instrument = self._instrument(item)
 
+            turnover = item.get("turnover_rub") if instrument_type == "FUTURES" else item.get("session_money")
             values = [
                 instrument_type,
                 instrument,
                 direction,
+                self._money(turnover),
                 probability_text,
                 state,
                 EntryRadarService.zone_text(item),
@@ -188,7 +204,7 @@ class EntryRadarWidget(QWidget):
                 cell = QTableWidgetItem(value)
                 cell.setTextAlignment(
                     Qt.AlignmentFlag.AlignCenter
-                    if col in (0, 2, 3, 4)
+                    if col in (0, 2, 3, 4, 5)
                     else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
                 self.table.setItem(row, col, cell)

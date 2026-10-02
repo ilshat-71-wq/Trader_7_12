@@ -114,9 +114,9 @@ class MorningRadarWidget(QWidget):
         watch_title = QLabel("TODAY'S WATCHLIST")
         watch_title.setStyleSheet("font-size:12px;font-weight:800;color:#e8ecef;padding-top:2px;")
         root.addWidget(watch_title)
-        self.watchlist_table = CopyableTableWidget(0, 8)
+        self.watchlist_table = CopyableTableWidget(0, 9)
         self.watchlist_table.setHorizontalHeaderLabels([
-            "#", "Type", "Instrument", "Direction", "Strength", "Interest", "Setup", "Entry"
+            "#", "Type", "Instrument", "TODAY ₽×V", "Direction", "Strength", "Interest", "Setup", "Entry"
         ])
         self.watchlist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.watchlist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -133,9 +133,9 @@ class MorningRadarWidget(QWidget):
         details_title = QLabel("MORNING DETAILS")
         details_title.setStyleSheet("font-size:11px;font-weight:800;color:#8d98a2;padding-top:3px;")
         root.addWidget(details_title)
-        self.table = CopyableTableWidget(0, 12)
+        self.table = CopyableTableWidget(0, 13)
         self.table.setHorizontalHeaderLabels([
-            "Ticker", "Price Δ%", "RS", "ATR / USED", "₽/min", "15m Δ%",
+            "Ticker", "Price Δ%", "RS", "TODAY ₽×V", "ATR / USED", "₽/min", "15m Δ%",
             "Accel", "Interest", "SHORT WATCH", "PERSIST", "SIGNAL", "PROB",
         ])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -325,15 +325,16 @@ class MorningRadarWidget(QWidget):
                 else item.get("spot_ticker") or item.get("ticker")
             )
             entry = "—"
+            turnover = item.get("turnover_rub") if instrument_type == "FUTURES" else item.get("session_money")
             values = [
-                str(r), instrument_type, str(instrument or "—"), direction,
+                str(r), instrument_type, str(instrument or "—"), self._money(turnover), direction,
                 strength, interest, setup, entry,
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setTextAlignment(
                     Qt.AlignmentFlag.AlignCenter
-                    if col in (0, 1, 3, 4, 5, 6, 7)
+                    if col in (0, 1, 3, 4, 5, 6, 7, 8)
                     else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
                 self.watchlist_table.setItem(r - 1, col, cell)
@@ -372,6 +373,7 @@ class MorningRadarWidget(QWidget):
                 item.get("spot_ticker") or item.get("ticker") or "—",
                 self._fmt(item.get("change_percent")),
                 self._fmt(item.get("relative_strength")),
+                self._money(item.get("session_money")),
                 (
                     f"{self._fmt(item.get('atr_percent'))}% • {self._fmt(item.get('atr_used_percent'), 0)}%"
                     if item.get("atr_percent") is not None and item.get("atr_used_percent") is not None
@@ -388,7 +390,7 @@ class MorningRadarWidget(QWidget):
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if col in (1, 2, 3, 4, 5, 6, 11):
+                if col in (1, 2, 3, 4, 5, 6, 12):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, col, cell)
             if item.get("short_watch"):
@@ -470,6 +472,20 @@ class MorningRadarWidget(QWidget):
         self._thread = None
         self._worker = None
         self.refresh_button.setEnabled(True)
+
+    @staticmethod
+    def _money(value):
+        try:
+            value = float(value)
+            if value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.2f}B"
+            if value >= 1_000_000:
+                return f"{value / 1_000_000:.2f}M"
+            if value >= 1_000:
+                return f"{value / 1_000:.1f}K"
+            return f"{value:.0f}"
+        except (TypeError, ValueError):
+            return "—"
 
     @staticmethod
     def _fmt(value, digits=1):

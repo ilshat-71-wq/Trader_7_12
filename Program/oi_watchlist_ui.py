@@ -121,7 +121,7 @@ class OIWatchlistTraderWindow(TraderWindow):
         toolbar.addWidget(self.oi_copy_button)
         layout.addLayout(toolbar)
         self.oi_table = MarketTableWidget(
-            ["#", "Root", "Contract", "Base", "FUT Δ%", "OI", "ΔOI%", "DAY ₽", "LIQ NOW", "FLOW", "BOOK", "TAPE", "FLOW RT", "ACTION", "ZONE",
+            ["#", "Root", "Contract", "Base", "FUT Δ%", "OI", "ΔOI%", "TODAY ₽", "LIQ NOW", "FLOW", "BOOK", "TAPE", "FLOW RT", "ACTION", "ZONE",
              "SIGNAL", "PROB", "ΔPROB"],
             [38, 55, 112, 92, 68, 92, 70, 94, 118, 125, 82, 82, 82, 130, 142, 78, 72, 72],
         )
