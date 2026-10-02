@@ -811,3 +811,33 @@ ONE MACOS APP ONLY — `Trader_7_12 Pro.app`
 - Futures OI table keeps the real MOEX `VALTODAY` monetary turnover and labels it `TODAY ₽`; mixed SPOT/FUTURES tables show the same current-day turnover concept as `TODAY ₽×V`.
 - Market Radar no longer falls back to an alternate `day_money` field for this display; the visible TODAY value is explicitly the current-day `session_money` field.
 - No synthetic Price×Volume, participant identity, or estimated turnover was introduced.
+
+## CURRENCY BASE / REAL-DATA SEMANTICS — 02.10.2026
+
+Для валютных futures mapping использует только реально подтверждённые BCS BASE/SPOT инструменты.
+
+Verified BCS relationships:
+
+```text
+SIZ6 / SI family → USDRUB economic underlying
+USDRUBF         → CETS_FX / USD000SMALL  (authoritative BASE reference)
+USD000SMALL     → CURRENCY / CETS_FX    (real USD/RUB BASE/SPOT source)
+EUZ6 / EU family → EURRUB economic underlying
+EUZ6             → CETS / EUR_RUB__TOM  (real BCS BASE reference)
+CR / CNY family  → CNYRUB
+```
+
+Rules:
+- USDRUBF is a perpetual FUTURES contract and is never used as BASE/SPOT quote source.
+- USD000SMALL/CETS_FX is preferred for real USD/RUB market data when BCS returns it.
+- EUR_RUB__TOM/CETS is preferred for EUR/RUB when BCS returns it.
+- The desktop does not calculate USD/RUB or EUR/RUB locally from CNY/RUB and does not invent a cross-rate.
+- If BCS/MOEX supplies an officially calculated or cross-derived rate, the application may use it only as the real returned market-data instrument/value; the source must remain identifiable in diagnostics.
+- Missing real USD/RUB, EUR/RUB or CNY/RUB data remains NO_DATA/INCOMPLETE and never becomes a synthetic value.
+- A futures contract's authoritative BASE relationship is taken from its real BCS futures card (baseAssetSecurityClassCode + baseAssetSecuritySecCode) when available; catalog entries are only lookup preferences.
+
+Current implementation change:
+- Program/api/bcs_underlying_catalog.py now prefers the verified BCS mappings USD000SMALL/CETS_FX for USDRUB and EUR_RUB__TOM/CETS for EURRUB.
+- tests/test_currency_underlying_catalog.py locks these mappings and explicitly forbids using USDRUBF as BASE/SPOT.
+
+Important source clarification: current MOEX public materials describe USD/RUB spot operations as available while also documenting cross-rate methodology for certain indicative rates. Therefore Trader_7_12 does not hard-code the blanket statement that all USD/RUB values are cross-calculated from CNY/RUB; it follows the real BCS/MOEX instrument and returned-data semantics instead.
