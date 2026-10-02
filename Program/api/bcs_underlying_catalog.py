@@ -18,11 +18,20 @@ BCS instrument lists used by the project.
 
 # canonical economic underlying -> preferred BCS instrument(s), in priority order
 BCS_UNDERLYING_INSTRUMENTS = {
+    # 2026-09-21 live BCS verification: USD/RUB BASE/SPOT is exposed as
+    # USD000SMALL / CETS_FX. Do not use USDRUBF as a quote source: it is a
+    # perpetual futures contract and is only authoritative for proving the
+    # BASE relationship (USDRUBF -> USD000SMALL).
     "USDRUB": (
+        {"ticker": "USD000SMALL", "classCode": "CETS_FX"},
         {"ticker": "USDRUB_TOM", "classCode": "CETS"},
         {"ticker": "USDRUB_TOD", "classCode": "CETS"},
     ),
+    # 2026-09-21 live BCS verification: EUZ6 -> EUR_RUB__TOM / CETS.
+    # Keep the real BCS spelling first; accept legacy aliases only after the
+    # live BCS directory confirms that they are real instruments.
     "EURRUB": (
+        {"ticker": "EUR_RUB__TOM", "classCode": "CETS"},
         {"ticker": "EURRUB_TOM", "classCode": "CETS"},
         {"ticker": "EURRUB_TOD", "classCode": "CETS"},
     ),
