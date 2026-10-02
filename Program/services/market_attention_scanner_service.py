@@ -513,6 +513,19 @@ class MarketAttentionScannerService:
         equal = sum(1 for x in ordered if x == value)
         return round((below + equal * 0.5) / len(ordered) * 100.0, 1)
 
+    @staticmethod
+    def _atr_used_percent(current_price, session_open, atr_value):
+        """Return the real session move consumed as a percentage of D1 Wilder ATR."""
+        try:
+            current = float(current_price)
+            opening = float(session_open)
+            atr = float(atr_value)
+        except (TypeError, ValueError):
+            return None
+        if current <= 0 or opening <= 0 or atr <= 0:
+            return None
+        return round(abs(current - opening) / atr * 100.0, 1)
+
     def _liquidity_ok(self, row):
         session_pace = self._f(row.get("money_per_minute"))
         recent_pace = self._f(row.get("recent_money_per_minute"))
@@ -644,9 +657,8 @@ class MarketAttentionScannerService:
                     atr_value = self._f(profile.get("atr_value"))
                     session_open = self._f(row.get("session_open"))
                     current_price = self._f(row.get("price"))
-                    row["atr_used_percent"] = (
-                        round(abs(current_price - session_open) / atr_value * 100.0, 1)
-                        if atr_value > 0 and session_open > 0 and current_price > 0 else None
+                    row["atr_used_percent"] = self._atr_used_percent(
+                        current_price, session_open, atr_value
                     )
                     row["daily_structure"] = profile.get("structure_direction", "NEUTRAL")
                     row["daily_structure_state"] = profile.get("structure_state", "UNKNOWN")
