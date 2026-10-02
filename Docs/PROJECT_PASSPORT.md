@@ -800,3 +800,14 @@ ONE MACOS APP ONLY — `Trader_7_12 Pro.app`
 - Morning Radar's existing exact-slot scheduler and saved-snapshot handoff remain unchanged.
 - Acceptance on the iMac still requires: pull `main` → pytest → build → open the single `Trader_7_12 Pro.app` → verify that one automatic cycle updates all dependent panels.
 
+
+
+## TODAY TURNOVER / PRICE×VOLUME — 02.10.2026
+
+- All radar tables now expose the accumulated real turnover from the opening of the current trading day through the latest available market data.
+- SPOT source is the existing real candle `money_volume` accumulated from the official intraday start (`06:50 MSK`) to NOW; it is shown as `TODAY ₽×V`.
+- The value is not reset at the 09:00 or 19:00 session boundary and does not represent a 5-minute or 15-minute window.
+- MOVE, ENTRY, FINAL and MORNING reuse the existing `session_money` field; no second SPOT turnover calculation was introduced.
+- Futures OI table keeps the real MOEX `VALTODAY` monetary turnover and labels it `TODAY ₽`; mixed SPOT/FUTURES tables show the same current-day turnover concept as `TODAY ₽×V`.
+- Market Radar no longer falls back to an alternate `day_money` field for this display; the visible TODAY value is explicitly the current-day `session_money` field.
+- No synthetic Price×Volume, participant identity, or estimated turnover was introduced.
