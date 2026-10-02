@@ -785,3 +785,18 @@ NEVER CREATE EXTRA APPLICATIONS OR UNNECESSARY ARCHITECTURE LAYERS
 
 ONE MACOS APP ONLY — `Trader_7_12 Pro.app`
 ```
+## AUTO SCAN / ALL PANELS — 02.10.2026
+
+### Desktop automatic refresh
+- Added one central desktop scheduler in `Program/professional_window.py`.
+- The scheduler starts the existing full market workflow automatically when the app is opened during an open market session.
+- After each completed cycle, the next cycle is scheduled for 5 minutes later.
+- The cycle is ordered through the existing pipeline: SPOT scan → existing MOVE/FINAL/ENTRY handoff → Futures OI + real Money Flow → realtime continuation.
+- No new scanner, scoring model, market-data source, trading logic, or separate application was introduced.
+- The manual `SCAN MARKET` button remains available for an immediate forced refresh.
+- SPOT and Futures scans are never overlapped; if a cycle is still running, the scheduler retries after 10 seconds.
+- Closed-session scans are not forced; the scheduler remains alive and resumes automatically when the market is open.
+- On SPOT/Futures failure the scheduler retries after 10 seconds.
+- Morning Radar's existing exact-slot scheduler and saved-snapshot handoff remain unchanged.
+- Acceptance on the iMac still requires: pull `main` → pytest → build → open the single `Trader_7_12 Pro.app` → verify that one automatic cycle updates all dependent panels.
+
