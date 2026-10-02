@@ -433,9 +433,13 @@ class TraderWindow(QWidget):
             "synthetic values are never used."
         )
 
-        self.copy_diagnostics_button = QPushButton("COPY DIAGNOSTICS")
-        self.copy_diagnostics_button.clicked.connect(
-            lambda: QApplication.clipboard().setText(self.diagnostics_box.toPlainText())
+        self.copy_diagnostics_button = QPushButton("COPY")
+        self.copy_diagnostics_button.setObjectName("secondaryAction")
+        self.copy_diagnostics_button.setToolTip("Copy DIAGNOSTICS status and all diagnostic text to the clipboard")
+        self.copy_diagnostics_button.clicked.connect(self.copy_diagnostics)
+        self.copy_diagnostics_button.setStyleSheet(
+            "font-size:12px;font-weight:800;color:#f0f2f4;background:#30383f;"
+            "border:1px solid #4a555f;border-radius:7px;padding:8px 13px;"
         )
 
         layout.addWidget(self.diagnostics_box, 1)
@@ -843,6 +847,12 @@ class TraderWindow(QWidget):
                     except (TypeError, ValueError):
                         lines.append(f"{label} {timing[key]}")
         return "\n".join(lines)
+
+    def copy_diagnostics(self):
+        QApplication.clipboard().setText(self.diagnostics_box.toPlainText())
+        self.copy_diagnostics_button.setText("COPIED ✓")
+        QTimer.singleShot(1400, lambda: self.copy_diagnostics_button.setText("COPY"))
+        return True
 
     def copy_active_table(self):
         widget = self.market_tabs.currentWidget()

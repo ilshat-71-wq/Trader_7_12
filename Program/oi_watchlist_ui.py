@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 import time
 
 from ui import TraderWindow
-from ui_table import MarketTableWidget, numeric
+from ui_table import MarketTableWidget, numeric, RADAR_BUTTON_STYLE
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.money_flow_service import MoneyFlowService
 from services.signal_probability_service import SignalProbabilityService
@@ -117,8 +117,10 @@ class OIWatchlistTraderWindow(TraderWindow):
         hint.setStyleSheet("color:#7f8a94;font-size:10px;padding-left:3px;")
         toolbar.addWidget(hint, 1)
         self.oi_copy_button = QPushButton("COPY")
+        self.oi_copy_button.setToolTip("Copy FUTURES OI status and all rows to the clipboard")
         self.oi_copy_button.clicked.connect(self.copy_oi_table)
         toolbar.addWidget(self.oi_copy_button)
+        self.setStyleSheet(self.styleSheet() + RADAR_BUTTON_STYLE)
         layout.addLayout(toolbar)
         self.oi_table = MarketTableWidget(
             ["#", "Root", "Contract", "Base", "FUT Δ%", "OI", "ΔOI%", "TODAY ₽", "LIQ NOW", "FLOW", "BOOK", "TAPE", "FLOW RT", "ACTION", "ZONE",
@@ -653,6 +655,8 @@ class OIWatchlistTraderWindow(TraderWindow):
     def copy_oi_table(self):
         copied = self.oi_table.copy_selection()
         self.market_tabs.setCurrentWidget(self.oi_panel)
+        self.oi_copy_button.setText("COPIED ✓" if copied else "NOTHING TO COPY")
+        QTimer.singleShot(1400, lambda: self.oi_copy_button.setText("COPY"))
         return copied
 
     def _oi_failed(self, error):
