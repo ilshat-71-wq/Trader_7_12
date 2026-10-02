@@ -126,11 +126,26 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         self.session_handoff_timer = QTimer(self)
         self.session_handoff_timer.timeout.connect(self._check_session_handoff)
         self.session_handoff_timer.start(1_000)
+
+        # One central desktop scheduler drives the existing full scan workflow.
+        # A completed SPOT scan already hands the same cycle into MOVE/ENTRY/
+        # FINAL and then Futures OI. Schedule the next cycle only after the
+        # current SPOT + Futures chain is finished, avoiding overlap.
+        self.AUTO_SCAN_INTERVAL_MS = 5 * 60 * 1000
+        self.AUTO_SCAN_RETRY_MS = 10 * 1000
+        self.auto_scan_timer = QTimer(self)
+        self.auto_scan_timer.setSingleShot(True)
+        self.auto_scan_timer.timeout.connect(self._run_auto_scan)
+        self.auto_scan_enabled = True
+
         # Load the persisted morning result once on startup. The UI keeps
         # refreshing through the 09:50 final morning slot; after that the
         # completed morning result remains visible for the rest of the day.
         QTimer.singleShot(1200, self.morning_radar.refresh)
         QTimer.singleShot(1300, self._check_session_handoff)
+        # Start the first live cycle automatically. The manual SCAN MARKET
+        # button remains available for an immediate forced refresh.
+        QTimer.singleShot(1800, self._run_auto_scan)
 
     @staticmethod
     def _moscow_time():
@@ -321,7 +336,43 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         if self.sound_enabled:
             self.sound.play()
 
+    def _schedule_next_auto_scan(self, delay_ms=None):
+        if not self.auto_scan_enabled:
+            return
+        delay = self.AUTO_SCAN_INTERVAL_MS if delay_ms is None else max(1000, int(delay_ms))
+        self.auto_scan_timer.start(delay)
+
+    def _run_auto_scan(self):
+        if not self.auto_scan_enabled or not self.scanner_enabled:
+            return
+        info = self.session_service.get_session_info()
+        if not info.get("market_open"):
+            # Keep the scheduler alive without forcing closed-session scans.
+            self._schedule_next_auto_scan(self.AUTO_SCAN_INTERVAL_MS)
+            return
+        if (
+            self.scan_thread is not None
+            and self.scan_thread.isRunning()
+        ) or (
+            self.oi_thread is not None
+            and self.oi_thread.isRunning()
+        ):
+            # Never overlap a full cycle. Re-check shortly after the current
+            # SPOT + Futures chain has completed.
+            self._schedule_next_auto_scan(self.AUTO_SCAN_RETRY_MS)
+            return
+        self.run_market_scan()
+
     def run_market_scan(self):
+        if (
+            self.scan_thread is not None
+            and self.scan_thread.isRunning()
+        ) or (
+            self.oi_thread is not None
+            and self.oi_thread.isRunning()
+        ):
+            return
+        self.auto_scan_timer.stop()
         if self.sound_enabled:
             self.sound.play()
             self.sound_timer.start(8500)
@@ -359,11 +410,16 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         super()._oi_finished(results, diagnostics)
         self._set_entry_results(self._latest_oi_results)
         self._play_completion_sound()
+        # The whole cycle is now complete: SPOT → OI/FLOW → all dependent
+        # panels. Start the next automatic cycle from this single scheduler.
+        self._schedule_next_auto_scan()
 
     def _oi_failed(self, error):
         super()._oi_failed(error)
         self._play_completion_sound()
+        self._schedule_next_auto_scan(self.AUTO_SCAN_RETRY_MS)
 
     def _scan_failed(self, error):
         self._stop_scan_sound()
         super()._scan_failed(error)
+        self._schedule_next_auto_scan(self.AUTO_SCAN_RETRY_MS)
