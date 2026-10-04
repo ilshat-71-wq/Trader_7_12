@@ -841,3 +841,10 @@ Current implementation change:
 - tests/test_currency_underlying_catalog.py locks these mappings and explicitly forbids using USDRUBF as BASE/SPOT.
 
 Important source clarification: current MOEX public materials describe USD/RUB spot operations as available while also documenting cross-rate methodology for certain indicative rates. Therefore Trader_7_12 does not hard-code the blanket statement that all USD/RUB values are cross-calculated from CNY/RUB; it follows the real BCS/MOEX instrument and returned-data semantics instead.
+
+## MOVE RADAR SORTING — 04.10.2026
+
+- MOVE RADAR header sorting is now preserved across realtime/table repaints instead of reverting to the service order.
+- Numeric columns carry their underlying numeric value for sorting, including mixed K/M/B turnover values; phase sorting uses the existing phase rank.
+- Clicking the same header toggles ascending/descending order; a refresh keeps the active column and direction.
+- No market-data, signal, phase-classification, or ranking logic was changed.
