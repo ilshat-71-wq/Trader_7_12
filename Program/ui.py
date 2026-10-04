@@ -255,7 +255,19 @@ class TraderWindow(QWidget):
         result_layout = QVBoxLayout(self.result_panel)
         result_layout.setContentsMargins(8, 8, 8, 8)
         result_layout.setSpacing(7)
-        result_layout.addWidget(self.result_box)
+
+        spot_head = QHBoxLayout()
+        spot_head.setSpacing(8)
+        spot_head.addWidget(self.result_box, 1)
+        self.copy_spot_button = QPushButton("COPY")
+        self.copy_spot_button.setObjectName("secondaryAction")
+        self.copy_spot_button.setToolTip(
+            "Copy the active SPOT radar table to the clipboard"
+        )
+        self.copy_spot_button.clicked.connect(self.copy_spot_table)
+        spot_head.addWidget(self.copy_spot_button, 0, Qt.AlignmentFlag.AlignTop)
+        result_layout.addLayout(spot_head)
+
         result_layout.addWidget(self.spot_tabs, 1)
         self.result_table.hide()
         self.weak_result_table.hide()
@@ -847,6 +859,16 @@ class TraderWindow(QWidget):
                     except (TypeError, ValueError):
                         lines.append(f"{label} {timing[key]}")
         return "\n".join(lines)
+
+    def copy_spot_table(self):
+        table = self.spot_tabs.currentWidget()
+        copied = table.copy_selection() if table is not None else False
+        if copied is False:
+            self.copy_spot_button.setText("NOTHING TO COPY")
+        else:
+            self.copy_spot_button.setText("COPIED ✓")
+        QTimer.singleShot(1400, lambda: self.copy_spot_button.setText("COPY"))
+        return copied
 
     def copy_diagnostics(self):
         QApplication.clipboard().setText(self.diagnostics_box.toPlainText())
