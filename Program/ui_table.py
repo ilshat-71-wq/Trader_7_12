@@ -242,7 +242,7 @@ class MarketTableWidget(QTableWidget):
         self.setStyleSheet(TABLE_STYLE)
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
-        self.setTextElideMode(QAbstractItemView.TextElideMode.ElideRight)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
