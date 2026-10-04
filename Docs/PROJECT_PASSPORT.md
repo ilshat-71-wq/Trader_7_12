@@ -895,3 +895,22 @@ Added Program/test_moex_weekend_eligibility_service.py covering:
 - MOEX mapping HTTP failure returns unavailable rather than allowing stocks.
 
 Local pytest/build after this change is pending; do not mark this correction as locally verified until the iMac runs the real test suite and a Sunday scan.
+
+
+---
+
+## Morning Radar — operator workflow (2026-10-04)
+
+Confirmed production behavior:
+- Cloud Morning Radar scheduler runs independently of the desktop UI at fixed Moscow slots: 07:00, 07:15, 07:30, 08:00, 09:00, 09:45, 09:50.
+- Each slot runs the existing real-data production scan and persists its snapshot; failed slots remain unmarked and are retried during the capture window.
+- Desktop Morning Radar is read-only: it loads persisted Cloud snapshots and does not launch a second scan.
+- When Trader_7_12 Pro is opened during 06:50–09:50 MSK, the Morning Radar tab is selected automatically and the persisted morning result is immediately shown.
+- The 09:00 handoff populates Entry Radar in the background and does not forcibly switch the operator away from Morning Radar.
+- After 09:50 the completed morning result remains visible for the rest of the day.
+
+Live evidence already observed on 2026-10-04: `1/7 SLOTS`, `SNAPSHOTS 1`, `latest slot 09:45`, Cloud `http://127.0.0.1:8080`.
+
+User workflow: start/keep Cloud running before the morning window; open the app near 09:00; review Morning Radar; use Entry Radar/Final Radar for subsequent confirmation. Morning Radar is a watchlist/history layer, not an order-execution layer.
+
+UI workflow fix commit: `cbb943ccb6176d82ffbe0bfaecd2c1898a2ac4f5` (`Fix Morning Radar morning-first user workflow`).
