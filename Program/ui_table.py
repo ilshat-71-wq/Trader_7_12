@@ -95,6 +95,7 @@ QPushButton:disabled {
 }
 """
 
+
 class CopyableTableWidget(QTableWidget):
     """Read-only Qt table with professional copy and reliable header sorting."""
 
@@ -151,6 +152,14 @@ class CopyableTableWidget(QTableWidget):
         else:
             self._sort_column = column
             self._sort_order = Qt.SortOrder.AscendingOrder
+
+        self.apply_current_sort()
+
+    def apply_current_sort(self):
+        """Reapply the active header sort without changing its direction."""
+        column = self._sort_column
+        if column < 0 or column >= self.columnCount():
+            return
 
         self.horizontalHeader().setSortIndicator(column, self._sort_order)
 
@@ -233,7 +242,7 @@ class MarketTableWidget(QTableWidget):
         self.setStyleSheet(TABLE_STYLE)
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
-        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setTextElideMode(QAbstractItemView.TextElideMode.ElideRight)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -372,12 +381,6 @@ class MarketTableWidget(QTableWidget):
 
         QApplication.clipboard().setText("\n".join(lines))
         return True
-
-    def copy_all(self):
-        return self.copy_selection(include_headers=True)
-
-    def copy_without_headers(self):
-        return self.copy_selection(include_headers=False)
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.StandardKey.Copy):
