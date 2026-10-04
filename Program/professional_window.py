@@ -143,6 +143,11 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         # completed morning result remains visible for the rest of the day.
         QTimer.singleShot(1200, self.morning_radar.refresh)
         QTimer.singleShot(1300, self._check_session_handoff)
+        # When the application is opened during the morning window, show the
+        # persisted Morning Radar immediately. It is a read-only view of the
+        # Cloud scheduler's already captured slots; opening the app must not
+        # make the operator hunt for the morning result.
+        QTimer.singleShot(1400, self._select_morning_radar_if_active)
         # Start the first live cycle automatically. The manual SCAN MARKET
         # button remains available for an immediate forced refresh.
         QTimer.singleShot(1800, self._run_auto_scan)
@@ -156,6 +161,14 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         total_minutes = now.hour * 60 + now.minute
         if 6 * 60 + 50 <= total_minutes <= 9 * 60 + 50:
             self.morning_radar.refresh()
+
+    def _select_morning_radar_if_active(self):
+        now = self._moscow_time()
+        total_minutes = now.hour * 60 + now.minute
+        if 6 * 60 + 50 <= total_minutes <= 9 * 60 + 50:
+            index = self.market_tabs.indexOf(self.morning_radar)
+            if index >= 0:
+                self.market_tabs.setCurrentIndex(index)
 
     @staticmethod
     def _entry_key(item):
@@ -207,9 +220,9 @@ class ProfessionalTraderWindow(OIWatchlistTraderWindow):
         # Select ENTRY RADAR once at the main-session handoff. Do not force
         # the tab every second: the operator must be free to switch tabs.
         if not self._entry_handoff_done:
-            entry_index = self.market_tabs.indexOf(self.entry_radar)
-            if entry_index >= 0:
-                self.market_tabs.setCurrentIndex(entry_index)
+            # The 09:00 handoff feeds ENTRY RADAR in the background. Do not
+            # steal the operator's view: Morning Radar remains visible until
+            # the operator chooses another tab.
             self._entry_handoff_done = True
         if not self._morning_handoff_requested:
             self._morning_handoff_requested = True
