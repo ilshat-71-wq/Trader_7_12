@@ -22,7 +22,6 @@ class MoexWeekendEligibilityService:
     CACHE_SECONDS = 300.0
     TIMEOUT = 8.0
     RETRIES = 1
-    WEEKEND_BOARDS = {"TQBR", "TQTF", "TQIF", "TQTY", "SMAL"}
 
     _lock = RLock()
     _cached = None
@@ -95,13 +94,7 @@ class MoexWeekendEligibilityService:
                 fields = set(rows[0])
                 if not {"SECURITYID", "BOARDID", "WEEKENDSES"}.issubset(fields):
                     continue
-                return {
-                    row["SECURITYID"].upper()
-                    for row in rows
-                    if row.get("BOARDID", "").upper() in cls.WEEKEND_BOARDS
-                    and row.get("WEEKENDSES", "").upper() == "Y"
-                    and row.get("SECURITYID", "").strip()
-                }
+                return {\n                    row["SECURITYID"].strip().upper()\n                    for row in rows\n                    if row.get("WEEKENDSES", "").strip().upper() == "Y"\n                    and row.get("SECTYPE", "").strip().upper() in {"1", "2"}\n                    and row.get("SECURITYID", "").strip()\n                }
         raise ValueError("SL.ZIP DBF has no WeekendSes mapping")
 
     @classmethod
