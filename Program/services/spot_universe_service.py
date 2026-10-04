@@ -189,6 +189,10 @@ class SpotUniverseService:
             recovered = self._load_sequential_fallback(failed_kinds)
             loaded_by_kind.update(recovered)
 
+        weekend_eligible = None
+        if weekend_session:
+            weekend_eligible = MoexWeekendEligibilityService.load()
+
         records = []
         for kind, items in loaded_by_kind.items():
             for item in items:
@@ -205,7 +209,6 @@ class SpotUniverseService:
                     # BCS Trade API instrument cards do not expose MOEX
                     # SECURITIES.WEEKENDSESSION. Use the official MOEX
                     # daily security/board mapping instead.
-                    weekend_eligible = MoexWeekendEligibilityService.load()
                     if weekend_eligible is None or ticker not in weekend_eligible:
                         continue
                     weekend_flag = True
