@@ -848,3 +848,13 @@ Important source clarification: current MOEX public materials describe USD/RUB s
 - Numeric columns carry their underlying numeric value for sorting, including mixed K/M/B turnover values; phase sorting uses the existing phase rank.
 - Clicking the same header toggles ascending/descending order; a refresh keeps the active column and direction.
 - No market-data, signal, phase-classification, or ranking logic was changed.
+
+
+## WEEKEND SPOT ELIGIBILITY — 04.10.2026
+
+- Weekend SPOT universe uses the real MOEX SECURITIES.WEEKENDSESSION eligibility exposed by BCS metadata.
+- The eligibility reader accepts the security-level BCS field and board-level BCS metadata variants.
+- During WEEKEND_SESSION, a stock is included only when BCS explicitly reports weekend eligibility; unknown eligibility is not treated as tradable.
+- The scanner passes the detected session explicitly into SpotUniverseService, so universe construction cannot drift to a different session clock during a scan.
+- No synthetic weekend eligibility, ticker allowlist, price, volume, liquidity, or coverage data is introduced.
+- Regular weekday SPOT universe construction is unchanged.
