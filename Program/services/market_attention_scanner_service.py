@@ -93,11 +93,11 @@ class MarketAttentionScannerService:
             rows = []
         return rows if isinstance(rows, list) else []
 
-    def build_universe(self):
+    def build_universe(self, weekend_session=None):
         started = perf_counter()
         spot_started = started
         spot_service = SpotUniverseService(api=self.api)
-        spots = spot_service.load()
+        spots = spot_service.load(weekend_session=weekend_session)
         spot_load_seconds = round(perf_counter() - spot_started, 3)
 
         filter_started = perf_counter()
@@ -575,7 +575,7 @@ class MarketAttentionScannerService:
             return []
         preferred = self.PREFERRED_START <= now.time() < self.PREFERRED_END
         scan_window = f"{session_start.strftime('%H:%M')}-до закрытия MSK"
-        universe = self.build_universe()
+        universe = self.build_universe(weekend_session=(session_name == "WEEKEND_SESSION"))
         timings["universe"] = round(perf_counter() - phase_started, 3)
         timings["universe_breakdown"] = dict(getattr(self, "_last_universe_timing", {}) or {})
 
