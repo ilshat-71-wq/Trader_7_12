@@ -858,3 +858,40 @@ Important source clarification: current MOEX public materials describe USD/RUB s
 - The scanner passes the detected session explicitly into SpotUniverseService, so universe construction cannot drift to a different session clock during a scan.
 - No synthetic weekend eligibility, ticker allowlist, price, volume, liquidity, or coverage data is introduced.
 - Regular weekday SPOT universe construction is unchanged.
+
+
+## WEEKEND SPOT ELIGIBILITY — MOEX SOURCE CORRECTION — 04.10.2026
+
+### Root cause
+BCS Trade API /instruments/by-type metadata does not expose MOEX SECURITIES.WEEKENDSESSION. The public BCS instrument schema contains ticker, boards, type and other instrument fields, but no WEEKENDSESSION field.
+
+Therefore the previous implementation that tried to read WEEKENDSESSION from BCS records could only return None for real BCS cards. With the strict weekend rule this correctly produced Universe 0, but the source itself was wrong.
+
+### Authoritative source
+MOEX explicitly documents SECURITIES.WEEKENDSESSION as the flag determining whether a security is admitted to the additional weekend session. MOEX also publishes the daily security/board mapping file SL.ZIP through the official Securities Listing page. Its WeekendSes field is the public representation of the same admission flag.
+
+### Production implementation
+- Added Program/services/moex_weekend_eligibility_service.py.
+- The service downloads the official MOEX https://iss.moex.com/file/stock_boardsecid/SL.ZIP mapping.
+- It parses the DBF without adding a third-party dependency.
+- Weekend eligibility is accepted only for real rows with WeekendSes=Y on the relevant weekend trading boards.
+- The mapping is cached for 300 seconds.
+- If the official MOEX mapping is unavailable or cannot be parsed, the service returns None; weekend SPOT does not silently fall back to an allowlist or unknown-as-eligible behavior.
+- SpotUniverseService loads the MOEX eligibility set once per weekend scan and intersects it with the real BCS STOCK universe.
+- Weekday SPOT universe construction remains unchanged.
+
+### Important correction to previous passport text
+The earlier statement that weekend eligibility was read from BCS metadata was incorrect. The correct production rule is:
+
+REAL BCS STOCK UNIVERSE ∩ REAL MOEX WeekendSes=Y
+
+No synthetic eligibility is introduced.
+
+### Regression coverage
+Added Program/test_moex_weekend_eligibility_service.py covering:
+- TQBR + WeekendSes=Y accepted;
+- TQBR + WeekendSes=N rejected;
+- non-weekend board does not qualify;
+- MOEX mapping HTTP failure returns unavailable rather than allowing stocks.
+
+Local pytest/build after this change is pending; do not mark this correction as locally verified until the iMac runs the real test suite and a Sunday scan.
