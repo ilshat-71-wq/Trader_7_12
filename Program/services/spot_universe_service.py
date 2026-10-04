@@ -101,21 +101,57 @@ class SpotUniverseService:
         return "SPOT"
 
     @staticmethod
-    def _weekend_flag(record):
-        """Read MOEX SECURITIES.WEEKENDSESSION from BCS metadata when exposed."""
+    def _parse_weekend_value(value):
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().upper()
+        if text in {"Y", "YES", "TRUE", "1", "T"}:
+            return True
+        if text in {"N", "NO", "FALSE", "0", "F"}:
+            return False
+        return None
+
+    @classmethod
+    def _weekend_flag(cls, record):
+        """Read MOEX SECURITIES.WEEKENDSESSION from real BCS metadata.
+
+        BCS cards can expose the field either on the security itself or on
+        one of its board entries. Never infer weekend eligibility when the
+        exchange did not provide an explicit value.
+        """
         if not isinstance(record, dict):
             return None
-        for key in ("WEEKENDSESSION", "weekendSession", "weekend_session", "weekEndSession", "WeekEndSession"):
-            if key not in record:
-                continue
-            value = record.get(key)
-            if isinstance(value, bool):
-                return value
-            text = str(value).strip().upper()
-            if text in {"Y", "YES", "TRUE", "1", "T"}:
-                return True
-            if text in {"N", "NO", "FALSE", "0", "F"}:
-                return False
+
+        keys = {
+            "WEEKENDSESSION",
+            "WEEKEND_SESSION",
+            "WEEKENDSESSIONFLAG",
+            "weekendSession",
+            "weekend_session",
+            "weekEndSession",
+            "WeekEndSession",
+        }
+        for key, value in record.items():
+            normalized = str(key).replace("-", "").replace("_", "").lower()
+            if normalized == "weekendsession":
+                parsed = cls._parse_weekend_value(value)
+                if parsed is not None:
+                    return parsed
+
+        boards = record.get("boards")
+        if isinstance(boards, dict):
+            boards = [boards]
+        if isinstance(boards, list):
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+                for key, value in board.items():
+                    normalized = str(key).replace("-", "").replace("_", "").lower()
+                    if normalized == "weekendsession":
+                        parsed = cls._parse_weekend_value(value)
+                        if parsed is not None:
+                            return parsed
+
         return None
 
     def load(self, weekend_session=None):
@@ -164,7 +200,7 @@ class SpotUniverseService:
                 if not ticker or not class_code:
                     continue
                 weekend_flag = self._weekend_flag(item) if kind == "STOCK" else None
-                if weekend_session and kind == "STOCK" and weekend_flag is False:
+                if weekend_session and kind == "STOCK" and weekend_flag is not True:
                     continue
                 normalized = {
                     "spot_ticker": ticker,
