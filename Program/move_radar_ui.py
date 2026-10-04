@@ -197,12 +197,29 @@ class MoveRadarWidget(QWidget):
                 self._fmt(item.get("signal_probability"), 1) + "%",
                 self._rt_text(item),
             ]
+            sort_values = [
+                None,
+                item.get("move_phase_rank"),
+                0 if signal == "LONG" else 1,
+                item.get("change_percent"),
+                item.get("atr_used_percent"),
+                item.get("relative_strength"),
+                item.get("session_money"),
+                item.get("money_per_minute"),
+                item.get("recent_money"),
+                item.get("money_acceleration"),
+                item.get("signal_probability"),
+                (item.get("_realtime") or {}).get("flow_score"),
+            ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
                 cell.setTextAlignment(
                     Qt.AlignmentFlag.AlignCenter if col in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
                     else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
+                numeric_sort_value = sort_values[col]
+                if isinstance(numeric_sort_value, (int, float)):
+                    cell.setData(Qt.ItemDataRole.UserRole, float(numeric_sort_value))
                 self.table.setItem(row, col, cell)
                 cell.setBackground(QBrush(QColor(phase_colors[item["move_phase"]])))
             self.table.item(row, 1).setForeground(QColor(
@@ -211,4 +228,5 @@ class MoveRadarWidget(QWidget):
                 else "#ff7d7d" if item["move_phase"] == "EXHAUSTION"
                 else "#b9e0c2"
             ))
+        self.table.apply_current_sort()
         self.state.setText(f"{len(rows)} CANDIDATES")
