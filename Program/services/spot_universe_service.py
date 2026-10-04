@@ -10,6 +10,7 @@ from time import perf_counter
 
 from api.bcs_api import BCSAPI
 from services.bcs_metadata_cache_service import BCSMetadataCacheService
+from services.moex_weekend_eligibility_service import MoexWeekendEligibilityService
 
 
 class SpotUniverseService:
@@ -200,8 +201,14 @@ class SpotUniverseService:
                 if not ticker or not class_code:
                     continue
                 weekend_flag = self._weekend_flag(item) if kind == "STOCK" else None
-                if weekend_session and kind == "STOCK" and weekend_flag is not True:
-                    continue
+                if weekend_session and kind == "STOCK":
+                    # BCS Trade API instrument cards do not expose MOEX
+                    # SECURITIES.WEEKENDSESSION. Use the official MOEX
+                    # daily security/board mapping instead.
+                    weekend_eligible = MoexWeekendEligibilityService.load()
+                    if weekend_eligible is None or ticker not in weekend_eligible:
+                        continue
+                    weekend_flag = True
                 normalized = {
                     "spot_ticker": ticker,
                     "spot_class_code": class_code,
