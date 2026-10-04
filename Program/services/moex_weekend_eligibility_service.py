@@ -92,7 +92,7 @@ class MoexWeekendEligibilityService:
                 if not rows:
                     continue
                 fields = set(rows[0])
-                if not {"SECURITYID", "BOARDID", "WEEKENDSES"}.issubset(fields):
+                if not {"SECURITYID", "BOARDID", "WEEKENDSES", "SECTYPE"}.issubset(fields):
                     continue
                 return {\n                    row["SECURITYID"].strip().upper()\n                    for row in rows\n                    if row.get("WEEKENDSES", "").strip().upper() == "Y"\n                    and row.get("SECTYPE", "").strip().upper() in {"1", "2"}\n                    and row.get("SECURITYID", "").strip()\n                }
         raise ValueError("SL.ZIP DBF has no WeekendSes mapping")
