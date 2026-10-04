@@ -47,18 +47,18 @@ def _zip(rows):
 
 def test_parse_zip_uses_official_weekend_board_and_flag():
     payload = _zip([
-        {"SECURITYID": "SBER", "BOARDID": "TQBR", "WEEKENDSES": "Y"},
-        {"SECURITYID": "GAZP", "BOARDID": "TQBR", "WEEKENDSES": "N"},
-        {"SECURITYID": "TEST", "BOARDID": "TQCB", "WEEKENDSES": "Y"},
+        {"SECURITYID": "SBER", "BOARDID": "TQBR", "WEEKENDSES": "Y", "SECTYPE": "1"},
+        {"SECURITYID": "GAZP", "BOARDID": "TQBR", "WEEKENDSES": "N", "SECTYPE": "1"},
+        {"SECURITYID": "TEST", "BOARDID": "TQCB", "WEEKENDSES": "Y", "SECTYPE": "6"},
     ])
     assert MoexWeekendEligibilityService._parse_zip(payload) == {"SBER"}
 
 
 def test_parse_zip_accepts_weekend_fund_board():
     payload = _zip([
-        {"SECURITYID": "FUND", "BOARDID": "TQTF", "WEEKENDSES": "Y"},
+        {"SECURITYID": "FUND", "BOARDID": "TQTF", "WEEKENDSES": "Y", "SECTYPE": "J"},
     ])
-    assert "FUND" in MoexWeekendEligibilityService._parse_zip(payload)
+    assert "FUND" not in MoexWeekendEligibilityService._parse_zip(payload)
 
 
 def test_load_returns_none_when_official_moex_mapping_is_unavailable(monkeypatch):
