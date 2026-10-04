@@ -10,6 +10,7 @@ def _dbf(rows):
         ("SECURITYID", 12),
         ("BOARDID", 8),
         ("WEEKENDSES", 1),
+        ("SECTYPE", 1),
     ]
     header_len = 32 + 32 * len(fields) + 1
     record_len = 1 + sum(length for _, length in fields)
