@@ -82,6 +82,8 @@ class Collector(QObject):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--seconds", type=float, default=20.0)
+    p.add_argument("--ticker", type=str, default=None,
+                   help="Optional exact futures ticker to isolate, e.g. SIZ6")
     args = p.parse_args()
 
     print("=== BCS PRODUCTION REALTIME / QT DIAGNOSTIC ===")
@@ -107,6 +109,14 @@ def main():
         if ticker and code and (ticker, code) not in seen:
             instruments.append({"ticker": ticker, "classCode": code})
             seen.add((ticker, code))
+
+    if args.ticker:
+        target = args.ticker.strip().upper()
+        instruments = [x for x in instruments if x["ticker"] == target]
+        if not instruments:
+            print(f"INSTRUMENT SET     FAIL: ticker {target} not found")
+            return 3
+        print(f"TARGET            {target} / {instruments[0]["classCode"]}")
 
     if not instruments:
         print("INSTRUMENT SET     FAIL")
@@ -140,6 +150,13 @@ def main():
     print(f"TAPE ACK           {len(accepted_tape)}/{len(expected)}")
     print(f"BOOK MESSAGE       {worker._message_counts['OrderBook']}")
     print(f"TAPE MESSAGE       {worker._message_counts['LastTrades']}")
+    if args.ticker:
+        target = args.ticker.strip().upper()
+        target_book = sum(1 for item in collector.snapshots if str(item.get("ticker") or "").upper() == target)
+        target_snapshot = sum(1 for item in collector.snapshots if str(item.get("ticker") or "").upper() == target)
+        print(f"{target} BOOK MESSAGE  {"YES" if target_book else "NO"}")
+        print(f"{target} BOOK COUNT    {target_book}")
+        print(f"{target} SNAPSHOTS     {target_snapshot}")
     print(f"LIVE DATA SEEN     {worker._live_data_seen}")
     print(f"SNAPSHOT EMITS     {worker.emit_attempts}")
     print(f"SNAPSHOT RECEIVED  {len(collector.snapshots)}")
@@ -165,6 +182,13 @@ def main():
     if worker._message_counts["OrderBook"] == 0 and worker._message_counts["LastTrades"] == 0:
         print("RESULT             NO REALTIME MARKET-DATA MESSAGES")
         return 11
+    if args.ticker:
+        target = args.ticker.strip().upper()
+        if target_book:
+            print(f"RESULT             {target} BOOK MESSAGE: YES")
+        else:
+            print(f"RESULT             {target} BOOK MESSAGE: NO")
+
     if worker.emit_attempts > 0 and not collector.snapshots:
         print("RESULT             SNAPSHOT EMIT EXISTS BUT QT RECEIVER GETS NOTHING")
         print("NEXT               Qt signal/thread handoff")
