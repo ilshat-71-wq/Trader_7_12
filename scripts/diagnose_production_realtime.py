@@ -21,6 +21,18 @@ class TracedRealtimeWorker(RealtimeMicrostructureWorker):
         super().__init__(api, instruments)
         self.emit_attempts = 0
         self.emit_tickers = Counter()
+        self.book_tickers = Counter()
+        self.tape_tickers = Counter()
+
+    def _handle(self, payload):
+        if isinstance(payload, dict):
+            ticker = str(payload.get("ticker") or "").upper()
+            response_type = str(payload.get("responseType") or "")
+            if response_type == "OrderBook" and ticker:
+                self.book_tickers[ticker] += 1
+            elif response_type == "LastTrades" and ticker:
+                self.tape_tickers[ticker] += 1
+        super()._handle(payload)
 
     def _emit_snapshot(self, ticker, class_code):
         self.emit_attempts += 1
@@ -152,10 +164,13 @@ def main():
     print(f"TAPE MESSAGE       {worker._message_counts['LastTrades']}")
     if args.ticker:
         target = args.ticker.strip().upper()
-        target_book = sum(1 for item in collector.snapshots if str(item.get("ticker") or "").upper() == target)
+        target_book = worker.book_tickers.get(target, 0)
+        target_tape = worker.tape_tickers.get(target, 0)
         target_snapshot = sum(1 for item in collector.snapshots if str(item.get("ticker") or "").upper() == target)
         print(f"{target} BOOK MESSAGE  {"YES" if target_book else "NO"}")
         print(f"{target} BOOK COUNT    {target_book}")
+        print(f"{target} TAPE MESSAGE  {"YES" if target_tape else "NO"}")
+        print(f"{target} TAPE COUNT    {target_tape}")
         print(f"{target} SNAPSHOTS     {target_snapshot}")
     print(f"LIVE DATA SEEN     {worker._live_data_seen}")
     print(f"SNAPSHOT EMITS     {worker.emit_attempts}")
