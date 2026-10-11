@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "Program"))
 
+from Cloud import market_data_engine as engine_module
 from Cloud.market_data_engine import CloudMarketDataEngine
 
 
@@ -64,11 +65,16 @@ class FakeMoneyFlow:
         return rows
 
 
-def test_engine_publishes_shared_snapshot():
-    engine = CloudMarketDataEngine(scan_interval_seconds=30, radar_limit=10)
-    engine._radar = FakeRadar()
-    engine._futures = FakeFutures()
-    engine._money_flow = FakeMoneyFlow()
+def _engine_with_fakes(monkeypatch, **kwargs):
+    # Engine construction must not authorize against BCS in unit tests.
+    monkeypatch.setattr(engine_module, "MarketInformationScannerService", FakeRadar)
+    monkeypatch.setattr(engine_module, "FuturesOIMarketDataScannerService", FakeFutures)
+    monkeypatch.setattr(engine_module, "MoneyFlowService", FakeMoneyFlow)
+    return CloudMarketDataEngine(**kwargs)
+
+
+def test_engine_publishes_shared_snapshot(monkeypatch):
+    engine = _engine_with_fakes(monkeypatch, scan_interval_seconds=30, radar_limit=10)
 
     snapshot = engine.scan_once()
     payload = snapshot.as_dict()
@@ -89,11 +95,8 @@ def test_engine_publishes_shared_snapshot():
     assert engine.status["timing"]["total_ms"] == payload["timing"]["total_ms"]
 
 
-def test_subscriber_gets_current_snapshot():
-    engine = CloudMarketDataEngine(scan_interval_seconds=30)
-    engine._radar = FakeRadar()
-    engine._futures = FakeFutures()
-    engine._money_flow = FakeMoneyFlow()
+def test_subscriber_gets_current_snapshot(monkeypatch):
+    engine = _engine_with_fakes(monkeypatch, scan_interval_seconds=30)
 
     engine.scan_once()
     queue = engine.subscribe()

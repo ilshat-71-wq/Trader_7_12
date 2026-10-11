@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from api import bcs_api as bcs_api_module
 from api.bcs_api import BCSAPI
 from api.request_helper import RequestHelper
 
@@ -16,45 +17,41 @@ class FakeResponse:
         return self._payload
 
 
-def test_candle_cache_reuses_equivalent_requests():
+def test_candle_cache_reuses_equivalent_requests(monkeypatch):
     api = BCSAPI()
     calls = []
-    original = RequestHelper.get
 
     def fake_get(*args, **kwargs):
         calls.append(kwargs)
         return FakeResponse()
 
-    RequestHelper.get = staticmethod(fake_get)
-    try:
-        start = datetime(2026, 8, 18, 5, 0, 12, tzinfo=timezone.utc)
-        end = datetime(2026, 8, 18, 5, 12, 44, tzinfo=timezone.utc)
-        first = api.get_candles("BRENT1026", "SPBFUT", "H1", start, end)
-        second = api.get_candles("BRENT1026", "SPBFUT", "H1", start, end)
-        assert first == second
-        assert len(calls) == 1
-        assert calls[0]["timeout"] == api.CANDLE_TIMEOUT
-        assert calls[0]["max_retries"] == api.CANDLE_RETRIES
-    finally:
-        RequestHelper.get = staticmethod(original)
+    # Patch the exact RequestHelper class referenced by BCSAPI, avoiding
+    # accidental cross-module alias differences in the test environment.
+    monkeypatch.setattr(bcs_api_module.RequestHelper, "get", staticmethod(fake_get))
+
+    start = datetime(2026, 8, 18, 5, 0, 12, tzinfo=timezone.utc)
+    end = datetime(2026, 8, 18, 5, 12, 44, tzinfo=timezone.utc)
+    first = api.get_candles("BRENT1026", "SPBFUT", "H1", start, end)
+    second = api.get_candles("BRENT1026", "SPBFUT", "H1", start, end)
+    assert first == second
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == api.CANDLE_TIMEOUT
+    assert calls[0]["max_retries"] == api.CANDLE_RETRIES
 
 
-def test_candle_request_uses_bounded_retry_profile():
+def test_candle_request_uses_bounded_retry_profile(monkeypatch):
     api = BCSAPI()
     captured = {}
-    original = RequestHelper.get
 
     def fake_get(*args, **kwargs):
         captured.update(kwargs)
         return FakeResponse()
 
-    RequestHelper.get = staticmethod(fake_get)
-    try:
-        api.get_candles("BRENT1026", "SPBFUT", "H1")
-        assert captured["timeout"] == api.CANDLE_TIMEOUT
-        assert captured["max_retries"] == api.CANDLE_RETRIES
-    finally:
-        RequestHelper.get = staticmethod(original)
+    monkeypatch.setattr(bcs_api_module.RequestHelper, "get", staticmethod(fake_get))
+
+    api.get_candles("BRENT1026", "SPBFUT", "H1")
+    assert captured["timeout"] == api.CANDLE_TIMEOUT
+    assert captured["max_retries"] == api.CANDLE_RETRIES
 
 
 def test_request_helper_has_connection_pool_and_rate_limit():
