@@ -30,6 +30,8 @@ def _records(start, count):
 def test_get_instruments_handles_bcs_200_record_pages(monkeypatch):
     api = BCSAPI()
     api._instrument_metadata_cache.clear()
+    # Pagination tests must not make a real BCS authorization request.
+    monkeypatch.setattr(api, "headers", lambda: {})
 
     calls = []
 
@@ -53,6 +55,8 @@ def test_get_instruments_handles_bcs_200_record_pages(monkeypatch):
 def test_get_instruments_cache_avoids_reloading_metadata(monkeypatch):
     api = BCSAPI()
     api._instrument_metadata_cache.clear()
+    # Pagination tests must not make a real BCS authorization request.
+    monkeypatch.setattr(api, "headers", lambda: {})
 
     calls = []
 
@@ -76,6 +80,8 @@ def test_get_instruments_cache_avoids_reloading_metadata(monkeypatch):
 def test_get_instruments_continues_when_server_returns_100_for_200_request(monkeypatch):
     api = BCSAPI()
     api._instrument_metadata_cache.clear()
+    # Pagination tests must not make a real BCS authorization request.
+    monkeypatch.setattr(api, "headers", lambda: {})
 
     calls = []
 
