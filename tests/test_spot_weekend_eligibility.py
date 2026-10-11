@@ -14,12 +14,14 @@ class FakeAPI:
             {
                 "ticker": "WEEK",
                 "classCode": "TQBR",
-                "WEEKENDSESSION": "Y",
+                # BCS metadata is not authoritative for weekend admission.
+                "WEEKENDSESSION": "N",
             },
             {
                 "ticker": "NOPE",
                 "classCode": "TQBR",
-                "WEEKENDSESSION": "N",
+                # A BCS flag alone must not admit this instrument.
+                "WEEKENDSESSION": "Y",
             },
             {
                 "ticker": "BOARD",
@@ -27,7 +29,6 @@ class FakeAPI:
                     {
                         "exchange": "MOEX",
                         "classCode": "TQBR",
-                        "weekendSession": "Y",
                     }
                 ],
             },
@@ -38,7 +39,7 @@ class FakeAPI:
         ]
 
 
-def test_weekend_flag_reads_security_and_board_metadata():
+def test_weekend_flag_parses_explicit_metadata_values():
     assert SpotUniverseService._weekend_flag({"WEEKENDSESSION": "Y"}) is True
     assert SpotUniverseService._weekend_flag({"WEEKENDSESSION": "N"}) is False
     assert SpotUniverseService._weekend_flag(
@@ -47,13 +48,29 @@ def test_weekend_flag_reads_security_and_board_metadata():
     assert SpotUniverseService._weekend_flag({"WEEKENDSESSION": "unknown"}) is None
 
 
-def test_weekend_universe_requires_explicit_real_eligibility():
+def test_weekend_universe_uses_official_moex_eligibility(monkeypatch):
+    # MOEX's official WeekendSes mapping is the source of truth. This fixture
+    # intentionally contradicts the BCS flags to ensure they cannot override it.
+    monkeypatch.setattr(
+        "services.spot_universe_service.MoexWeekendEligibilityService.load",
+        lambda: {"WEEK", "BOARD"},
+    )
     service = SpotUniverseService(api=FakeAPI())
     rows = service.load(weekend_session=True)
+
     assert {(row["spot_ticker"], row["spot_class_code"]) for row in rows} == {
         ("WEEK", "TQBR"),
         ("BOARD", "TQBR"),
     }
+
+
+def test_weekend_universe_fails_closed_when_moex_mapping_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        "services.spot_universe_service.MoexWeekendEligibilityService.load",
+        lambda: None,
+    )
+    service = SpotUniverseService(api=FakeAPI())
+    assert service.load(weekend_session=True) == []
 
 
 def test_regular_universe_does_not_apply_weekend_eligibility_filter():
