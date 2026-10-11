@@ -27,7 +27,14 @@ fi
 printf '%s\n' "=== TRADER_7_12 PRO • macOS APP BUILD ==="
 printf '%s\n' "Repository: $(pwd)" "Branch: $(git branch --show-current 2>/dev/null || echo unknown)" "Commit: $(git rev-parse HEAD)"
 
-[[ "$(git branch --show-current 2>/dev/null)" == "main" ]] || { echo "ERROR: build must run from main branch."; exit 1; }
+CURRENT_BRANCH="$(git branch --show-current 2>/dev/null || true)"
+if [[ "${CI:-}" == "true" ]]; then
+    # GitHub Actions checks out pull requests at a detached commit. Allow that
+    # only in CI so the exact proposed commit can be built and provenance-tested.
+    printf '%s\n' "CI build ref: ${CURRENT_BRANCH:-detached HEAD}"
+else
+    [[ "${CURRENT_BRANCH}" == "main" ]] || { echo "ERROR: local build must run from main branch."; exit 1; }
+fi
 [[ -z "$(git status --porcelain)" ]] || { echo "ERROR: local working tree is not clean."; git status --short; exit 1; }
 [[ "$(uname -s)" == "Darwin" ]] || { echo "ERROR: this build is for macOS only."; exit 1; }
 PYTHON_BIN="$(command -v python3)"
