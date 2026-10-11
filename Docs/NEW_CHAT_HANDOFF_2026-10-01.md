@@ -1,10 +1,10 @@
 # TRADER_7_12 PRO — NEW CHAT HANDOFF
 
-**Дата:** 01.10.2026  
+**Дата актуализации:** 11.10.2026  
 **Репозиторий:** `ilshat-71-wq/Trader_7_12`  
 **Рабочая ветка:** `main`  
-**GitHub main:** `97e874f3c71b47745ecfac54c811c5e8bf9bf31d`  
-**Предыдущий функциональный checkpoint:** `15273355d530b6d4f211725faf6c4a912881305f`
+**Кодовый checkpoint GitHub main:** `ee7fef4cf92959b639f1cc44f0ea6eaaf68dba6c`  
+**Последний ранее подтверждённый функциональный checkpoint:** `15273355d530b6d4f211725faf6c4a912881305f`
 
 ## 1. Как продолжать
 
@@ -221,3 +221,58 @@ Docs/NEW_CHAT_HANDOFF_2026-10-01.md
 Новый чат начинать с GitHub `main` + этих двух документов.
 
 **Не использовать память чата как единственный источник состояния проекта.**
+
+
+## АКТУАЛЬНАЯ ПЕРЕДАЧА — 11.10.2026
+
+### Источник и документация
+- Канонический кодовый checkpoint перед синхронизацией документации: `ee7fef4cf92959b639f1cc44f0ea6eaaf68dba6c` (`Fix weekend SPOT eligibility CI`).
+- Паспорт актуализирован отдельным документационным commit `68ebfee42734ef76154c7db0444453883880dc41`; этот handoff обновляется следом. После обновления обоих файлов точный GitHub HEAD проверить через `git log -1 --oneline` или на странице репозитория — документационные commits не меняют кодовый checkpoint.
+- CI status connector не показал записей, поэтому CI PASS для `ee7fef4` не заявляем. Локальный полный pytest/build на iMac после этого checkpoint также не подтверждён.
+- Последний ранее упомянутый локальный diff `Program/test_daily_trend_profile_service.py` нужно проверить на самой машине; его актуальное наличие неизвестно. Никаких `reset --hard`, очистки и принудительного pull до просмотра diff.
+
+### Последний наблюдавшийся runtime — воскресенье, 11.10.2026
+- Cloud health READY, snapshot version 14, последняя SPOT-сессия `WEEKEND_SESSION`, scan завершился без last_scan_error.
+- SPOT: universe 255, analyzed 233, coverage 91.4%, liquidity passed 91, D1 qualified 19, directional qualified 7, strict 7, watch 13, selected 20; total scan ~353.1 s.
+- Futures OI 8/8; Money Flow `NO_DATA`; realtime 100 subscribed, BOOK 100, TAPE 100.
+- FINAL: `NEED 3 MORE SCANS`, scan 5, strict 0, final SPOT 0, final Futures 0, RT READY 0, RT BLOCKED 0.
+- Это подтверждает запуск воскресного контура, но не подтверждает торговый сигнал и не заменяет проверку в обычную открытую сессию.
+
+### Завтра, понедельник 12.10.2026 — порядок проверки
+1. На iMac: проверить локальный статус и diff; сохранить нужные локальные изменения, затем синхронизировать `main` fast-forward only.
+2. Compile + full pytest. Не переносить старый результат `197 passed` на новый commit без повторного запуска.
+3. При успешных тестах — собрать `Trader_7_12 Pro.app`, открыть установленную сборку и сверить её commit/build с исходником.
+4. Проверить Cloud endpoints и один полный цикл обновления.
+5. Во время реальной торговой сессии записать D1 → H1 → M5 → M1/ENTRY, Futures OI, Money Flow, realtime BOOK/TAPE/FLOW RT и FINAL confirmation sequence.
+6. Не менять фильтры и пороги ради появления кандидатов; отсутствующие реальные данные оставлять `NO DATA / INCOMPLETE / NO TRADE`.
+
+### Безопасная первичная диагностика iMac
+```bash
+cd ~/Documents/Trader_7_12
+git status --short --branch
+git diff -- Program/test_daily_trend_profile_service.py
+git fetch origin
+git log -1 --oneline
+git log -1 --oneline origin/main
+```
+
+Только после просмотра вывода выбираем безопасный способ синхронизации. Если локальное дерево чистое:
+```bash
+git switch main
+git pull --ff-only origin main
+git status --short --branch
+git log -1 --oneline
+```
+
+После pull:
+```bash
+python3 -m compileall -q Program
+python3 -m pytest -q
+```
+
+Только при успешных тестах:
+```bash
+./scripts/build_mac_app.sh
+open "$HOME/Applications/Trader_7_12 Pro.app"
+```
+
