@@ -1,15 +1,15 @@
 # TRADER_7_12 PRO — PROJECT PASSPORT
 
-**Дата актуализации:** 01.10.2026  
+**Дата актуализации:** 11.10.2026  
 **Репозиторий:** `Trader_7_12`  
 **Ветка:** `main` — единственная рабочая ветка  
 **Статус:** production-oriented read-only market-information scanner  
 **Radar pipeline:** D1-first production chain (current implementation)  
 **Futures OI scanner:** current production implementation  
-**Последний функциональный commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701` — `Test FINAL Radar futures confirmation display`  
-**Текущий GitHub `main` HEAD:** `419a9ba16e5a46c30bd7a4c05c3286f030ec6d12`  
+**Последний кодовый commit перед синхронизацией паспорта:** `ee7fef4cf92959b639f1cc44f0ea6eaaf68dba6c` — `Fix weekend SPOT eligibility CI`  
+**Последний проверенный кодовый checkpoint GitHub `main`:** `ee7fef4cf92959b639f1cc44f0ea6eaaf68dba6c` (11.10.2026; ниже зафиксировано состояние перед синхронизацией документации)  
 **Последний локально подтверждённый regression suite:** `197 passed, 1 warning` (30.09.2026)  
-**Последний regression-test commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701`  
+**Последний ранее подтверждённый regression-test commit:** `fb3a67fd7d03af40f5c0c83e9f54af1297d8a701`  
 **Последний build-infrastructure commit:** `f2e0aff5bf5034aa483cb81b3834640735feb382`  
 **Архитектура клиента:** одно и только одно macOS-приложение `Trader_7_12 Pro.app`.
 
@@ -914,3 +914,34 @@ Live evidence already observed on 2026-10-04: `1/7 SLOTS`, `SNAPSHOTS 1`, `lates
 User workflow: start/keep Cloud running before the morning window; open the app near 09:00; review Morning Radar; use Entry Radar/Final Radar for subsequent confirmation. Morning Radar is a watchlist/history layer, not an order-execution layer.
 
 UI workflow fix commit: `cbb943ccb6176d82ffbe0bfaecd2c1898a2ac4f5` (`Fix Morning Radar morning-first user workflow`).
+
+## CURRENT SYNCHRONIZATION CHECKPOINT — 11.10.2026
+
+### GitHub source checkpoint
+- Последний проверенный кодовый commit перед обновлением документации: `ee7fef4cf92959b639f1cc44f0ea6eaaf68dba6c` — `Fix weekend SPOT eligibility CI`.
+- Изменение исправляет weekend eligibility tests в соответствии с официальным MOEX `WeekendSes`, задаёт `PYTHONPATH: Program` для regression tests в macOS build workflow и разрешает сборку detached PR commit только в CI; локальная сборка по-прежнему требует ветку `main` и чистое дерево.
+- Combined commit status connector не вернул статусов; это НЕ доказательство успешного CI. Связанные PR workflow runs также не вернули записей. Результаты тестов/сборки на iMac после этого commit не подтверждены.
+- Документация теперь синхронизируется с этим кодовым checkpoint; последующие commits могут менять HEAD только документацией. Для точного HEAD всегда выполнять `git log -1 --oneline` после pull.
+
+### Реальное состояние рынка, последнее наблюдение 11.10.2026
+- Cloud health: READY; snapshot version 14; last scan завершился без `last_scan_error`.
+- SPOT: `SESSION: WEEKEND_SESSION`, `REGIME: UP`, universe 255, analyzed 233, coverage 91.4%, liquidity passed 91, D1 qualified 19, directional qualified 7, strict 7, watch 13, selected 20.
+- Timing: universe 293.200 s; benchmark 0.281 s; M5 29.516 s; D1 27.342 s; total 353.056 s.
+- Futures OI: 8/8 contracts with OI. Money Flow: `NO_DATA`, available 0, hot liquidity 0. Realtime: 100 subscribed instruments, BOOK 100, TAPE 100.
+- FINAL RADAR: `NEED 3 MORE SCANS`; scan 5, strict 0, final SPOT 0, final Futures 0, RT READY 0, RT BLOCKED 0.
+- Интерпретация: воскресный запуск реально отработал, но торговый кандидат FINAL не подтвердил. Отсутствие Money Flow в выходной сессии фиксируется как `NO_DATA`, а не заменяется значением из другого источника. Это наблюдение не доказывает состояние всех контуров в обычную торговую сессию.
+
+### Acceptance status — DO NOT OVERSTATE
+- Тестовый результат `197 passed, 1 warning` относится к более раннему состоянию проекта (30.09.2026), а не автоматически к commit `ee7fef4`.
+- Полный локальный pytest и macOS build после актуального кода ещё нужно выполнить на iMac.
+- Нельзя считать локальный установленный `Trader_7_12 Pro.app` синхронизированным, пока не подтверждены локальные HEAD, чистота дерева, тесты, сборка, запуск приложения и фактическое обновление панелей.
+- Старый handoff упоминал незакоммиченный `Program/test_daily_trend_profile_service.py`. Его текущее состояние неизвестно; перед pull/reset проверить `git status` и diff. Не использовать `git reset --hard` и не удалять изменения вслепую.
+
+### Monday live-market acceptance plan — 12.10.2026
+1. Перед открытием рынка: безопасно синхронизировать iMac с GitHub `main`, сохранив/разобрав все локальные изменения.
+2. Запустить `python -m compileall -q Program` и полную регрессию `python -m pytest -q` из корня репозитория с тем Python/окружением, которое используется проектом.
+3. Если тесты проходят — выполнить `./scripts/build_mac_app.sh`; затем открыть единственный `~/Applications/Trader_7_12 Pro.app` и проверить, что запущена именно новая сборка.
+4. Проверить Cloud `/health`, `/v1/status`, `/v1/snapshot`; один полный автоматический/ручной цикл и обновление зависимых панелей.
+5. Во время открытой сессии наблюдать последовательность SPOT D1 → H1 → M5 → M1/ENTRY, отдельно Futures OI, Money Flow, BOOK/TAPE/FLOW RT и Final Radar `1/3 → 2/3 → 3/3`. Записывать реальные значения, время и ошибки.
+6. Не ослаблять фильтры ради сигналов. `NO DATA`, `INCOMPLETE`, `NO TRADE` — корректный результат, если реальные данные/подтверждения отсутствуют.
+
