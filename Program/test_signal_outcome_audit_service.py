@@ -7,6 +7,7 @@ from services.signal_outcome_audit_service import (
     evaluate_signal,
     normalize_signal,
     summarize_outcomes,
+    summarize_model_quality,
 )
 
 
@@ -86,3 +87,27 @@ def test_journal_appends_and_reads_jsonl(tmp_path):
     journal.append({"event": "signal", "ticker": "SBER"})
     journal.append({"event": "outcome", "ticker": "SBER"})
     assert [x["event"] for x in journal.read_all()] == ["signal", "outcome"]
+
+
+
+def test_model_quality_calibration_excludes_ambiguous_and_missing_outcomes():
+    rows = [
+        {"instrument_type": "SPOT", "direction": "LONG", "phase": "DEVELOPING",
+         "signal_probability": 90.0, "outcome": "TARGET_FIRST"},
+        {"instrument_type": "SPOT", "direction": "LONG", "phase": "DEVELOPING",
+         "signal_probability": 90.0, "outcome": "STOP_FIRST"},
+        {"instrument_type": "FUTURES", "direction": "SHORT", "phase": "OI_FLOW",
+         "signal_probability": 95.0, "outcome": "AMBIGUOUS_SAME_BAR"},
+        {"instrument_type": "SPOT", "direction": "SHORT", "phase": "START",
+         "signal_probability": 92.0, "outcome": "NO_FUTURE_DATA"},
+    ]
+    report = summarize_model_quality(rows)
+    assert report["records_seen"] == 4
+    assert report["resolved"] == 2
+    assert report["excluded"] == 2
+    assert report["overall"]["target_first"] == 1
+    assert report["overall"]["observed_target_rate_pct"] == 50.0
+    assert report["overall"]["mean_predicted_probability_pct"] == 90.0
+    assert report["overall"]["calibration_gap_pp"] == 40.0
+    assert report["overall"]["brier_score"] == 0.41
+    assert list(report["by_instrument_direction_phase"]) == ["SPOT:LONG:DEVELOPING"]
