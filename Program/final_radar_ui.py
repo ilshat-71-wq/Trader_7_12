@@ -35,7 +35,15 @@ class FinalRadarWidget(QWidget):
             str(Path.home() / "Library" / "Application Support" / "Trader_7_12" / "signal_outcomes.jsonl"),
         )
         self._signal_journal = SignalOutcomeJournal(audit_path)
-        self._captured_final_ids = set()
+        try:
+            self._captured_final_ids = {
+                str(row.get("signal_id"))
+                for row in self._signal_journal.read_all()
+                if str(row.get("radar") or "") == "FINAL_RADAR" and row.get("signal_id")
+            }
+        except (OSError, ValueError):
+            # A damaged audit file must not prevent the trading dashboard from opening.
+            self._captured_final_ids = set()
         self._realtime_render_timer = QTimer(self)
         self._realtime_render_timer.setSingleShot(True)
         self._realtime_render_timer.timeout.connect(self._render)
