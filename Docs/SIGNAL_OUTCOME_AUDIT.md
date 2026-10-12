@@ -26,9 +26,9 @@ change live signal generation, radar ranking, cloud market data, or trade execut
 ## Append-only journal
 
 `SignalOutcomeJournal` stores one JSON object per line (JSONL), using append mode,
-flush and fsync. The Cloud Market Data Engine now appends eligible SPOT scanner observations to this journal. The default path is `~/.local/share/trader_7_12/signal_outcomes.jsonl`; set `SIGNAL_OUTCOME_JOURNAL_PATH` to override it. The capture is audit-only and does not change ranking or trading decisions. Each scan observation gets its own ID, so repeated observations of the same ticker across scans are correlated and must not be counted as independent trades. The desktop Final Radar and Futures OI candidates are not yet captured by this integration.
+flush and fsync. The Cloud Market Data Engine appends eligible SPOT scanner observations. The desktop FINAL RADAR also appends a record only when a candidate passes the existing three-scan and realtime gates and appears in the FINAL list, including SPOT and FUTURES. The default path is platform-specific (`~/.local/share/trader_7_12/signal_outcomes.jsonl` in Cloud Engine; `~/Library/Application Support/Trader_7_12/signal_outcomes.jsonl` in the macOS app); set `SIGNAL_OUTCOME_JOURNAL_PATH` to override it. Both captures are audit-only and do not change ranking or trading decisions. Periodic Cloud observations are correlated across scans and must not be counted as independent trades. FINAL Radar records use scan/instrument/ticker/direction IDs and are deduplicated across repaints and journal restarts.
 
-Current capture event: `signal_observation`, containing the scanner timestamp, price, model, direction, probability, class code, snapshot version, and available market context. `outcome` events are not yet automatically produced; the next step is the bounded BCS candle evaluation worker.
+Current capture event: `signal_observation`, containing the timestamp, entry price, model, direction, probability, class code, scan/snapshot version, phase, FINAL confirmation count, realtime state, and available market context. `outcome` events are not yet automatically produced; the next step is the bounded BCS candle evaluation worker.
 
 Do not overwrite signal events with later model values. Keep model version,
 snapshot version, instrument type, direction, entry price, and timestamp attached
