@@ -30,6 +30,7 @@ class FinalRadarWidget(QWidget):
         super().__init__(parent)
         self.service = FinalRadarService()
         self._rows = []
+        self._active_final_keys = set()
         audit_path = os.getenv(
             "SIGNAL_OUTCOME_JOURNAL_PATH",
             str(Path.home() / "Library" / "Application Support" / "Trader_7_12" / "signal_outcomes.jsonl"),
@@ -150,6 +151,7 @@ class FinalRadarWidget(QWidget):
         day_key = str(getattr(self.service, "_day_key", "") or now[:10])
         scan_no = int(status.get("scan_no") or 0)
         captured = 0
+        current_keys = set()
         for item in rows:
             instrument_type = str(item.get("final_instrument_type") or "").upper()
             if instrument_type not in {"SPOT", "FUTURES"}:
@@ -164,6 +166,12 @@ class FinalRadarWidget(QWidget):
             except (TypeError, ValueError):
                 continue
             if entry_price <= 0:
+                continue
+            episode_key = f"{day_key}:{instrument_type}:{ticker}:{direction}"
+            current_keys.add(episode_key)
+            # Repaints and scans during the same FINAL appearance are not new signals.
+            # A later re-entry after leaving FINAL gets a new scan-numbered ID.
+            if episode_key in self._active_final_keys:
                 continue
             event_id = f"final:{day_key}:{scan_no}:{instrument_type}:{ticker}:{direction}"
             if event_id in self._captured_final_ids:
@@ -202,6 +210,7 @@ class FinalRadarWidget(QWidget):
                 continue
             self._captured_final_ids.add(event_id)
             captured += 1
+        self._active_final_keys = current_keys
         return captured
 
     def _render(self, resize_columns=True):
