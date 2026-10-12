@@ -284,7 +284,6 @@ class CloudMarketDataEngine:
                     audit_captured += 1
                 except (OSError, TypeError, ValueError) as exc:
                     print("SIGNAL AUDIT CAPTURE FAILED:", type(exc).__name__, str(exc))
-            timing["signal_audit_captured"] = audit_captured
 
             total_finished = time.perf_counter()
             timing = {
@@ -294,6 +293,7 @@ class CloudMarketDataEngine:
                 "snapshot_ms": self._timing_ms(snapshot_started, snapshot_finished),
                 "total_ms": self._timing_ms(scan_started, total_finished),
                 "total_seconds": round(total_finished - scan_started, 3),
+                "signal_audit_captured": audit_captured,
             }
 
             radar_timing = radar_diagnostics.get("timings_seconds", {})
