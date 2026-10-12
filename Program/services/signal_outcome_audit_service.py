@@ -93,7 +93,7 @@ class SignalOutcomeJournal:
         payload.setdefault("schema_version", SCHEMA_VERSION)
         line = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
         with self.path.open("a", encoding="utf-8") as stream:
-            stream.write(line + "\\n")
+            stream.write(line + "\n")
             stream.flush()
             os.fsync(stream.fileno())
 
