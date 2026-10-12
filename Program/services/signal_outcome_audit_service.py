@@ -213,9 +213,13 @@ def evaluate_signal(
     elif stop_time:
         outcome = "STOP_FIRST"
         gross_return_pct = ((stop / entry) - 1.0) * 100.0 * sign if stop else None
-    elif bars_evaluated:
+    elif bars_evaluated >= max_bars:
         outcome = "HORIZON_END"
         gross_return_pct = ((last_close / entry) - 1.0) * 100.0 * sign
+    elif bars_evaluated:
+        # A partial history is not a completed evaluation horizon.
+        outcome = "PENDING_HORIZON"
+        gross_return_pct = None
     else:
         outcome = "NO_FUTURE_DATA"
         gross_return_pct = None
@@ -238,7 +242,11 @@ def evaluate_signal(
         "gross_return_pct": None if gross_return_pct is None else round(gross_return_pct, 6),
         "round_trip_cost_bps": float(round_trip_cost_bps),
         "net_return_pct": None if net_return_pct is None else round(net_return_pct, 6),
-        "outcome_status": "EVALUATED" if outcome != "NO_FUTURE_DATA" else "NO_DATA",
+        "outcome_status": (
+            "EVALUATED" if outcome in {"TARGET_FIRST", "STOP_FIRST", "HORIZON_END", "AMBIGUOUS_SAME_BAR"}
+            else "PENDING" if outcome == "PENDING_HORIZON"
+            else "NO_DATA"
+        ),
     }
 
 
@@ -330,7 +338,9 @@ def summarize_outcomes(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         groups.setdefault(key, []).append(row)
 
     def stats(items: list[dict[str, Any]]) -> dict[str, Any]:
-        evaluated = [x for x in items if x.get("outcome") not in {"NO_FUTURE_DATA", None}]
+        evaluated = [x for x in items if x.get("outcome") in {
+            "TARGET_FIRST", "STOP_FIRST", "HORIZON_END", "AMBIGUOUS_SAME_BAR"
+        }]
         target_first = sum(x.get("outcome") == "TARGET_FIRST" for x in evaluated)
         stop_first = sum(x.get("outcome") == "STOP_FIRST" for x in evaluated)
         ambiguous = sum(x.get("outcome") == "AMBIGUOUS_SAME_BAR" for x in evaluated)
