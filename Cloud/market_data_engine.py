@@ -27,6 +27,7 @@ from services.market_information_scanner_service import MarketInformationScanner
 from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataScannerService
 from services.money_flow_service import MoneyFlowService
 from Cloud.morning_radar_service import MorningRadarService
+from services.signal_outcome_audit_service import SignalOutcomeJournal
 
 
 ENGINE_VERSION = "1.1.0"
@@ -103,6 +104,9 @@ class CloudMarketDataEngine:
         self._futures = FuturesOIMarketDataScannerService()
         self._money_flow = MoneyFlowService()
         self.morning_radar = MorningRadarService()
+        from pathlib import Path
+        audit_path = os.getenv("SIGNAL_OUTCOME_JOURNAL_PATH", str(Path.home() / ".local" / "share" / "trader_7_12" / "signal_outcomes.jsonl"))
+        self._signal_journal = SignalOutcomeJournal(audit_path)
 
         self._scan_lock = threading.Lock()
         self._snapshot_lock = threading.RLock()
@@ -239,6 +243,48 @@ class CloudMarketDataEngine:
                 self._last_scan_error = None
                 self._last_scan_finished_at = time.time()
             snapshot_finished = time.perf_counter()
+
+            # Audit-only capture from the existing real-data SPOT scanner.
+            # These are periodic observations, not independent trades.
+            audit_captured = 0
+            for row in radar_rows if isinstance(radar_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                ticker = str(row.get("spot_ticker") or row.get("ticker") or "").strip().upper()
+                direction = str(row.get("signal") or "").strip().upper()
+                try:
+                    entry_price = float(row.get("price"))
+                except (TypeError, ValueError):
+                    continue
+                if not ticker or direction not in {"LONG", "SHORT"} or entry_price <= 0:
+                    continue
+                if str(row.get("data_status") or "").upper() != "AVAILABLE":
+                    continue
+                event = {
+                    "event": "signal_observation",
+                    "signal_id": f"cloud:{snapshot.version}:{ticker}:{direction}",
+                    "signal_model": row.get("signal_model"),
+                    "signal_probability": row.get("signal_probability"),
+                    "ticker": ticker,
+                    "instrument_type": "SPOT",
+                    "direction": direction,
+                    "signal_time": snapshot.generated_at,
+                    "entry_price": entry_price,
+                    "class_code": row.get("spot_class_code"),
+                    "snapshot_version": snapshot.version,
+                    "radar": "CLOUD_MARKET_INFORMATION",
+                    "data_status": row.get("data_status"),
+                    "change_percent": row.get("change_percent"),
+                    "relative_strength": row.get("relative_strength"),
+                    "atr_percent": row.get("atr_percent"),
+                    "atr_used_percent": row.get("atr_used_percent"),
+                }
+                try:
+                    self._signal_journal.append(event)
+                    audit_captured += 1
+                except (OSError, TypeError, ValueError) as exc:
+                    print("SIGNAL AUDIT CAPTURE FAILED:", type(exc).__name__, str(exc))
+            timing["signal_audit_captured"] = audit_captured
 
             total_finished = time.perf_counter()
             timing = {
