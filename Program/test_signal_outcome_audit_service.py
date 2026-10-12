@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from services.signal_outcome_evaluation_worker import SignalOutcomeEvaluationWorker
 from services.signal_outcome_audit_service import (
     SignalOutcomeJournal,
     evaluate_signal,
@@ -111,3 +112,61 @@ def test_model_quality_calibration_excludes_ambiguous_and_missing_outcomes():
     assert report["overall"]["calibration_gap_pp"] == 40.0
     assert report["overall"]["brier_score"] == 0.41
     assert list(report["by_instrument_direction_phase"]) == ["SPOT:LONG:DEVELOPING"]
+
+
+
+def test_partial_history_stays_pending_until_full_horizon():
+    rows = [
+        _candle("2026-10-12T10:05:00+03:00", 100.4, 99.8, 100.1),
+        _candle("2026-10-12T10:10:00+03:00", 100.5, 99.7, 100.2),
+    ]
+    result = evaluate_signal(_signal(), rows, target_pct=1, max_bars=3)
+    assert result["outcome"] == "PENDING_HORIZON"
+    assert result["outcome_status"] == "PENDING"
+    assert summarize_outcomes([result])["overall"]["evaluated"] == 0
+
+
+def test_worker_appends_resolved_outcome_once(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "signals.jsonl")
+    signal = _signal(
+        signal_id="final:2026-10-12:3:SPOT:TEST:LONG",
+        event="signal_observation",
+        class_code="TQBR",
+        signal_probability=92.0,
+    )
+    journal.append(signal)
+
+    def loader(**kwargs):
+        return [
+            _candle("2026-10-12T10:05:00+03:00", 101.2, 99.8, 101.1),
+        ]
+
+    worker = SignalOutcomeEvaluationWorker(
+        journal, candle_loader=loader, max_bars=3, target_pct=1,
+        round_trip_cost_bps=10,
+    )
+    now = datetime.fromisoformat("2026-10-12T10:20:00+03:00")
+    first = worker.run_once(now=now)
+    second = worker.run_once(now=now)
+    rows = journal.read_all()
+    outcome_rows = [row for row in rows if row.get("event") == "outcome"]
+    assert first["evaluated"] == 1
+    assert second["evaluated"] == 0
+    assert len(outcome_rows) == 1
+    assert outcome_rows[0]["signal_id"] == signal["signal_id"]
+    assert outcome_rows[0]["outcome"] == "TARGET_FIRST"
+    assert outcome_rows[0]["data_source"] == "BCS_REAL_CLOSED_CANDLES"
+    assert outcome_rows[0]["time_to_outcome_minutes"] is not None
+
+
+def test_worker_does_not_append_outcome_without_real_future_data(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "signals.jsonl")
+    journal.append(_signal(
+        signal_id="cloud:1:TEST:LONG",
+        event="signal_observation",
+        class_code="TQBR",
+    ))
+    worker = SignalOutcomeEvaluationWorker(journal, candle_loader=lambda **kwargs: [])
+    result = worker.run_once(now=datetime.fromisoformat("2026-10-12T10:20:00+03:00"))
+    assert result["evaluated"] == 0
+    assert not any(row.get("event") == "outcome" for row in journal.read_all())
