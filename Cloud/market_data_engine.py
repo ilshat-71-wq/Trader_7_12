@@ -28,6 +28,7 @@ from services.futures_oi_marketdata_scanner_service import FuturesOIMarketDataSc
 from services.money_flow_service import MoneyFlowService
 from Cloud.morning_radar_service import MorningRadarService
 from services.signal_outcome_audit_service import SignalOutcomeJournal
+from services.signal_outcome_evaluation_worker import SignalOutcomeEvaluationWorker
 
 
 ENGINE_VERSION = "1.1.0"
@@ -107,6 +108,16 @@ class CloudMarketDataEngine:
         from pathlib import Path
         audit_path = os.getenv("SIGNAL_OUTCOME_JOURNAL_PATH", str(Path.home() / ".local" / "share" / "trader_7_12" / "signal_outcomes.jsonl"))
         self._signal_journal = SignalOutcomeJournal(audit_path)
+        self._outcome_worker = SignalOutcomeEvaluationWorker(
+            self._signal_journal,
+            max_signals_per_run=2,
+            timeframe_minutes=5,
+            max_bars=60,
+            target_pct=1.0,
+            round_trip_cost_bps=float(os.getenv("SIGNAL_AUDIT_ROUND_TRIP_COST_BPS", "10")),
+        )
+        self._outcome_worker_thread = None
+        self._last_outcome_worker_started_at = 0.0
 
         self._scan_lock = threading.Lock()
         self._snapshot_lock = threading.RLock()
@@ -278,6 +289,8 @@ class CloudMarketDataEngine:
                     "relative_strength": row.get("relative_strength"),
                     "atr_percent": row.get("atr_percent"),
                     "atr_used_percent": row.get("atr_used_percent"),
+                    "phase": row.get("move_phase") or row.get("phase"),
+                    "model_version": row.get("model_version"),
                 }
                 try:
                     self._signal_journal.append(event)
@@ -285,6 +298,7 @@ class CloudMarketDataEngine:
                 except (OSError, TypeError, ValueError) as exc:
                     print("SIGNAL AUDIT CAPTURE FAILED:", type(exc).__name__, str(exc))
 
+            self._schedule_outcome_worker()
             total_finished = time.perf_counter()
             timing = {
                 "radar_ms": self._timing_ms(radar_started, radar_finished),
@@ -391,6 +405,31 @@ class CloudMarketDataEngine:
             raise
         finally:
             self._scan_lock.release()
+
+    def _schedule_outcome_worker(self) -> None:
+        """Run a small audit-only BCS history batch off the market-scan thread."""
+        now = time.monotonic()
+        thread = self._outcome_worker_thread
+        if thread is not None and thread.is_alive():
+            return
+        if now - self._last_outcome_worker_started_at < 300.0:
+            return
+        self._last_outcome_worker_started_at = now
+
+        def run():
+            try:
+                result = self._outcome_worker.run_once()
+                print("SIGNAL OUTCOME AUDIT:", result)
+            except Exception as exc:
+                # Outcome auditing must never fail or delay the live market scan.
+                print("SIGNAL OUTCOME AUDIT FAILED:", type(exc).__name__, str(exc))
+
+        self._outcome_worker_thread = threading.Thread(
+            target=run,
+            name="signal-outcome-audit",
+            daemon=True,
+        )
+        self._outcome_worker_thread.start()
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=2)
