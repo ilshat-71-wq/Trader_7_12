@@ -68,18 +68,45 @@ class SignalOutcomeEvaluationWorker:
         checked = evaluated = no_data = 0
         try:
             rows = self.journal.read_all()
-            outcomes = {
+            outcome_ids = {
                 str(row.get("signal_id"))
                 for row in rows
                 if row.get("event") == "outcome" and row.get("signal_id")
+            }
+            source_by_id = {
+                str(row.get("signal_id")): row
+                for row in rows
+                if row.get("event") == "signal_observation" and row.get("signal_id")
+            }
+
+            def episode_key(row):
+                stamp = str(row.get("signal_time") or "")
+                day = stamp[:10]
+                return ":".join((
+                    str(row.get("radar") or "UNKNOWN").upper(),
+                    day,
+                    str(row.get("instrument_type") or "UNKNOWN").upper(),
+                    str(row.get("ticker") or "").upper(),
+                    str(row.get("direction") or row.get("signal") or "").upper(),
+                ))
+
+            # Periodic Cloud snapshots are correlated observations, not separate
+            # trades. Evaluate only the earliest observation per same-day episode.
+            resolved_episodes = {
+                episode_key(source_by_id[signal_id])
+                for signal_id in outcome_ids if signal_id in source_by_id
             }
             observations = {}
             for row in rows:
                 if row.get("event") != "signal_observation" or not row.get("signal_id"):
                     continue
                 signal_id = str(row["signal_id"])
-                if signal_id not in outcomes:
-                    observations.setdefault(signal_id, row)
+                key = episode_key(row)
+                if signal_id in outcome_ids or key in resolved_episodes:
+                    continue
+                current_row = observations.get(key)
+                if current_row is None or str(row.get("signal_time") or "") < str(current_row.get("signal_time") or ""):
+                    observations[key] = row
 
             current = now or datetime.now(timezone.utc)
             if current.tzinfo is None:
@@ -91,10 +118,11 @@ class SignalOutcomeEvaluationWorker:
             cutoff = current.replace(second=0, microsecond=0)
             cutoff -= timedelta(minutes=cutoff.minute % self.timeframe_minutes)
             cutoff -= interval
-            for signal_id, observation in sorted(
+            for episode, observation in sorted(
                 observations.items(),
                 key=lambda pair: str(pair[1].get("signal_time") or ""),
             )[: self.max_signals_per_run]:
+                signal_id = str(observation["signal_id"])
                 checked += 1
                 signal_time_text = observation.get("signal_time")
                 try:
