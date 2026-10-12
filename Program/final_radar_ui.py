@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
@@ -18,6 +22,7 @@ from PySide6.QtWidgets import (
 from ui_table import CopyableTableWidget, RADAR_BUTTON_STYLE
 
 from services.final_radar_service import FinalRadarService
+from services.signal_outcome_audit_service import SignalOutcomeJournal
 
 
 class FinalRadarWidget(QWidget):
@@ -25,6 +30,21 @@ class FinalRadarWidget(QWidget):
         super().__init__(parent)
         self.service = FinalRadarService()
         self._rows = []
+        self._active_final_keys = set()
+        audit_path = os.getenv(
+            "SIGNAL_OUTCOME_JOURNAL_PATH",
+            str(Path.home() / "Library" / "Application Support" / "Trader_7_12" / "signal_outcomes.jsonl"),
+        )
+        self._signal_journal = SignalOutcomeJournal(audit_path)
+        try:
+            self._captured_final_ids = {
+                str(row.get("signal_id"))
+                for row in self._signal_journal.read_all()
+                if str(row.get("radar") or "") == "FINAL_RADAR" and row.get("signal_id")
+            }
+        except (OSError, ValueError):
+            # A damaged audit file must not prevent the trading dashboard from opening.
+            self._captured_final_ids = set()
         self._realtime_render_timer = QTimer(self)
         self._realtime_render_timer.setSingleShot(True)
         self._realtime_render_timer.timeout.connect(self._render)
@@ -123,9 +143,80 @@ class FinalRadarWidget(QWidget):
         except (TypeError, ValueError):
             return "—"
 
+    def _capture_final_observations(self, rows, status):
+        # Capture only when a candidate is genuinely present in FINAL, which
+        # implies the existing scan-confirmation and realtime gates passed.
+        # Repaints/websocket refreshes must not create duplicate observations.
+        now = datetime.now().astimezone().isoformat()
+        day_key = str(getattr(self.service, "_day_key", "") or now[:10])
+        scan_no = int(status.get("scan_no") or 0)
+        captured = 0
+        current_keys = set()
+        for item in rows:
+            instrument_type = str(item.get("final_instrument_type") or "").upper()
+            if instrument_type not in {"SPOT", "FUTURES"}:
+                continue
+            ticker = str(item.get("final_ticker") or "").strip().upper()
+            direction = str(item.get("signal") or "").strip().upper()
+            if not ticker or direction not in {"LONG", "SHORT"}:
+                continue
+            raw_price = item.get("last") if instrument_type == "FUTURES" else item.get("price")
+            try:
+                entry_price = float(raw_price)
+            except (TypeError, ValueError):
+                continue
+            if entry_price <= 0:
+                continue
+            episode_key = f"{day_key}:{instrument_type}:{ticker}:{direction}"
+            current_keys.add(episode_key)
+            # Repaints and scans during the same FINAL appearance are not new signals.
+            # A later re-entry after leaving FINAL gets a new scan-numbered ID.
+            if episode_key in self._active_final_keys:
+                continue
+            event_id = f"final:{day_key}:{scan_no}:{instrument_type}:{ticker}:{direction}"
+            if event_id in self._captured_final_ids:
+                continue
+            event = {
+                "event": "signal_observation",
+                "signal_id": event_id,
+                "radar": "FINAL_RADAR",
+                "signal_time": now,
+                "ticker": ticker,
+                "instrument_type": instrument_type,
+                "direction": direction,
+                "entry_price": entry_price,
+                "signal_probability": item.get("signal_probability"),
+                "signal_model": item.get("signal_model"),
+                "phase": item.get("move_phase") if instrument_type == "SPOT" else "OI_FLOW",
+                "confirmations": item.get("final_confirmations"),
+                "realtime": item.get("final_realtime"),
+                "futures_confirmation": item.get("final_futures"),
+                "change_percent": item.get("change_percent"),
+                "atr_percent": item.get("atr_percent"),
+                "atr_used_percent": item.get("atr_used_percent"),
+                "turnover_rub": item.get("turnover_rub"),
+                "session_money": item.get("session_money"),
+                "class_code": item.get("futures_class_code") if instrument_type == "FUTURES" else item.get("spot_class_code"),
+                "futures_ticker": item.get("futures_ticker") if instrument_type == "FUTURES" else None,
+                "underlying_ticker": item.get("underlying_ticker") if instrument_type == "FUTURES" else None,
+                "snapshot_version": scan_no,
+                "data_status": "AVAILABLE",
+            }
+            try:
+                self._signal_journal.append(event)
+            except (OSError, TypeError, ValueError) as exc:
+                # Keep the radar operational if local audit storage is unavailable.
+                print("FINAL RADAR AUDIT CAPTURE FAILED:", type(exc).__name__, str(exc))
+                continue
+            self._captured_final_ids.add(event_id)
+            captured += 1
+        self._active_final_keys = current_keys
+        return captured
+
     def _render(self, resize_columns=True):
         self._rows = self.service.final_candidates()
         status = self.service.status()
+        self._capture_final_observations(self._rows, status)
         self.table.setRowCount(len(self._rows))
 
         if not self._rows:
