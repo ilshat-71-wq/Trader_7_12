@@ -242,6 +242,85 @@ def evaluate_signal(
     }
 
 
+
+def summarize_model_quality(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Evaluate confidence calibration against the observed target-within-horizon event.
+
+    Only TARGET_FIRST, STOP_FIRST and HORIZON_END are resolved labels.
+    Same-bar ambiguity and missing/unresolved data are excluded, never guessed.
+    """
+    records = list(rows or [])
+    resolved = []
+    for row in records:
+        outcome = str(row.get("outcome") or "").upper()
+        if outcome not in {"TARGET_FIRST", "STOP_FIRST", "HORIZON_END"}:
+            continue
+        probability = _number(
+            row.get("signal_probability")
+            if row.get("signal_probability") is not None
+            else row.get("probability")
+        )
+        if probability is None or not 0.0 <= probability <= 100.0:
+            continue
+        resolved.append({
+            **row,
+            "_p": probability / 100.0,
+            "_y": 1.0 if outcome == "TARGET_FIRST" else 0.0,
+        })
+
+    def metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+        if not items:
+            return {
+                "resolved": 0, "target_first": 0, "target_rate_pct": None,
+                "mean_predicted_probability_pct": None,
+                "observed_target_rate_pct": None, "calibration_gap_pp": None,
+                "brier_score": None,
+            }
+        predicted = sum(x["_p"] for x in items) / len(items)
+        observed = sum(x["_y"] for x in items) / len(items)
+        return {
+            "resolved": len(items),
+            "target_first": sum(int(x["_y"]) for x in items),
+            "target_rate_pct": round(observed * 100.0, 3),
+            "mean_predicted_probability_pct": round(predicted * 100.0, 3),
+            "observed_target_rate_pct": round(observed * 100.0, 3),
+            "calibration_gap_pp": round((predicted - observed) * 100.0, 3),
+            "brier_score": round(sum((x["_p"] - x["_y"]) ** 2 for x in items) / len(items), 6),
+        }
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in resolved:
+        key = ":".join((
+            str(row.get("instrument_type") or "UNKNOWN").upper(),
+            str(row.get("direction") or "UNKNOWN").upper(),
+            str(row.get("phase") or "UNKNOWN").upper(),
+        ))
+        grouped.setdefault(key, []).append(row)
+
+    bins = []
+    for lower in range(0, 100, 10):
+        upper = lower + 10
+        members = [
+            x for x in resolved
+            if lower <= x["_p"] * 100.0 < upper
+            or (upper == 100 and x["_p"] * 100.0 == 100)
+        ]
+        if members:
+            bins.append({"probability_range": f"{lower}-{upper}%", **metrics(members)})
+
+    return {
+        "definition": "TARGET_FIRST within configured target/stop/horizon; resolved labels only",
+        "records_seen": len(records),
+        "resolved": len(resolved),
+        "excluded": len(records) - len(resolved),
+        "overall": metrics(resolved),
+        "by_instrument_direction_phase": {
+            key: metrics(items) for key, items in sorted(grouped.items())
+        },
+        "calibration_bins": bins,
+    }
+
+
 def summarize_outcomes(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate by instrument type/direction without mixing ambiguous records."""
     data = list(rows or [])
