@@ -192,7 +192,8 @@ class SignalOutcomeEvaluationWorker:
                     except (TypeError, ValueError):
                         pass
                 self.journal.append(event)
-                outcomes.add(signal_id)
+                outcome_ids.add(signal_id)
+                resolved_episodes.add(episode)
                 evaluated += 1
             return {"busy": 0, "checked": checked, "evaluated": evaluated, "no_data": no_data}
         finally:
