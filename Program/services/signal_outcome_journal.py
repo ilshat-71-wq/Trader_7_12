@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from math import isfinite
 from pathlib import Path
@@ -47,8 +48,17 @@ class SignalOutcomeJournal:
             result = result.replace(tzinfo=timezone.utc)
         return result
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(str(self.db_path), timeout=10)
+        db = sqlite3.connect(str(self.db_path), timeout=10)
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _initialize(self):
         with self._connect() as db:

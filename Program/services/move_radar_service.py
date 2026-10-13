@@ -37,6 +37,8 @@ class MoveRadarService:
     @classmethod
     def classify(cls, item):
         signal = str(item.get("signal") or "").upper()
+        if str(item.get("signal_status") or "").upper() == "INCOMPLETE":
+            return None
         change = cls._f(item.get("change_percent"))
         used = cls._f(item.get("atr_used_percent"))
         accel = cls._f(item.get("money_acceleration"))

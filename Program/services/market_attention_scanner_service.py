@@ -294,6 +294,8 @@ class MarketAttentionScannerService:
             "long_probability": signal["long_probability"],
             "short_probability": signal["short_probability"],
             "signal_model": signal["signal_model"],
+            "signal_status": signal.get("signal_status", "AVAILABLE"),
+            "signal_reason": signal.get("signal_reason"),
             "signal_probability_delta": (
                 round(signal["probability"] - previous, 1)
                 if previous is not None else None

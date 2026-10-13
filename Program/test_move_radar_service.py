@@ -51,3 +51,10 @@ def test_extreme_acceleration_does_not_change_phase_or_crash():
     row = MoveRadarService.classify(item("OUTLIER", 2.0, 20.0, 32591.2, 93.6))
     assert row["move_phase"] == "START"
     assert row["directional_acceleration"] == 32591.2
+
+
+
+def test_incomplete_signal_status_is_not_a_move():
+    row = item("NO_DATA", 2.0, 20.0, 100.0, 95.0)
+    row["signal_status"] = "INCOMPLETE"
+    assert MoveRadarService.classify(row) is None

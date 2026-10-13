@@ -103,3 +103,10 @@ def test_spot_entry_with_sub_80_score_is_wait_not_enter():
     item = spot_item("CONFIRMED")
     item["signal_probability"] = 74.0
     assert EntryRadarService.state(item) == "WAIT"
+
+
+
+def test_incomplete_signal_status_cannot_enter():
+    row = spot_item("CONFIRMED")
+    row["signal_status"] = "INCOMPLETE"
+    assert EntryRadarService.state(row) == "WATCH"

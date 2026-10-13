@@ -23,6 +23,8 @@ class EntryRadarService:
 
     @classmethod
     def state(cls, item):
+        if str(item.get("signal_status") or "").upper() == "INCOMPLETE":
+            return "WATCH"
         probability = cls._number(item.get("signal_probability"))
         if probability is not None and not 0.0 <= probability <= 100.0:
             probability = None
