@@ -19,6 +19,32 @@ def test_journal_deduplicates_final_candidate_per_day(tmp_path):
     assert len(journal.records()) == 1
 
 
+
+def test_futures_candidate_uses_real_last_price_and_futures_class_code(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "outcomes.sqlite3")
+    now = datetime(2026, 10, 13, 10, 0, tzinfo=MSK)
+    journal.record_candidates([{
+        "final_ticker": "NGV6",
+        "final_instrument_type": "FUTURES",
+        "futures_ticker": "NGV6",
+        "signal": "SHORT",
+        "last": 3.125,
+        "futures_class_code": "SPBFUT",
+        "signal_probability": 83.9,
+    }], now=now)
+    record = journal.records()[0]
+    assert record["ticker"] == "NGV6"
+    assert record["instrument_type"] == "FUTURES"
+    assert record["entry_price"] == 3.125
+    with journal._connect() as db:
+        stored_class_code = db.execute(
+            "SELECT class_code FROM signal_outcomes WHERE ticker = ?", ("NGV6",)
+        ).fetchone()[0]
+    assert stored_class_code == "SPBFUT"
+    assert record["status"] == "PENDING"
+    assert record["data_reason"] is None
+
+
 def test_missing_real_price_or_class_code_is_not_fabricated(tmp_path):
     journal = SignalOutcomeJournal(tmp_path / "outcomes.sqlite3")
     now = datetime(2026, 10, 13, 10, 0, tzinfo=MSK)
