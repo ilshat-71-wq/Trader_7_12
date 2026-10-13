@@ -234,3 +234,56 @@ def test_percentile_cannot_rescue_low_liquidity(monkeypatch):
     result = scanner.scan(limit=3)
     assert all(x["spot_ticker"] not in {"STRONG_THIN", "WEAK_THIN"} for x in result)
     assert scanner._last_scan_diagnostics["liquidity_filtered"] == 2
+
+def test_probability_is_scored_after_relative_strength_and_d1_are_available():
+    scanner = MarketInformationScannerService(
+        api=FakeAPI(), session_service=FakeSession(), history_service=object()
+    )
+    common = {
+        "change_percent": 1.5,
+        "money_acceleration": 0.0,
+        "money_per_minute": 50_000.0,
+        "recent_money_per_minute": 50_000.0,
+    }
+    aligned = dict(
+        common, spot_ticker="ALIGNED", relative_strength=1.5,
+        daily_structure="LONG",
+    )
+    opposed = dict(
+        common, spot_ticker="OPPOSED", relative_strength=-1.5,
+        daily_structure="SHORT",
+    )
+
+    scanner._apply_signal_probability(aligned)
+    scanner._apply_signal_probability(opposed)
+
+    assert aligned["long_probability"] > opposed["long_probability"]
+    assert aligned["signal"] == "LONG"
+    assert opposed["long_probability"] < 55.0
+
+
+def test_probability_delta_uses_the_enriched_current_scan_features():
+    scanner = MarketInformationScannerService(
+        api=FakeAPI(), session_service=FakeSession(), history_service=object()
+    )
+    row = {
+        "spot_ticker": "TEST",
+        "change_percent": 1.5,
+        "relative_strength": 1.5,
+        "money_acceleration": 0.0,
+        "money_per_minute": 50_000.0,
+        "recent_money_per_minute": 50_000.0,
+        "daily_structure": "LONG",
+    }
+    scanner._apply_signal_probability(row)
+    first_probability = row["signal_probability"]
+
+    row["relative_strength"] = -1.5
+    row["daily_structure"] = "SHORT"
+    scanner._apply_signal_probability(row)
+
+    assert row["signal_probability_delta"] == round(
+        row["signal_probability"] - first_probability, 1
+    )
+    assert row["signal_probability_delta"] < 0
+

@@ -25,3 +25,11 @@ Run targeted tests and the full suite from Program. Then verify the macOS build 
 
 
 Validation note: horizon outcomes require a real closed M5 candle at each horizon end; if costs are configured after gross outcomes are stored, the journal fills net results from the stored gross return.
+
+
+## Aggregate evaluation follow-up — 13.10.2026
+
+- The outcome report now summarizes real closed-M5 outcomes at each horizon using sample size, mean/median gross directional return, and gross win rate.
+- Net mean/median/win rate are calculated only from outcomes with an explicit round-trip cost assumption; missing costs remain missing and are never treated as zero.
+- The report also breaks results down by observed Move Radar phase and direction. These are observational signal outcomes, not executed trades; repeated signals can remain correlated and sample sizes must be shown alongside metrics.
+- This reporting layer does not alter the signal model, trade gates, or order execution.
