@@ -305,6 +305,78 @@ class SignalOutcomeJournal:
             ).fetchall()
         return {status: count for status, count in rows}
 
+    @staticmethod
+    def _return_stats(values):
+        clean = [value for value in values if value is not None and isfinite(value)]
+        if not clean:
+            return {
+                "sample_size": 0,
+                "mean_pct": None,
+                "median_pct": None,
+                "win_rate_pct": None,
+            }
+        ordered = sorted(clean)
+        middle = len(ordered) // 2
+        median = ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
+        return {
+            "sample_size": len(clean),
+            "mean_pct": round(sum(clean) / len(clean), 5),
+            "median_pct": round(median, 5),
+            "win_rate_pct": round(sum(1 for value in clean if value > 0) / len(clean) * 100.0, 2),
+        }
+
+    def performance_summary(self):
+        """Aggregate only measured forward-candle outcomes; never infer missing net returns."""
+        records = self.records()
+        result = {
+            "record_count": len(records),
+            "status_counts": self.summary(),
+            "horizons": {},
+            "by_phase_direction": {},
+            "warning": (
+                "Observational signal outcomes, not executed trades. Signals may be correlated; "
+                "net statistics include only records with an explicit round-trip cost assumption."
+            ),
+        }
+        for minutes in HORIZONS_MINUTES:
+            key = str(minutes)
+            available = [
+                row for row in records
+                if key in (row.get("outcomes") or {})
+                and (row["outcomes"][key].get("source") == "BCS_CLOSED_M5")
+            ]
+            gross = [
+                self._number(row["outcomes"][key].get("gross_close_return_pct"))
+                for row in available
+            ]
+            net = [
+                self._number(row["outcomes"][key].get("net_close_return_pct"))
+                for row in available
+            ]
+            result["horizons"][key] = {
+                "gross": self._return_stats(gross),
+                "net": self._return_stats(net),
+                "net_cost_assumption_count": sum(value is not None for value in net),
+            }
+            groups = {}
+            for row in available:
+                group_key = "|".join((
+                    str(row.get("phase") or "UNKNOWN").upper(),
+                    str(row.get("direction") or "UNKNOWN").upper(),
+                ))
+                groups.setdefault(group_key, {"gross": [], "net": []})
+                outcome = row["outcomes"][key]
+                groups[group_key]["gross"].append(self._number(outcome.get("gross_close_return_pct")))
+                groups[group_key]["net"].append(self._number(outcome.get("net_close_return_pct")))
+            result["by_phase_direction"][key] = {
+                group_key: {
+                    "gross": self._return_stats(values["gross"]),
+                    "net": self._return_stats(values["net"]),
+                }
+                for group_key, values in sorted(groups.items())
+            }
+        return result
+
     def records(self):
         with self._connect() as db:
             rows = db.execute("""
