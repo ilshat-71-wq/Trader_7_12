@@ -39,6 +39,7 @@ class BCSAPI:
     CANDLE_DIAGNOSTIC_EVERY = 50
     METADATA_TIMEOUT = 5.0
     METADATA_RETRIES = 2
+    AUTH_FAILURE_RETRY_DELAY = 10.0
     INSTRUMENT_METADATA_PAGE_SIZE = 200
     INSTRUMENT_METADATA_MAX_PAGES = 100
     INSTRUMENT_METADATA_CACHE_TTL = 300.0
@@ -63,6 +64,7 @@ class BCSAPI:
             return
         self.access_token = None
         self._access_token_expires_at = 0.0
+        self._auth_retry_after = 0.0
         self._auth_lock = threading.RLock()
         self.info_url = "https://be.broker.ru/trade-api-information-service/api/v1"
         self.market_url = "https://be.broker.ru/trade-api-market-data-connector/api/v1"
@@ -82,6 +84,8 @@ class BCSAPI:
     def authorize(self, force=False):
         """Ensure a valid BCS read-only access token is available."""
         now = time.time()
+        if not force and not self.access_token and now < self._auth_retry_after:
+            return False
         if (
             not force
             and self.access_token
@@ -91,6 +95,8 @@ class BCSAPI:
 
         with self._auth_lock:
             now = time.time()
+            if not force and not self.access_token and now < self._auth_retry_after:
+                return False
             if (
                 not force
                 and self.access_token
@@ -120,6 +126,7 @@ class BCSAPI:
                 # Keep authorization unavailable; later API calls can retry it, and
                 # callers must continue to represent missing market data honestly.
                 print("⚠️ BCS authorization request failed:", type(exc).__name__, str(exc))
+                self._auth_retry_after = time.time() + self.AUTH_FAILURE_RETRY_DELAY
                 return False
 
             if r.status_code == 200:
@@ -130,6 +137,7 @@ class BCSAPI:
                     return False
 
                 self.access_token = access_token
+                self._auth_retry_after = 0.0
                 expires_in = float(data.get("expires_in") or 86400)
                 self._access_token_expires_at = time.time() + expires_in
 
@@ -141,6 +149,7 @@ class BCSAPI:
                 return True
 
             print("❌ BCS authorization HTTP:", r.status_code)
+            self._auth_retry_after = time.time() + self.AUTH_FAILURE_RETRY_DELAY
             return False
 
     def headers(self):
