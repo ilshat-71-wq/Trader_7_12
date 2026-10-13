@@ -188,7 +188,7 @@ class FinalRadarWidget(QWidget):
                 f"confirm {diag.get('confirmations')}/{diag.get('required_confirmations')} | "
                 f"RT {diag.get('realtime_count')}/{3} avg {avg_text} | {reason_text}"
             )
-        self.meta.setToolTip("\\n".join(tooltip_lines))
+        self.meta.setToolTip("\n".join(tooltip_lines))
 
         for row, item in enumerate(self._rows, 1):
             rt = item["final_realtime"]
