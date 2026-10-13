@@ -239,3 +239,46 @@ def test_final_status_exposes_block_reasons():
     row["liquidity_gate"] = False
     service.record_spot_scan([row], "2026-10-13")
     assert service.status()["blocked_reasons"].get("SPOT_LIQUIDITY_NOT_CONFIRMED", 0) >= 1
+
+
+def test_status_diagnoses_confirmation_and_missing_realtime_components():
+    service = FinalRadarService()
+    service.record_spot_scan([spot("DIAG1")], "2026-10-13")
+    service.update_realtime({"ticker": "DIAG1", "book_score": 70})
+    diag = service.status()["candidate_diagnostics"][0]
+    assert diag["ticker"] == "DIAG1"
+    assert diag["confirmations"] == 1
+    assert diag["realtime_count"] == 1
+    assert diag["realtime_average"] == 70.0
+    assert "NEED_CONFIRMATIONS" in diag["reasons"]
+    assert "RT_COMPONENTS_INSUFFICIENT" in diag["reasons"]
+    assert diag["final"] is False
+
+
+def test_status_diagnoses_realtime_score_below_threshold():
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_spot_scan([spot("DIAG2")], "2026-10-13")
+    service.update_realtime({
+        "ticker": "DIAG2", "book_score": 30, "tape_score": 40,
+    })
+    diag = service.status()["candidate_diagnostics"][0]
+    assert diag["confirmations"] == 3
+    assert diag["realtime_count"] == 2
+    assert diag["realtime_average"] == 35.0
+    assert diag["reasons"] == ["RT_SCORE_BELOW_MIN"]
+    assert diag["final"] is False
+
+
+def test_status_marks_final_eligible_candidate():
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_spot_scan([spot("DIAG3")], "2026-10-13")
+    service.update_realtime({
+        "ticker": "DIAG3", "book_score": 70, "tape_score": 80,
+    })
+    diag = service.status()["candidate_diagnostics"][0]
+    assert diag["confirmations"] == 3
+    assert diag["realtime_count"] == 2
+    assert diag["final"] is True
+    assert diag["reasons"] == ["FINAL_ELIGIBLE"]

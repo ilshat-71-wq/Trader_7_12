@@ -171,12 +171,24 @@ class FinalRadarWidget(QWidget):
             f"RT BLOCKED {status.get('rt_blocked', 0)}"
         )
         blocked = status.get("blocked_reasons") or {}
-        self.meta.setToolTip(
+        tooltip_lines = [
             "Current scan gate counts: " + (
                 ", ".join(f"{key}: {value}" for key, value in sorted(blocked.items()))
-                if blocked else "no blocked-candidate reasons recorded"
+                if blocked else "no pre-STRICT gate blocks recorded"
+            ),
+            "",
+            "STRICT candidate diagnostics:",
+        ]
+        for diag in status.get("candidate_diagnostics", []):
+            avg = diag.get("realtime_average")
+            avg_text = f"{avg:.1f}" if avg is not None else "NO DATA"
+            reason_text = ", ".join(diag.get("reasons") or []) or "UNKNOWN"
+            tooltip_lines.append(
+                f"{diag.get('ticker')} {diag.get('direction')} | "
+                f"confirm {diag.get('confirmations')}/{diag.get('required_confirmations')} | "
+                f"RT {diag.get('realtime_count')}/{3} avg {avg_text} | {reason_text}"
             )
-        )
+        self.meta.setToolTip("\n".join(tooltip_lines))
 
         for row, item in enumerate(self._rows, 1):
             rt = item["final_realtime"]
@@ -235,6 +247,20 @@ class FinalRadarWidget(QWidget):
                 item = self.table.item(row, col)
                 values.append(item.text() if item is not None else "")
             lines.append("\t".join(values))
+        lines.extend(["", "=== CANDIDATE DIAGNOSTICS ==="])
+        diagnostics = self.service.status().get("candidate_diagnostics", [])
+        if not diagnostics:
+            lines.append("No current STRICT candidates")
+        for diag in diagnostics:
+            avg = diag.get("realtime_average")
+            avg_text = f"{avg:.1f}" if avg is not None else "NO DATA"
+            reasons = ", ".join(diag.get("reasons") or []) or "UNKNOWN"
+            lines.append(
+                f"{diag.get('instrument_type')} {diag.get('ticker')} {diag.get('direction')} | "
+                f"confirm {diag.get('confirmations')}/{diag.get('required_confirmations')} | "
+                f"RT {diag.get('realtime_count')}/{diag.get('required_realtime_components')} "
+                f"avg {avg_text} | {reasons}"
+            )
         lines.extend(["", self.note.text()])
         QApplication.clipboard().setText("\n".join(lines))
         self.copy_button.setText("COPIED ✓")
