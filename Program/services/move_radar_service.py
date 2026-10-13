@@ -5,6 +5,9 @@ or alter the existing signal model. Missing data stays missing.
 """
 
 
+from math import isfinite
+
+
 class MoveRadarService:
     """Identify large, directionally aligned moves and classify their phase."""
 
@@ -26,9 +29,10 @@ class MoveRadarService:
     @staticmethod
     def _f(value):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return None
+        return number if isfinite(number) else None
 
     @classmethod
     def classify(cls, item):
@@ -41,6 +45,8 @@ class MoveRadarService:
         if signal not in {"LONG", "SHORT"}:
             return None
         if change is None or used is None or probability is None:
+            return None
+        if used < 0 or probability < 0 or probability > 100:
             return None
         if abs(change) < cls.MIN_MOVE_PERCENT or probability < cls.MIN_PROBABILITY:
             return None
@@ -92,7 +98,9 @@ class MoveRadarService:
             phase = cls.PHASE_ORDER[item["move_phase"]]
             prob = cls._f(item.get("signal_probability")) or 0.0
             accel = abs(cls._f(item.get("directional_acceleration")) or 0.0)
+            # Keep denominator-driven outliers from dominating tie-breaks.
+            accel_rank = min(accel, 100.0)
             used = cls._f(item.get("atr_used_percent")) or 0.0
-            return (phase, -prob, -accel, used)
+            return (phase, -prob, -accel_rank, used)
 
         return sorted(rows, key=sort_key)

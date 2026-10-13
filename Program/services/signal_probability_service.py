@@ -1,6 +1,6 @@
 """Trader_7_12 Pro — real-data directional signal probability."""
 
-from math import exp, tanh
+from math import exp, isfinite, tanh
 
 
 class SignalProbabilityService:
@@ -19,9 +19,10 @@ class SignalProbabilityService:
     @staticmethod
     def _f(value, default=0.0):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return default
+        return number if isfinite(number) else default
 
     @staticmethod
     def _sigmoid(score):
@@ -37,6 +38,17 @@ class SignalProbabilityService:
         return 0.0
 
     def spot(self, item):
+        try:
+            valid_change = item.get("change_percent") is not None and isfinite(float(item["change_percent"]))
+        except (TypeError, ValueError, OverflowError):
+            valid_change = False
+        if not valid_change:
+            return {
+                "signal": "NEUTRAL", "probability": 50.0,
+                "long_probability": 50.0, "short_probability": 50.0,
+                "signal_model": self.VERSION, "signal_status": "INCOMPLETE",
+                "signal_reason": "change_percent missing or non-finite",
+            }
         change = self._f(item.get("change_percent"))
         rs = self._f(item.get("relative_strength"))
         accel = self._f(item.get("money_acceleration"))
@@ -80,9 +92,25 @@ class SignalProbabilityService:
             "long_probability": round(long_probability, 1),
             "short_probability": round(short_probability, 1),
             "signal_model": self.VERSION,
+            "signal_status": "AVAILABLE",
+            "signal_reason": None,
         }
 
     def futures(self, item):
+        try:
+            valid_change = item.get("change_percent") is not None and isfinite(float(item["change_percent"]))
+        except (TypeError, ValueError, OverflowError):
+            valid_change = False
+        if not valid_change:
+            return {
+                "signal": "NEUTRAL", "probability": 50.0,
+                "long_probability": 50.0, "short_probability": 50.0,
+                "signal_model": self.VERSION,
+                "rollover_active": bool(item.get("rollover_active")),
+                "oi_feature": "COMBINED_CURVE" if item.get("rollover_active") else "FRONT_CONTRACT",
+                "signal_status": "INCOMPLETE",
+                "signal_reason": "change_percent missing or non-finite",
+            }
         change = self._f(item.get("change_percent"))
         oi_analysis = item.get("oi_analysis") or {}
         front_oi_change = self._f(oi_analysis.get("oi_change_percent"))
@@ -161,4 +189,6 @@ class SignalProbabilityService:
             "signal_model": self.VERSION,
             "rollover_active": rollover_active,
             "oi_feature": "COMBINED_CURVE" if rollover_active and combined_oi_change is not None else "FRONT_CONTRACT",
+            "signal_status": "AVAILABLE",
+            "signal_reason": None,
         }

@@ -7,6 +7,8 @@ promotes a candidate after repeated confirmation.
 
 from __future__ import annotations
 
+from math import isfinite
+
 from services.move_radar_service import MoveRadarService
 
 
@@ -20,6 +22,7 @@ class FinalRadarService:
 
     def __init__(self):
         self._day_key = None
+        self._blocked_reasons = {}
         self._scan_no = 0
         self._history = {}
         self._realtime = {}
@@ -30,9 +33,13 @@ class FinalRadarService:
     @staticmethod
     def _f(value):
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
             return None
+        return number if isfinite(number) else None
+
+    def _block(self, reason):
+        self._blocked_reasons[reason] = self._blocked_reasons.get(reason, 0) + 1
 
     @staticmethod
     def _direction(item):
@@ -51,6 +58,7 @@ class FinalRadarService:
         self._history = {}
         self._realtime = {}
         self._futures = []
+        self._blocked_reasons = {}
 
     def _record_candidate(self, key, direction, item, scan_no, instrument_type):
         previous = self._history.get(key)
@@ -82,7 +90,10 @@ class FinalRadarService:
 
         self._scan_no += 1
         scan_no = self._scan_no
-        candidates = MoveRadarService.candidates(market_map)
+        self._blocked_reasons = {}
+        source_rows = list(market_map or [])
+        candidates = MoveRadarService.candidates(source_rows)
+        self._blocked_reasons["MOVE_RADAR_FILTER"] = max(0, len(source_rows) - len(candidates))
         current = {}
 
         for item in candidates:
@@ -93,21 +104,31 @@ class FinalRadarService:
             directional_accel = self._f(item.get("directional_acceleration"))
 
             if not ticker or not direction:
+                self._block("MISSING_TICKER_OR_DIRECTION")
                 continue
-            # FINAL RADAR uses the same established SPOT liquidity gate as
-            # Market Radar. High model confidence cannot promote illiquidity.
             if item.get("liquidity_gate") is not True:
+                self._block("SPOT_LIQUIDITY_NOT_CONFIRMED")
                 continue
             if probability is None or probability < self.MIN_PROBABILITY:
+                self._block("PROBABILITY_MISSING_OR_BELOW_MIN")
                 continue
-            if used is None or used > self.MAX_ATR_USED:
+            if used is None:
+                self._block("ATR_USAGE_MISSING")
+                continue
+            if used > self.MAX_ATR_USED:
+                self._block("ATR_USAGE_ABOVE_MAX")
                 continue
             # Move Radar already normalizes acceleration to directional
             # acceleration: positive means aligned with the model direction
             # for both LONG and SHORT.
-            if directional_accel is None or directional_accel < self.MIN_DIRECTIONAL_ACCEL:
+            if directional_accel is None:
+                self._block("DIRECTIONAL_ACCEL_MISSING")
+                continue
+            if directional_accel < self.MIN_DIRECTIONAL_ACCEL:
+                self._block("DIRECTIONAL_ACCEL_WEAK_OR_OPPOSED")
                 continue
             if item.get("move_phase") not in {"START", "DEVELOPING"}:
+                self._block("PHASE_NOT_ENTRY_ELIGIBLE")
                 continue
 
             key = f"SPOT:{ticker}"
@@ -142,18 +163,22 @@ class FinalRadarService:
             action = str(item.get("money_flow_position_action") or "").upper()
 
             if not ticker or not direction:
+                self._block("FUTURES_TICKER_OR_DIRECTION_MISSING")
                 continue
             if probability is None or probability < self.MIN_PROBABILITY:
+                self._block("FUTURES_PROBABILITY_MISSING_OR_BELOW_MIN")
                 continue
-            # Use the established Futures OI / Money Flow liquidity data.
-            # Do not apply the SPOT liquidity_gate to futures.
             if turnover is None or turnover <= 0:
+                self._block("FUTURES_TURNOVER_MISSING_OR_ZERO")
                 continue
             if money_flow_status != "AVAILABLE":
+                self._block("FUTURES_MONEY_FLOW_UNAVAILABLE")
                 continue
             if liquidity_state not in {"ACTIVE", "HOT"}:
+                self._block("FUTURES_LIQUIDITY_NOT_ACTIVE")
                 continue
             if action in {"LONG_LIQUIDATION", "LIQUIDATE"}:
+                self._block("FUTURES_LIQUIDATION_ACTION")
                 continue
 
             key = f"FUT:{ticker}"
@@ -329,4 +354,5 @@ class FinalRadarService:
             "final_futures_count": futures_final,
             "rt_ready": rt_ready,
             "rt_blocked": rt_blocked,
+            "blocked_reasons": {key: value for key, value in self._blocked_reasons.items() if value},
         }
