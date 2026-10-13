@@ -202,6 +202,7 @@ class EntryRadarWidget(QWidget):
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
+                cell.setToolTip(EntryRadarService.reason(item))
                 cell.setTextAlignment(
                     Qt.AlignmentFlag.AlignCenter
                     if col in (0, 2, 3, 4, 5)

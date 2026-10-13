@@ -208,3 +208,34 @@ def test_final_contains_multiple_spot_and_futures_candidates_without_ranking():
     assert [row["final_ticker"] for row in rows] == [
         "AAA1", "BBB1", "NGV6", "ONZ6"
     ]
+
+
+
+def test_exhaustion_cannot_promote_even_with_99_probability_and_strong_rt():
+    service = FinalRadarService()
+    row = spot("EXHAUSTED", prob=99.0, used=151.0, accel=32591.2, change=1.9)
+    for _ in range(3):
+        service.record_spot_scan([row], "2026-10-13")
+    service.update_realtime({
+        "ticker": "EXHAUSTED", "book_score": 95, "tape_score": 95, "flow_score": 95,
+    })
+    assert service.final_candidates() == []
+
+
+def test_final_rejects_non_finite_atr_and_probability():
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_spot_scan([spot("BADATR", prob=99.0, used=float("nan"))], "2026-10-13")
+    assert service.final_candidates() == []
+    service = FinalRadarService()
+    for _ in range(3):
+        service.record_spot_scan([spot("BADPROB", prob=float("nan"), used=20.0)], "2026-10-13")
+    assert service.final_candidates() == []
+
+
+def test_final_status_exposes_block_reasons():
+    service = FinalRadarService()
+    row = spot("ILLIQUID", prob=99.0)
+    row["liquidity_gate"] = False
+    service.record_spot_scan([row], "2026-10-13")
+    assert service.status()["blocked_reasons"].get("SPOT_LIQUIDITY_NOT_CONFIRMED", 0) >= 1

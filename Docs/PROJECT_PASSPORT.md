@@ -981,3 +981,16 @@ Code guardrail: `Program/ui.py` documents this locked contract next to the MAP t
 - Regression coverage added in `Program/test_entry_radar_service.py` for all four direction/action combinations.
 - GitHub commits: `57accbf` (logic correction), `a57f734` (regression tests).
 - **Acceptance pending:** GitHub Actions full regression and macOS build workflows must finish successfully. The remote edits alone are not proof of a passing test suite, a rebuilt iMac app, or successful live-market validation. Do not label the installed app verified until the documented local acceptance sequence is completed.
+
+
+## 0.5 Radar entry gates and outcome measurement — 13.10.2026
+
+Implementation branch / PR: `audit/radar-entry-outcomes-2026-10-13` / PR #29.
+
+- Entry Radar SPOT is aligned with the existing FINAL risk ceiling: confirmed liquidity, known ATR usage <=70%, no EXHAUSTION, D1/H1/setup/M1 confirmation; SPOT ENTER additionally requires model score >=80. A score of 65–79.9 with a confirmed M1 trigger remains WAIT.
+- Move Radar rejects non-finite core metrics. Raw acceleration remains visible for audit, but acceleration outliers are capped only for tie-breaking. Invalid price-change input is explicitly INCOMPLETE and propagated into the SPOT map.
+- FINAL RADAR reports blocked-gate counts and continues to require three consecutive scans, established liquidity/OI-FLOW checks, ATR and directional-acceleration gates, plus realtime confirmation. FINAL is a confirmation list, not a profit guarantee or order executor.
+- Persistent outcome journal: `~/Library/Application Support/Trader_7_12/SignalOutcomeJournal.sqlite3`. It records confirmed FINAL candidates and evaluates BCS closed M5 candles at 5/15/30/60 minutes for directional gross return, MFE and MAE. Net return is deliberately null unless the verified round-trip cost assumption is supplied through `TRADER712_ROUND_TRIP_COST_BPS`.
+- Reporting command from the Program directory: `python3 signal_outcomes_report.py`.
+- Regression validation: 212 tests passed on code commit `4ee8cdd6549a2acf3e02a92130b9f1e5b721409c`. Current-head CI and macOS bundle build are being rechecked after follow-up journal hardening.
+- **Acceptance remains incomplete until** current-head CI/macOS build passes, then the iMac pulls the merged code, runs the full local suite/build, and verifies one real open-session BCS scan. No profitability claim is made until a sufficient forward-outcome sample is collected.
