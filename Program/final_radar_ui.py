@@ -253,4 +253,46 @@ class FinalRadarWidget(QWidget):
 
     def update_futures(self, results):
         self.service.update_futures(results)
+        self._journal_outcomes()
         self._render()
+
+    def _journal_outcomes(self):
+        now = time.monotonic()
+        candidates = self.service.final_candidates()
+        if now - self._last_journal_record_at >= 5.0:
+            try:
+                self.outcome_journal.record_candidates(candidates)
+                self._last_journal_record_at = now
+            except Exception as exc:
+                self._outcome_last_error = f"{type(exc).__name__}: {exc}"
+        if (
+            not self._outcome_worker_running
+            and now - self._last_outcome_eval_at >= 60.0
+        ):
+            self._outcome_worker_running = True
+            self._last_outcome_eval_at = now
+            threading.Thread(
+                target=self._evaluate_outcome_worker,
+                name="Trader712OutcomeEvaluator",
+                daemon=True,
+            ).start()
+
+    def _evaluate_outcome_worker(self):
+        try:
+            from services.history_candle_service import HistoryCandleService
+
+            history = HistoryCandleService()
+            raw_cost = os.environ.get("TRADER712_ROUND_TRIP_COST_BPS")
+            costs_bps = float(raw_cost) if raw_cost else None
+            self.outcome_journal.evaluate_pending(
+                lambda ticker, class_code, start, end: history.load_interval(
+                    ticker, class_code, "M5", start_time=start, end_time=end
+                ),
+                now=datetime.now(timezone.utc),
+                costs_bps=costs_bps,
+            )
+            self._outcome_last_error = None
+        except Exception as exc:
+            self._outcome_last_error = f"{type(exc).__name__}: {exc}"
+        finally:
+            self._outcome_worker_running = False
