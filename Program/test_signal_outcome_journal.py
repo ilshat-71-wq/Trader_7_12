@@ -36,7 +36,11 @@ def test_futures_candidate_uses_real_last_price_and_futures_class_code(tmp_path)
     assert record["ticker"] == "NGV6"
     assert record["instrument_type"] == "FUTURES"
     assert record["entry_price"] == 3.125
-    assert record["class_code"] == "SPBFUT"
+    with journal._connect() as db:
+        stored_class_code = db.execute(
+            "SELECT class_code FROM signal_outcomes WHERE ticker = ?", ("NGV6",)
+        ).fetchone()[0]
+    assert stored_class_code == "SPBFUT"
     assert record["status"] == "PENDING"
     assert record["data_reason"] is None
 
