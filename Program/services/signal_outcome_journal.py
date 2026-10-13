@@ -110,7 +110,7 @@ class SignalOutcomeJournal:
                 if instrument_type not in {"SPOT", "FUTURES"}:
                     instrument_type = "FUTURES" if item.get("futures_ticker") else "SPOT"
                 price = next((
-                    self._number(item.get(key)) for key in ("price", "last_price", "close")
+                    self._number(item.get(key)) for key in ("price", "last_price", "last", "close")
                     if self._number(item.get(key)) is not None
                 ), None)
                 class_code = str(
