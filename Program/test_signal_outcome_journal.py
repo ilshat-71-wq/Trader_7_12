@@ -130,3 +130,44 @@ def test_invalid_price_does_not_mask_later_valid_candidate(tmp_path):
     journal.record_candidates([valid], now=entry + timedelta(minutes=1))
     assert journal.records()[0]["status"] == "PENDING"
     assert journal.records()[0]["entry_price"] == 100.0
+
+def test_performance_summary_reports_sample_size_and_never_fakes_net_returns(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "outcomes.sqlite3")
+    entry = datetime(2026, 10, 13, 10, 0, tzinfo=MSK)
+    journal.record_candidates([
+        {
+            "final_ticker": "SBER", "final_instrument_type": "SPOT",
+            "signal": "LONG", "price": 100.0, "spot_class_code": "TQBR",
+            "signal_probability": 91.0, "move_phase": "START",
+        },
+        {
+            "final_ticker": "GAZP", "final_instrument_type": "SPOT",
+            "signal": "SHORT", "price": 100.0, "spot_class_code": "TQBR",
+            "signal_probability": 88.0, "move_phase": "LATE",
+        },
+    ], now=entry)
+
+    candles_by_ticker = {
+        "SBER": [{
+            "time": entry.isoformat(), "high": 101.0, "low": 99.8, "close": 100.5,
+        }],
+        "GAZP": [{
+            "time": entry.isoformat(), "high": 100.8, "low": 99.7, "close": 100.25,
+        }],
+    }
+    journal.evaluate_pending(
+        lambda ticker, code, start, end: candles_by_ticker[ticker],
+        now=entry + timedelta(minutes=5),
+    )
+
+    summary = journal.performance_summary()
+    five = summary["horizons"]["5"]
+    assert five["gross"]["sample_size"] == 2
+    assert five["gross"]["mean_pct"] == 0.125
+    assert five["gross"]["win_rate_pct"] == 50.0
+    assert five["net"]["sample_size"] == 0
+    assert five["net"]["mean_pct"] is None
+    assert five["net_cost_assumption_count"] == 0
+    assert summary["by_phase_direction"]["5"]["START|LONG"]["gross"]["sample_size"] == 1
+    assert summary["by_phase_direction"]["5"]["LATE|SHORT"]["gross"]["mean_pct"] == -0.25
+
