@@ -7,11 +7,6 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import os
-import threading
-import time
-from datetime import datetime, timezone
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
@@ -28,7 +23,6 @@ from PySide6.QtWidgets import (
 from ui_table import CopyableTableWidget, RADAR_BUTTON_STYLE
 
 from services.final_radar_service import FinalRadarService
-from services.signal_outcome_journal import SignalOutcomeJournal
 from services.signal_outcome_journal import SignalOutcomeJournal
 
 
