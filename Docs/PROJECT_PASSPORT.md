@@ -945,3 +945,16 @@ UI workflow fix commit: `cbb943ccb6176d82ffbe0bfaecd2c1898a2ac4f5` (`Fix Morning
 5. Во время открытой сессии наблюдать последовательность SPOT D1 → H1 → M5 → M1/ENTRY, отдельно Futures OI, Money Flow, BOOK/TAPE/FLOW RT и Final Radar `1/3 → 2/3 → 3/3`. Записывать реальные значения, время и ошибки.
 6. Не ослаблять фильтры ради сигналов. `NO DATA`, `INCOMPLETE`, `NO TRADE` — корректный результат, если реальные данные/подтверждения отсутствуют.
 
+## LOCKED DECISION — SPOT MAP RELATIVE-STRENGTH COLUMNS (2026-10-13)
+
+This question was investigated and closed on 2026-09-28 / 2026-10-01. Do not reopen it merely because a scan shows the same `IDX Δ%` for every row or because `D1-RS` differs from current `RS`.
+
+- `D1-RS` → `daily_relative_mean_pp`: historical daily relative-strength statistic built from matching completed daily candles.
+- `IDX Δ%` → `benchmark_change_percent`: current change of the shared benchmark, which is IMOEX. The same benchmark value appearing for every instrument in one snapshot is expected.
+- `RS` → `relative_strength`: current intraday relative strength, calculated as instrument `change_percent - benchmark_change_percent`.
+- These fields represent different time horizons / quantities and are intentionally not interchangeable. Example: price change +5.35% and benchmark change +0.10% produce current RS +5.25%; D1-RS is a separate completed-daily-candle metric.
+- UI mapping was already correct. No formula or display behavior is to be changed for this settled issue.
+
+**Reopen only with new, concrete evidence**: a failing regression test, an observed source/benchmark substitution away from IMOEX, a broken field mapping, or a numerical invariant failure using the raw values from the same snapshot. Repeated identical `IDX Δ%` values or a difference between `D1-RS` and `RS` are not evidence of a defect.
+
+Code guardrail: `Program/ui.py` documents this locked contract next to the MAP table mapping.
