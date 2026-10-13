@@ -968,3 +968,16 @@ Code guardrail: `Program/ui.py` documents this locked contract next to the MAP t
 - Added regression test `Program/test_bcs_api_authorization.py` for a simulated authorization POST timeout.
 - GitHub commits: `1a2074c` (initial graceful startup fix), `4c86258` (authorization retry cooldown), `3017ed7` / `108ebd6` (regression test and cooldown coverage).
 - **Verification pending on the iMac:** pull latest `main`, run full tests/build, then launch the installed app. Do not mark the fix as locally verified until those checks pass and a successful live BCS authorization/data cycle is observed.
+
+
+## ENTRY RADAR — DIRECTIONAL FUTURES OI ACTION GUARD (2026-10-13)
+
+- Audit found a precedence/guard defect in `EntryRadarService.state()`: `LONG_LIQUIDATION` forced `AVOID` regardless of signal direction.
+- The guard now blocks only directionally conflicting combinations:
+  - `LONG_LIQUIDATION + LONG → AVOID`
+  - `SHORT_COVERING + SHORT → AVOID`
+  - `LONG_LIQUIDATION + SHORT` and `SHORT_COVERING + LONG` are not rejected by this guard; the existing probability, real-zone, and other state rules still apply.
+- No thresholds, signal-generation formulas, market-data sources, SPOT pipeline, architecture, or execution behavior changed.
+- Regression coverage added in `Program/test_entry_radar_service.py` for all four direction/action combinations.
+- GitHub commits: `57accbf` (logic correction), `a57f734` (regression tests).
+- **Acceptance pending:** GitHub Actions full regression and macOS build workflows must finish successfully. The remote edits alone are not proof of a passing test suite, a rebuilt iMac app, or successful live-market validation. Do not label the installed app verified until the documented local acceptance sequence is completed.
