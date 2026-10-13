@@ -54,3 +54,13 @@ def test_spot_entry_never_uses_synthetic_zone():
 def test_spot_entry_requires_directionally_aligned_h1_level():
     assert EntryRadarService.state(spot_item("CONFIRMED", h1="NEAR_H1_RESISTANCE")) == "WATCH"
     assert EntryRadarService.state(spot_item("CONFIRMED", signal="SHORT", h1="NEAR_H1_RESISTANCE")) == "ENTER"
+
+
+def test_entry_radar_oi_action_conflict_is_directional():
+    # Long liquidation is adverse to LONG but directionally consistent with SHORT.
+    assert EntryRadarService.state(item(83, signal="LONG", action="LONG_LIQUIDATION")) == "AVOID"
+    assert EntryRadarService.state(item(83, signal="SHORT", action="LONG_LIQUIDATION")) == "ENTER"
+
+    # Short covering is adverse to SHORT but directionally consistent with LONG.
+    assert EntryRadarService.state(item(83, signal="SHORT", action="SHORT_COVERING")) == "AVOID"
+    assert EntryRadarService.state(item(83, signal="LONG", action="SHORT_COVERING")) == "ENTER"
