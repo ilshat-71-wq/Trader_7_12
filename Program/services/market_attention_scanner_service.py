@@ -285,10 +285,15 @@ class MarketAttentionScannerService:
             "candle_count": len(candles),
             "data_status": "AVAILABLE",
         }
-        signal = self.signal_probability.spot(result)
-        key = result.get("spot_ticker") or ""
+        # Directional probability is applied after RS and D1 structure are known.
+        return result
+
+    def _apply_signal_probability(self, row):
+        """Score only after all real model inputs, including RS and D1, are available."""
+        signal = self.signal_probability.spot(row)
+        key = str(row.get("spot_ticker") or "").upper()
         previous = self._previous_signal_probabilities.get(key)
-        result.update({
+        row.update({
             "signal": signal["signal"],
             "signal_probability": signal["probability"],
             "long_probability": signal["long_probability"],
@@ -301,8 +306,9 @@ class MarketAttentionScannerService:
                 if previous is not None else None
             ),
         })
-        self._previous_signal_probabilities[key] = signal["probability"]
-        return result
+        if key:
+            self._previous_signal_probabilities[key] = signal["probability"]
+        return row
 
     @staticmethod
     def _empty_entry_pipeline(reason):
@@ -685,6 +691,12 @@ class MarketAttentionScannerService:
                 row["d1_relative_consistent"] = False
                 skipped["D1_UNAVAILABLE"].append(row["spot_ticker"])
         timings["d1"] = round(perf_counter() - phase_started, 3)
+
+        # The probability model uses real relative strength and D1 structure.
+        # Compute it only after those features have been populated; scoring
+        # earlier silently treated them as neutral defaults.
+        for row in results:
+            self._apply_signal_probability(row)
 
         # Canonical SPOT pipeline after D1 qualification:
         # D1 trend -> H1 structural level -> M5 setup -> M1 volume trigger.
