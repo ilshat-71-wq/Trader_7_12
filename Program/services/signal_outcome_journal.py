@@ -182,6 +182,30 @@ class SignalOutcomeJournal:
         cost = self._number(costs_bps)
         if cost is not None and cost < 0:
             raise ValueError("costs_bps cannot be negative")
+        # If the fee assumption is added after earlier horizons completed,
+        # update saved gross outcomes without needing to refetch historical candles.
+        if cost is not None:
+            with self._connect() as db:
+                saved = db.execute(
+                    "SELECT id, outcomes_json FROM signal_outcomes WHERE status IN ('PARTIAL', 'COMPLETE')"
+                ).fetchall()
+                for saved_id, saved_text in saved:
+                    try:
+                        saved_outcomes = json.loads(saved_text or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    changed = False
+                    for saved_result in saved_outcomes.values():
+                        gross = self._number(saved_result.get("gross_close_return_pct"))
+                        if gross is not None and saved_result.get("net_close_return_pct") is None:
+                            saved_result["net_close_return_pct"] = round(gross - cost / 100.0, 5)
+                            saved_result["cost_assumption_bps_round_trip"] = cost
+                            changed = True
+                    if changed:
+                        db.execute(
+                            "UPDATE signal_outcomes SET outcomes_json=? WHERE id=?",
+                            (json.dumps(saved_outcomes, ensure_ascii=False, allow_nan=False), saved_id),
+                        )
         with self._connect() as db:
             rows = db.execute("""
                 SELECT id, ticker, direction, entry_time, entry_price, class_code, outcomes_json
@@ -240,6 +264,10 @@ class SignalOutcomeJournal:
                     if c[0] >= entry_time and c[0] + timedelta(minutes=5) <= cutoff
                 ]
                 if not eligible:
+                    continue
+                # A horizon needs a real closed candle at its end; an old
+                # first candle must not be reused as a fake 15/30/60m result.
+                if eligible[-1][0] + timedelta(minutes=5) < cutoff:
                     continue
                 signed = 1.0 if direction == "LONG" else -1.0
                 gross_close = ((eligible[-1][3] / entry_price) - 1.0) * 100.0 * signed

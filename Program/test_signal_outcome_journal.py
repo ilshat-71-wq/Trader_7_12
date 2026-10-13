@@ -101,14 +101,20 @@ def test_late_cost_configuration_updates_existing_net_outcome(tmp_path):
         "final_ticker": "SBER", "final_instrument_type": "SPOT",
         "signal": "LONG", "price": 100.0, "spot_class_code": "TQBR",
     }], now=entry)
-    candles = [{
-        "time": entry.isoformat(), "high": 101.0, "low": 99.0, "close": 100.5
-    }]
+    candles = []
+    for i in range(12):
+        stamp = entry + timedelta(minutes=5 * i)
+        candles.append({
+            "time": stamp.isoformat(), "high": 101.0, "low": 99.0,
+            "close": 100.5, "open": 100.0,
+        })
     loader = lambda ticker, code, start, end: candles
     journal.evaluate_pending(loader, now=entry + timedelta(minutes=65))
+    assert journal.records()[0]["status"] == "COMPLETE"
     assert journal.records()[0]["outcomes"]["5"]["net_close_return_pct"] is None
     journal.evaluate_pending(loader, now=entry + timedelta(minutes=65), costs_bps=10.0)
     assert journal.records()[0]["outcomes"]["5"]["net_close_return_pct"] == 0.4
+    assert journal.records()[0]["outcomes"]["60"]["net_close_return_pct"] == 0.4
 
 
 
