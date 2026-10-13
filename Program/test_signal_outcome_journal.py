@@ -76,3 +76,36 @@ def test_net_return_is_not_claimed_without_cost_assumption(tmp_path):
         now=entry + timedelta(minutes=65),
     )
     assert journal.records()[0]["outcomes"]["5"]["net_close_return_pct"] is None
+
+
+
+def test_incomplete_record_can_be_repaired_by_later_real_data(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "outcomes.sqlite3")
+    entry = datetime(2026, 10, 13, 10, 0, tzinfo=MSK)
+    base = {
+        "final_ticker": "SBER", "final_instrument_type": "SPOT",
+        "signal": "LONG", "signal_probability": 91.0,
+    }
+    journal.record_candidates([base], now=entry)
+    repaired = dict(base, price=100.0, spot_class_code="TQBR")
+    assert journal.record_candidates([repaired], now=entry + timedelta(minutes=1)) == 1
+    record = journal.records()[0]
+    assert record["status"] == "PENDING"
+    assert record["entry_price"] == 100.0
+
+
+def test_late_cost_configuration_updates_existing_net_outcome(tmp_path):
+    journal = SignalOutcomeJournal(tmp_path / "outcomes.sqlite3")
+    entry = datetime(2026, 10, 13, 10, 0, tzinfo=MSK)
+    journal.record_candidates([{
+        "final_ticker": "SBER", "final_instrument_type": "SPOT",
+        "signal": "LONG", "price": 100.0, "spot_class_code": "TQBR",
+    }], now=entry)
+    candles = [{
+        "time": entry.isoformat(), "high": 101.0, "low": 99.0, "close": 100.5
+    }]
+    loader = lambda ticker, code, start, end: candles
+    journal.evaluate_pending(loader, now=entry + timedelta(minutes=65))
+    assert journal.records()[0]["outcomes"]["5"]["net_close_return_pct"] is None
+    journal.evaluate_pending(loader, now=entry + timedelta(minutes=65), costs_bps=10.0)
+    assert journal.records()[0]["outcomes"]["5"]["net_close_return_pct"] == 0.4

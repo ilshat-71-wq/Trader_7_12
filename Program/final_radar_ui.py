@@ -170,6 +170,13 @@ class FinalRadarWidget(QWidget):
             f"RT READY {status.get('rt_ready', 0)} • "
             f"RT BLOCKED {status.get('rt_blocked', 0)}"
         )
+        blocked = status.get("blocked_reasons") or {}
+        self.meta.setToolTip(
+            "Current scan gate counts: " + (
+                ", ".join(f"{key}: {value}" for key, value in sorted(blocked.items()))
+                if blocked else "no blocked-candidate reasons recorded"
+            )
+        )
 
         for row, item in enumerate(self._rows, 1):
             rt = item["final_realtime"]

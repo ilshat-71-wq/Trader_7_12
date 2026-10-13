@@ -99,7 +99,10 @@ class SignalOutcomeJournal:
                     continue
                 if instrument_type not in {"SPOT", "FUTURES"}:
                     instrument_type = "FUTURES" if item.get("futures_ticker") else "SPOT"
-                price = self._number(item.get("price", item.get("last_price", item.get("close"))))
+                price = next((
+                    self._number(item.get(key)) for key in ("price", "last_price", "close")
+                    if self._number(item.get(key)) is not None
+                ), None)
                 class_code = str(
                     item.get("spot_class_code") or item.get("futures_class_code")
                     or item.get("class_code") or ""
@@ -119,12 +122,27 @@ class SignalOutcomeJournal:
                     ) if item.get(key) is not None
                 }
                 cursor = db.execute("""
-                    INSERT OR IGNORE INTO signal_outcomes (
+                    INSERT INTO signal_outcomes (
                         signal_key, ticker, instrument_type, direction, entry_time,
                         entry_price, class_code, probability, phase, atr_percent,
                         atr_used_percent, session_money, money_per_minute,
                         realtime_json, status, data_reason
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(signal_key) DO UPDATE SET
+                        entry_time=excluded.entry_time,
+                        entry_price=excluded.entry_price,
+                        class_code=excluded.class_code,
+                        probability=excluded.probability,
+                        phase=excluded.phase,
+                        atr_percent=excluded.atr_percent,
+                        atr_used_percent=excluded.atr_used_percent,
+                        session_money=excluded.session_money,
+                        money_per_minute=excluded.money_per_minute,
+                        realtime_json=excluded.realtime_json,
+                        status=excluded.status,
+                        data_reason=excluded.data_reason
+                    WHERE signal_outcomes.status='INCOMPLETE_DATA'
+                      AND excluded.status='PENDING'
                 """, (
                     signal_key, ticker, instrument_type, direction,
                     local_now.isoformat(timespec="seconds"), price, class_code,
@@ -196,7 +214,16 @@ class SignalOutcomeJournal:
             for minutes in HORIZONS_MINUTES:
                 key = str(minutes)
                 cutoff = entry_time + timedelta(minutes=minutes)
-                if key in outcomes or now < cutoff:
+                if key in outcomes:
+                    # If actual costs are configured after gross outcomes were
+                    # measured, derive net return from the saved gross result.
+                    if cost is not None and outcomes[key].get("net_close_return_pct") is None:
+                        gross_saved = self._number(outcomes[key].get("gross_close_return_pct"))
+                        if gross_saved is not None:
+                            outcomes[key]["net_close_return_pct"] = round(gross_saved - cost / 100.0, 5)
+                            outcomes[key]["cost_assumption_bps_round_trip"] = cost
+                    continue
+                if now < cutoff:
                     continue
                 eligible = [
                     c for c in normalized
