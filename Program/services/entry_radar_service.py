@@ -48,7 +48,13 @@ class EntryRadarService:
 
         if not signal or signal == "NEUTRAL" or probability is None:
             return "WATCH"
-        if action == "LONG_LIQUIDATION" or action == "SHORT_COVERING" and signal == "SHORT":
+        # OI regimes are directional: long liquidation is adverse to LONG,
+        # while short covering is adverse to SHORT. The opposite signal is
+        # not blocked by a regime that is directionally consistent with it.
+        if (
+            (action == "LONG_LIQUIDATION" and signal == "LONG")
+            or (action == "SHORT_COVERING" and signal == "SHORT")
+        ):
             return "AVOID"
         if not has_zone:
             return "WATCH"
