@@ -113,7 +113,14 @@ class BCSAPI:
                 "refresh_token": refresh_token,
             }
 
-            r = RequestHelper.post(url, data=payload)
+            try:
+                r = RequestHelper.post(url, data=payload)
+            except RuntimeError as exc:
+                # A temporary BCS token-endpoint timeout must not abort GUI startup.
+                # Keep authorization unavailable; later API calls can retry it, and
+                # callers must continue to represent missing market data honestly.
+                print("⚠️ BCS authorization request failed:", type(exc).__name__, str(exc))
+                return False
 
             if r.status_code == 200:
                 data = r.json()
