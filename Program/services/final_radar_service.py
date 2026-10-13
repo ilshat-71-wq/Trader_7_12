@@ -209,22 +209,27 @@ class FinalRadarService:
         self._futures = [dict(x) for x in (results or [])]
         return self.final_candidates()
 
-    def _realtime_state(self, ticker):
+    def _realtime_diagnostics(self, ticker):
+        """Describe available live RT components without changing promotion gates."""
         snapshot = self._realtime.get(ticker) or {}
-        values = []
-        for key in ("book_score", "tape_score", "flow_score"):
-            value = self._f(snapshot.get(key))
-            if value is not None:
-                values.append(value)
-        if len(values) < self.MIN_RT_COMPONENTS:
-            return None
+        scores = {
+            key: self._f(snapshot.get(key))
+            for key in ("book_score", "tape_score", "flow_score")
+        }
+        values = [value for value in scores.values() if value is not None]
         return {
             "count": len(values),
-            "average": sum(values) / len(values),
-            "book": self._f(snapshot.get("book_score")),
-            "tape": self._f(snapshot.get("tape_score")),
-            "flow": self._f(snapshot.get("flow_score")),
+            "average": sum(values) / len(values) if values else None,
+            "book": scores["book_score"],
+            "tape": scores["tape_score"],
+            "flow": scores["flow_score"],
         }
+
+    def _realtime_state(self, ticker):
+        state = self._realtime_diagnostics(ticker)
+        if state["count"] < self.MIN_RT_COMPONENTS:
+            return None
+        return state
 
     def _futures_state(self, ticker, direction):
         matches = [
@@ -331,6 +336,11 @@ class FinalRadarService:
         )
         rt_ready = 0
         rt_blocked = 0
+        candidate_diagnostics = []
+        final_keys = {
+            (row.get("final_instrument_type"), str(row.get("final_ticker") or "").upper())
+            for row in final_rows
+        }
         for state in strict:
             item = state.get("item") or {}
             ticker = str(
@@ -338,11 +348,50 @@ class FinalRadarService:
                 if state.get("instrument_type") == "FUTURES"
                 else item.get("spot_ticker") or state.get("ticker")
             ).upper()
-            rt = self._realtime_state(ticker)
-            if rt is not None and rt["average"] >= self.MIN_RT_SCORE:
+            rt = self._realtime_diagnostics(ticker)
+            rt_pass = rt["count"] >= self.MIN_RT_COMPONENTS and (
+                rt["average"] is not None and rt["average"] >= self.MIN_RT_SCORE
+            )
+            if rt_pass:
                 rt_ready += 1
             else:
                 rt_blocked += 1
+
+            reasons = []
+            confirmations_count = int(state.get("confirmations", 0))
+            if confirmations_count < self.MIN_CONFIRMATIONS:
+                reasons.append("NEED_CONFIRMATIONS")
+            if rt["count"] < self.MIN_RT_COMPONENTS:
+                reasons.append("RT_COMPONENTS_INSUFFICIENT")
+            elif rt["average"] is None or rt["average"] < self.MIN_RT_SCORE:
+                reasons.append("RT_SCORE_BELOW_MIN")
+            is_final = (
+                confirmations_count >= self.MIN_CONFIRMATIONS
+                and rt_pass
+                and (state.get("instrument_type"), ticker) in final_keys
+            )
+            if is_final:
+                reasons = ["FINAL_ELIGIBLE"]
+            candidate_diagnostics.append({
+                "ticker": ticker,
+                "instrument_type": state.get("instrument_type"),
+                "direction": state.get("direction"),
+                "confirmations": confirmations_count,
+                "required_confirmations": self.MIN_CONFIRMATIONS,
+                "realtime_count": rt["count"],
+                "required_realtime_components": self.MIN_RT_COMPONENTS,
+                "realtime_average": rt["average"],
+                "required_realtime_score": self.MIN_RT_SCORE,
+                "final": is_final,
+                "reasons": reasons,
+            })
+
+        candidate_diagnostics.sort(
+            key=lambda row: (
+                0 if row["instrument_type"] == "SPOT" else 1,
+                str(row["ticker"] or "").upper(),
+            )
+        )
 
         return {
             "scan_no": self._scan_no,
@@ -354,5 +403,6 @@ class FinalRadarService:
             "final_futures_count": futures_final,
             "rt_ready": rt_ready,
             "rt_blocked": rt_blocked,
+            "candidate_diagnostics": candidate_diagnostics,
             "blocked_reasons": {key: value for key, value in self._blocked_reasons.items() if value},
         }
