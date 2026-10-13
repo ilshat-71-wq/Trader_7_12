@@ -584,6 +584,12 @@ class TraderWindow(QWidget):
             if item.get("qualification_status") == "WATCH_ONLY":
                 role = "WATCH"
 
+            # LOCKED FIELD CONTRACT — do not reinterpret these columns as duplicates:
+            # D1-RS = daily_relative_mean_pp (historical D1 relative strength).
+            # IDX Δ% = benchmark_change_percent (shared current benchmark change; IMOEX).
+            # RS = relative_strength (current intraday price change minus benchmark change).
+            # A constant IDX Δ% across rows and differences between D1-RS and RS are expected.
+            # Reopen this decision only with new code/test evidence of a broken mapping or source.
             rs = item.get("relative_strength")
             rows.append((
                 float(rs) if rs is not None else 0.0,
