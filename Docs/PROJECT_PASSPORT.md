@@ -963,8 +963,8 @@ Code guardrail: `Program/ui.py` documents this locked contract next to the MAP t
 ## BCS AUTHORIZATION STARTUP RESILIENCE — 13.10.2026
 
 - Root cause observed on the iMac: BCS refresh-token POST raised `ReadTimeout`; `RequestHelper.post()` exhausted its configured attempt and raised `RuntimeError`, which escaped `BCSAPI.authorize()` during `TradeService` construction and terminated the GUI before the scan could populate panels.
-- `BCSAPI.authorize()` now catches that request-level `RuntimeError`, reports the authorization failure, and returns `False`. This prevents a transient BCS token-endpoint timeout from crashing desktop startup. Subsequent calls may retry authorization through the existing API path.
+- `BCSAPI.authorize()` now catches that request-level `RuntimeError`, reports the authorization failure, and returns `False`. This prevents a transient BCS token-endpoint timeout from crashing desktop startup. A 10-second retry cooldown also prevents repeated synchronous token POSTs while startup constructs multiple services; later calls retry authorization after the cooldown.
 - No token, price, candle, signal, or other market value is fabricated. If BCS authorization/data remains unavailable, the app must continue to represent that as unavailable/incomplete data.
 - Added regression test `Program/test_bcs_api_authorization.py` for a simulated authorization POST timeout.
-- GitHub commits: `1a2074c` (graceful startup fix), `3017ed7` (regression test).
+- GitHub commits: `1a2074c` (initial graceful startup fix), `4c86258` (authorization retry cooldown), `3017ed7` / `108ebd6` (regression test and cooldown coverage).
 - **Verification pending on the iMac:** pull latest `main`, run full tests/build, then launch the installed app. Do not mark the fix as locally verified until those checks pass and a successful live BCS authorization/data cycle is observed.
