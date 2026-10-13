@@ -38,3 +38,16 @@ def test_direction_conflict_is_not_presented_as_move():
 
 def test_small_move_is_not_a_move_candidate():
     assert MoveRadarService.classify(item("TEST", 0.7, 20.0, 500.0, 95.0, "LONG")) is None
+
+
+
+def test_non_finite_move_metrics_are_rejected():
+    assert MoveRadarService.classify(item("NAN", float("nan"), 20.0, 100.0, 95.0)) is None
+    assert MoveRadarService.classify(item("INF", 2.0, float("inf"), 100.0, 95.0)) is None
+    assert MoveRadarService.classify(item("BADPROB", 2.0, 20.0, 100.0, float("nan"))) is None
+
+
+def test_extreme_acceleration_does_not_change_phase_or_crash():
+    row = MoveRadarService.classify(item("OUTLIER", 2.0, 20.0, 32591.2, 93.6))
+    assert row["move_phase"] == "START"
+    assert row["directional_acceleration"] == 32591.2

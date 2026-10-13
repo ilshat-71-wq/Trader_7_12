@@ -36,6 +36,9 @@ def spot_item(m1_state, triggered=True, setup_state="WATCH", h1="NEAR_H1_SUPPORT
         "setup_state": setup_state,
         "m1_entry_state": m1_state,
         "m1_entry_triggered": triggered,
+        "liquidity_gate": True,
+        "atr_used_percent": 25.0,
+        "money_acceleration": 100.0,
     }
 
 
@@ -64,3 +67,39 @@ def test_entry_radar_oi_action_conflict_is_directional():
     # Short covering is adverse to SHORT but directionally consistent with LONG.
     assert EntryRadarService.state(item(83, signal="SHORT", action="SHORT_COVERING")) == "AVOID"
     assert EntryRadarService.state(item(83, signal="LONG", action="SHORT_COVERING")) == "ENTER"
+
+
+
+def test_spot_entry_high_probability_cannot_override_atr_exhaustion():
+    item = spot_item("CONFIRMED")
+    item["atr_used_percent"] = 151.0
+    item["signal_probability"] = 99.0
+    assert EntryRadarService.state(item) == "AVOID"
+    assert "ATR used" in EntryRadarService.reason(item)
+
+
+def test_spot_entry_blocks_explicit_exhaustion_phase():
+    item = spot_item("CONFIRMED")
+    item["move_phase"] = "EXHAUSTION"
+    assert EntryRadarService.state(item) == "AVOID"
+
+
+def test_spot_entry_missing_liquidity_or_atr_is_not_enter():
+    item = spot_item("CONFIRMED")
+    item["liquidity_gate"] = None
+    assert EntryRadarService.state(item) == "WATCH"
+    item = spot_item("CONFIRMED")
+    item.pop("atr_used_percent")
+    assert EntryRadarService.state(item) == "WATCH"
+
+
+def test_entry_probability_nan_is_not_an_entry():
+    item = spot_item("CONFIRMED")
+    item["signal_probability"] = float("nan")
+    assert EntryRadarService.state(item) == "WATCH"
+
+
+def test_spot_entry_with_sub_80_score_is_wait_not_enter():
+    item = spot_item("CONFIRMED")
+    item["signal_probability"] = 74.0
+    assert EntryRadarService.state(item) == "WAIT"
