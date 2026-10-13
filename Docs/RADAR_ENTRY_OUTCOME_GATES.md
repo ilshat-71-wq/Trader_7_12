@@ -22,3 +22,6 @@ Status: implementation on branch audit/radar-entry-outcomes-2026-10-13; merge on
 ## Acceptance
 
 Run targeted tests and the full suite from Program. Then verify the macOS build and a live open-session scan. CI passing is necessary but not sufficient for real BCS runtime acceptance.
+
+
+Validation note: horizon outcomes require a real closed M5 candle at each horizon end; if costs are configured after gross outcomes are stored, the journal fills net results from the stored gross return.
